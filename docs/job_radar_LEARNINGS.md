@@ -288,6 +288,41 @@ miss morphological variants (`architect`/`architecture`); enumerate suffixes.
 
 ---
 
+### Exact-hash dedupe is not enough for multi-location job boards
+
+**Context:** After the screen cut the corpus to 66 survivors, inspecting them
+(prompted by Michel asking "are some of these duplicates?") showed ~14 were the
+*same role* posted many times: Databricks "AI Engineer – FDE" across 5 EU
+countries, Stripe "Customer Success Manager" in 4 language variants
+(—/French/German/Spanish), Databricks "Delivery Solutions Architect" ×3. The
+content-hash dedupe (`pipeline.dedupe`, SHA-256 of cleaned body) can't catch these
+— each posting's body genuinely differs (location string, language requirement),
+so the hashes differ.
+
+**Decision:** Add a semantic **near-dedupe** *after* screening
+(`collapse_near_duplicates`): group survivors by `(company, language-stripped
+title)` and keep one best-located representative (UK first). The key strips
+*language* qualifiers ("(French speaking)") but **not** specialisation
+parentheticals ("(Enterprise Accounts)" vs "(Utilities/Energy)") — so genuinely
+distinct roles that happen to share a base title are preserved. 66 → 62 distinct.
+
+**Outcome:** The same inspection round also caught a *recall* miss hiding among the
+borderline roles: "Deployment Strategist" (which Databricks literally describes as
+"PM for the field" on its forward-deployed team, and Mistral ships as "AI
+Deployment Strategist – UK") had no keep-list entry and was being dropped as
+off-target. Pulling 2-3 real JD bodies for each borderline role into a throwaway
+md — rather than deciding from the title alone — is what surfaced it. Both fixes
+landed in one pass; 62 distinct survivors, recall good on the target families.
+
+**Reusability:** Dedup has two layers — *byte-identical* (cheap hash) and
+*semantically same* (same role, different location/language/variant). Job boards
+produce the second constantly; budget for a domain-keyed collapse on top of the
+hash. When a screen has borderline keep/drop calls, **judge from the artifact, not
+the label** — read the actual content of a sample, because a title ("Deployment
+Strategist") rarely tells you whether it's on-target.
+
+---
+
 ## Learning Entries
 
 ### Learning Entry Template

@@ -48,8 +48,8 @@ cv-tailor workflow
 | Phase | Name | Status | Primary output |
 |---|---|---|---|
 | 1 | Corpus Engine | ✅ Complete — 95 tests, pipeline proven | Labelled JD corpus |
-| 2 | Scoring Engine | Not started | Fit + priority scores per role |
-| 3 | Job Tracker | Not started | Application workflow state |
+| 2 | Scoring Engine | ✅ Complete — scorer v1 locked, 179 tests | Fit + priority scores per role |
+| 3 | Job Tracker | 🔄 In progress — real-corpus build: metadata sidecar + pre-label filter (§5.8) done | Application workflow state |
 | 4 | Discovery Layer | Not started | Continuous role ingestion |
 | 5 | UI | Not started | Read-only browse + filter interface |
 | 6 | Fine-Tuned Analyser | Future enhancement | Replace rule-based scoring |
@@ -549,6 +549,16 @@ and completion fields. Completion is valid JSON.
 
 **Excluded:** LinkedIn, Indeed, Glassdoor — anti-bot, not worth it.
 
+**Metadata sidecar (added Phase 3).** Each ATS response also carries a structured
+`title` and location that `JDRecord` (schema-locked v1.2) has no field for. Rather
+than overload `raw_text` (which stays employer JD text only), collectors now
+return `CollectedJob` (record + meta) and `collect.py` writes a parallel sidecar
+`corpus/raw/meta_{date}.jsonl` keyed by `source_url`: `title`, `location_str` (all
+listed locations joined), `workplace_type`, `is_remote`, `country`,
+`raw_location_payload`. The sidecar drives the pre-label filter (§5.8) and is later
+passed to the extraction prompt as separate context. Identity is unaffected —
+dedupe hashes `clean(raw_html)`, which the sidecar never touches.
+
 **VC board list:**
 
 | VC | Board URL | Focus |
@@ -633,6 +643,44 @@ Claude extracts. Schema validation in code. No per-JD human review.
 | delivery_motion | How value is delivered, not what function. Multi-value ok. |
 | leadership_geography | Empty [] for IC roles or scope not stated. |
 | Contamination rule | Claude extraction on Tier 1 JDs runs after human labels only. |
+
+### 5.8 — Pre-label filter (added Phase 3)
+
+The first real collection pulled **2,507** global postings; labelling all of them
+via the Batch API (~$0.016/record ≈ $40) to extract mostly off-target US
+engineering roles is wasteful. A deterministic, code-only screen on the metadata
+sidecar (§5.4) cuts the set to the genuinely-relevant before any labelling spend.
+No model calls, no scoring. Pure logic in `pipeline/prefilter.py`; IO + report in
+`prefilter.py`. Both screens are **generous** — recall over precision; the scorer's
+gates handle nuance later.
+
+**Pipeline:** re-collect (+meta) → clean → dedupe → **screen** → **near-dedupe** →
+`corpus/filtered/filtered_{date}.jsonl` (JDRecords only) + a survivor-distribution
+report.
+
+- **Location screen** — keep UK / London / UK-remote / Europe-remote / EMEA-remote /
+  multi-location-incl-UK / bare-Remote / not-stated (ambiguous kept); drop clear
+  non-UK onsite and remote tied to a non-European country (incl. US **state** names,
+  which have no country field on Greenhouse).
+- **Role screen** — STRONG_KEEP target families (Solutions *eng/arch/consult*,
+  Pre-Sales, Sales Engineer, Applied AI Architect, Forward Deployed, Field
+  Engineering, Deployment Strategist, Partner SA, AI Delivery) → drop pure sales
+  (AE/AM/SDR/BDR) → drop recruiting/HR → keep Product / Customer (Success/Experience)
+  / GTM / Partner (incl. Partner Success/Programs) → else drop off-target. Strong-keep
+  precedes the sales drop so "Technical Account Manager" survives.
+- **Near-dedupe** — `collapse_near_duplicates` merges survivors sharing
+  `(company, language-stripped title)` — the same role posted to N locations /
+  language variants that exact-body dedupe can't catch — keeping the single
+  best-located representative (UK first). Specialisation parentheticals are
+  preserved so distinct roles aren't merged.
+
+**First live cut (2026-06-09):** 2,507 raw → 116 exact dupes → 2,391 unique →
+screened → near-deduped → **62 distinct survivors** (54 UK, 8 remote-ambiguous;
+solutions 37 / gtm_partner 10 / product 9 / customer 6). ~$1 to label vs ~$40 for
+the full set. The screen is iterated against the survivor/drop report, not assumed
+correct — three recall bugs were found by inspection and fixed before locking the
+cut (Applied AI Architect family; `architectu**re**` / `field engineer**ing**`
+word-boundary; US-state remote). Re-run after seed-list expansion to widen coverage.
 
 ---
 
