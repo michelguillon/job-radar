@@ -543,5 +543,32 @@ a different shape, it's a new projection, not a migration.
 
 ---
 
+### Learning 15 — Keep the eval set out of the labels it is meant to judge
+
+#### Learning
+
+The fine-tuning export's `eval` set is Tier 1+2+3 only — Tier 4 is excluded. Tier
+4 is Claude's *automated, unreviewed* extraction; the model fine-tuned on the
+corpus learns from exactly those automated labels. Evaluating that model on Tier
+4 would grade its output against labels of the same provenance — a mirror, not a
+test. The eval set is restricted to human-reviewed tiers so it stays an
+independent yardstick.
+
+#### Surprise
+
+The split that matters for trustworthy evaluation isn't train/test by *record*,
+it's by *label provenance*. Two records can be identical in shape yet belong on
+opposite sides of the line purely because of who/what produced their labels.
+
+#### Reusable Pattern
+
+When the thing you're evaluating also produced (or is trained on) some of your
+labels, partition the eval set by label provenance, not just by a random split.
+Hold back only labels created independently of the model under test. (Open
+question flagged to the spec: `train` vs `full` currently select the same
+records — the distinction needs defining before it carries weight.)
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

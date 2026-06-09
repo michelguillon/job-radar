@@ -44,7 +44,7 @@ bump `SCHEMA_VERSION`.
 
 | Phase | Status |
 |---|---|
-| 1 — Corpus Engine | Steps 0–8 complete (90 tests). Step 9 pending. |
+| 1 — Corpus Engine | ✅ complete — Steps 0–9, 95 tests. Pipeline end-to-end. |
 | 2 — Scoring Engine | Not started |
 | 3 — Job Tracker | Not started |
 | 4 — Discovery Layer | Not started |
@@ -66,7 +66,7 @@ bump `SCHEMA_VERSION`.
 | 6 — Tier 2 tooling | ✅ complete | tier2_review.py — a/e/s loop, resumable via corpus/tier2_progress.json. Extraction is a placeholder (Step 7 replaces). |
 | 7 — Batch API labelling | ✅ complete | pipeline/label.py + label.py. Live verified: 5/5 labelled, $0.055, cost→stats.json. opus-4-8, prompt from locked enums. |
 | 8 — Validation + stats | ✅ complete | validate.py → corpus/validated/{validated,failures}_*.jsonl; stats.py summary + --export-index → corpus/index.json (flat, UI contract). |
-| 9 — Export | ⏳ next | export.py — prompt/completion JSONL; eval/train/full sets; exclude validation failures + wrong schema_version; Tier 4 out of eval |
+| 9 — Export | ✅ complete | export.py — prompt/completion JSONL; eval(1-3)/train(all)/full sets; excludes validation failures, wrong schema_version, unlabelled. NB: train≈full until spec clarifies. |
 
 ---
 
