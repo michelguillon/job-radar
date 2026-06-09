@@ -946,5 +946,39 @@ paper over upstream label noise is the failure mode to avoid.
 
 ---
 
+### Learning 20 — First production scoring run: the capability blocker is the killer feature
+
+#### Learning
+
+The first real 44-record production run (39 non-Databricks + 5 Databricks + 2 CSM
+variants, $0.77 Batch API) confirmed the scorer works as designed on data it has
+never seen. The capability blocker split same-named roles by feasibility: Databricks
+"Deployment Strategist" (hybrid, PM for the field) → strong_fit 10, Mistral "AI
+Deployment Strategist–UK" (hands-on) → blocked_fit. The CSM spread was genuine: pure
+Stripe CSM → interview_practice(4), strategic Anthropic CS leadership → good_fit(6),
+technical Perplexity CS Engineer → blocked. The "strong_fit where role isn't the top
+contributor" diagnostic confirmed as a production monitoring tool — it correctly
+flagged zero false positives in the first run (the Product Marketing case had role
+tied domain, not domain > role, so it didn't trip the detector — a known blind spot
+to watch).
+
+#### Surprise
+
+The most important confirmation wasn't a new finding — it was that Known Limitation F
+(Enterprise Software over-tagging, Product Marketing → Product) is now an observed
+production fact, not a theoretical risk. It's real, it's producing false positives in
+the feed, and it's the highest-value next fix. The scorer correctly identified it as
+an extraction problem rather than a scoring problem — it stayed locked.
+
+#### Reusable Pattern
+
+Ship the scorer when calibration holds against real adversarial data; don't optimise
+further in isolation. The first production run either confirms the calibration held
+(correct — move to extraction quality) or surfaces a new rule failure (fix the rule).
+In this case it confirmed. The next lever is always upstream of the scorer: better
+extraction labels produce better scores without touching scoring logic.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*
