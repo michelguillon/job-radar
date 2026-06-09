@@ -1,7 +1,7 @@
 """Tests for the collect.py CLI: selection, routing, writing, and dry-run."""
 
 import collect
-from collectors.base import build_raw_record
+from collectors.base import CollectedJob, build_meta, build_raw_record
 
 
 SEEDS = [
@@ -12,12 +12,21 @@ SEEDS = [
 
 
 def _record(company="Acme"):
-    return build_raw_record(
-        source_url="https://x/1",
-        source_ats="greenhouse",
-        company=company,
-        collected_at="2026-06-09",
-        raw_html="<p>x</p>",
+    return CollectedJob(
+        record=build_raw_record(
+            source_url="https://x/1",
+            source_ats="greenhouse",
+            company=company,
+            collected_at="2026-06-09",
+            raw_html="<p>x</p>",
+        ),
+        meta=build_meta(
+            source_url="https://x/1",
+            source_ats="greenhouse",
+            company=company,
+            title="Solutions Engineer",
+            location_str="London, UK",
+        ),
     )
 
 
@@ -85,6 +94,21 @@ def test_write_records_appends_jsonl(tmp_path):
     collect.write_records([_record("C")], out_dir=str(out_dir), date_str="20260609")
     lines = (out_dir / "raw_20260609.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(lines) == 3
+
+
+def test_write_meta_writes_sidecar(tmp_path):
+    import json
+
+    out_dir = tmp_path / "raw"
+    path = collect.write_meta([_record("A"), _record("B")], out_dir=str(out_dir), date_str="20260609")
+    assert path.endswith("meta_20260609.jsonl")
+
+    lines = (out_dir / "meta_20260609.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+    meta = json.loads(lines[0])
+    assert meta["title"] == "Solutions Engineer"
+    assert meta["location_str"] == "London, UK"
+    assert meta["source_url"] == "https://x/1"
 
 
 def test_main_dry_run_writes_nothing(monkeypatch, tmp_path, capsys):

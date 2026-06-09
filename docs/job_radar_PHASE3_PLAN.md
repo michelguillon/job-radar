@@ -55,25 +55,22 @@ extract mostly-irrelevant global engineering roles. A cheap, code-only screen on
 the raw records (location ≈ UK/London/remote-EU; role-title vs target families)
 must cut the set first. CLI writes; JSONL only; no scoring in this step.
 
-### The first design fork (decide before writing the filter)
+### The first design fork — RESOLVED (2026-06-09): sidecar metadata
 
-**The raw records have no structured `title` or `location` to filter on.** The
-collectors (`collectors/greenhouse.py` etc.) store only `raw_html` (JD body) +
-`source_url` + `company` and **discard the ATS `title` and `location.name`
-fields** the APIs return. Options:
+**The raw records had no structured `title` or `location` to filter on.** The
+collectors stored only `raw_html` + `source_url` + `company` and discarded the
+ATS `title` and `location` fields. Chosen approach: **(A) enhance the collectors
+and re-collect — via a metadata SIDECAR, not by overloading `raw_text`.**
 
-- **(A) Enhance collectors to capture title + location, then re-collect.** The
-  cleanest signal. Greenhouse/Lever/Ashby all return title + location structured.
-  No API cost (public APIs). Question: where do they go? `JDRecord` has no title
-  field and schema is locked — likely prepend "`<title> — <location>`" into
-  `raw_text` (deterministic, also helps the labeller), or carry a sidecar. Mind
-  the content-hash id (`pipeline.dedupe`) if `raw_text` changes shape.
-- **(B) Filter on `raw_html`/`raw_text` content only** — grep the body for
-  London/UK/remote + role keywords. No re-collect, but weaker: a JD body doesn't
-  reliably state its city, and the title isn't in the body.
-
-Recommendation: **(A)** — re-collect with title + location preserved, then the
-filter (and downstream labelling) has clean signal. Confirm with Michel first.
+Michel's decision: `raw_text` stays **employer-provided JD text only**; no
+synthetic title/location header is injected. Collectors now return `CollectedJob`
+(record + meta) and `collect.py` writes `corpus/raw/meta_{date}.jsonl` alongside
+`raw_{date}.jsonl`. Sidecar fields (keyed by `source_url`, stable pre-dedupe):
+`title`, `location_str` (all listed locations joined), `workplace_type`,
+`is_remote`, `country`, `raw_location_payload`. The metadata feeds the filter now
+and is passed to the extraction prompt as **separate context** at labelling time.
+Identity is unaffected — `pipeline.dedupe` hashes `clean(raw_html)`, which the
+sidecar never touches.
 
 ### Filter design (to iterate on)
 

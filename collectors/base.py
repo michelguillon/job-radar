@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import dataclass, field
 
 import requests
 
@@ -27,6 +28,25 @@ log = logging.getLogger(__name__)
 DEFAULT_TIMEOUT = 30
 MAX_RETRIES = 3
 RAW_TIER = 4
+
+# Fields carried by a metadata sidecar record (corpus/raw/meta_{date}.jsonl).
+# The sidecar holds the structured title + location signal the ATS APIs return
+# but JDRecord (schema-locked v1.2) has no field for. It is keyed by
+# ``source_url`` (stable at collection time, before dedupe assigns the content
+# hash) and used for the deterministic pre-label filter (pipeline.prefilter) and,
+# later, passed to the extraction prompt as separate context — never injected
+# into raw_text, which stays employer-provided JD text only.
+META_FIELDS = (
+    "source_url",
+    "source_ats",
+    "company",
+    "title",
+    "location_str",
+    "workplace_type",
+    "is_remote",
+    "country",
+    "raw_location_payload",
+)
 
 
 class NotFound(Exception):
@@ -92,3 +112,48 @@ def build_raw_record(
         raw_text=raw_text,
         **_NONE_FIELDS,
     )
+
+
+def build_meta(
+    *,
+    source_url: str,
+    source_ats: str,
+    company: str,
+    title: str,
+    location_str: str,
+    workplace_type: str = "not_stated",
+    is_remote: bool | None = None,
+    country: str | None = None,
+    raw_location_payload=None,
+) -> dict:
+    """Build a metadata sidecar dict for one posting (see ``META_FIELDS``).
+
+    ``location_str`` is the *combined* human location string (all listed
+    locations joined with " | ") so the location screen can match a multi-site
+    posting on any one of its locations. ``raw_location_payload`` keeps the
+    original structured location object for later inspection.
+    """
+    return {
+        "source_url": source_url,
+        "source_ats": source_ats,
+        "company": company,
+        "title": title,
+        "location_str": location_str,
+        "workplace_type": workplace_type,
+        "is_remote": is_remote,
+        "country": country,
+        "raw_location_payload": raw_location_payload,
+    }
+
+
+@dataclass(frozen=True)
+class CollectedJob:
+    """A collected posting: the raw ``JDRecord`` plus its metadata sidecar.
+
+    Collectors return ``list[CollectedJob]`` so the record and its structured
+    title/location metadata stay paired. ``collect.py`` splits the two streams
+    into ``raw_{date}.jsonl`` and ``meta_{date}.jsonl``.
+    """
+
+    record: JDRecord
+    meta: dict = field(default_factory=dict)

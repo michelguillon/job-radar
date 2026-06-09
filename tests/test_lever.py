@@ -8,6 +8,10 @@ from tests.fake_http import FakeResponse, patch_get
 def _posting():
     return {
         "hostedUrl": "https://jobs.lever.co/acme/abc-123",
+        "text": "Sales Engineer",
+        "country": "GB",
+        "workplaceType": "hybrid",
+        "categories": {"location": "London", "team": "Field", "allLocations": ["London", "Paris"]},
         "description": "<p>Intro</p>",
         "lists": [
             {"text": "What you'll do", "content": "<ul><li>Build</li></ul>"},
@@ -20,10 +24,10 @@ def _posting():
 def test_fetch_company_maps_array_to_records(monkeypatch):
     # Lever returns a JSON array, not an object.
     patch_get(monkeypatch, [FakeResponse(200, [_posting(), _posting()])])
-    records = fetch_company("acme", "Acme", collected_at="2026-06-09")
+    jobs = fetch_company("acme", "Acme", collected_at="2026-06-09")
 
-    assert len(records) == 2
-    r = records[0]
+    assert len(jobs) == 2
+    r = jobs[0].record
     assert r.source_ats == "lever"
     assert r.company == "Acme"
     assert r.tier == 4
@@ -31,9 +35,19 @@ def test_fetch_company_maps_array_to_records(monkeypatch):
     assert r.role_type is None  # collector does not extract
 
 
+def test_fetch_company_captures_metadata(monkeypatch):
+    patch_get(monkeypatch, [FakeResponse(200, [_posting()])])
+    meta = fetch_company("acme", "Acme")[0].meta
+    assert meta["title"] == "Sales Engineer"
+    assert meta["country"] == "GB"
+    assert meta["workplace_type"] == "hybrid"
+    # allLocations joined so a multi-site posting matches on any one location
+    assert meta["location_str"] == "London | Paris"
+
+
 def test_assemble_html_joins_sections(monkeypatch):
     patch_get(monkeypatch, [FakeResponse(200, [_posting()])])
-    html = fetch_company("acme", "Acme")[0].raw_html
+    html = fetch_company("acme", "Acme")[0].record.raw_html
     assert "<p>Intro</p>" in html
     assert "<h3>What you'll do</h3>" in html  # list heading rendered
     assert "<li>Build</li>" in html
@@ -48,5 +62,5 @@ def test_fetch_company_404_returns_empty(monkeypatch):
 
 def test_fetch_company_records_round_trip(monkeypatch):
     patch_get(monkeypatch, [FakeResponse(200, [_posting()])])
-    record = fetch_company("acme", "Acme")[0]
+    record = fetch_company("acme", "Acme")[0].record
     assert JDRecord.from_jsonl(record.to_jsonl()) == record

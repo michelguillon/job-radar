@@ -22,7 +22,7 @@ from datetime import date
 
 import yaml
 
-from models.record import JDRecord
+from collectors.base import CollectedJob
 
 log = logging.getLogger(__name__)
 
@@ -40,14 +40,14 @@ def collect(
     *,
     collected_at: str | None = None,
     path: str = CONFIG_PATH,
-) -> list[JDRecord]:
+) -> list[CollectedJob]:
     """Attempt to collect from VC boards.
 
     Every board is currently ``requires_js`` and skipped, so this always returns
     ``[]`` — but it logs a clear, per-board reason so the skip is visible.
     """
     collected_at = collected_at or date.today().isoformat()  # noqa: F841 — reserved for future scrapers
-    records: list[JDRecord] = []
+    records: list[CollectedJob] = []
 
     for board in load_boards(path):
         name = board.get("name", "?")

@@ -50,7 +50,7 @@ thing tests actually run against.
 |---|---|
 | 1 — Corpus Engine | ✅ complete — Steps 0–9, 95 tests. Pipeline end-to-end. |
 | 2 — Scoring Engine | ✅ **complete (scorer v1)** — `scoring/{profile,scorer}.py` + `score.py`, 179 tests. Option A (`ApplicationRecord` v1.3 → `corpus/scored/`) + gates-vs-signal model + 3-tier role (primary/conditional/secondary) + capability/M&A blockers + negative-signal ceiling. Thresholds **set from evidence** (held against the 23-record corpus: 10 manual + 13 calibration). Calibration regression set: `corpus/calibration/`. Known limit F (extraction generosity) deferred. Conventions: `scoring/CLAUDE.md`. |
-| 3 — Job Tracker | 🔄 in progress — building a **real** corpus (target 500+ validated). First: verify collection end-to-end → `corpus/raw/`. Then weekly extraction-quality review (watch Enterprise Software / Product over-tagging) and a structured score review after 100+ real scored jobs. Option D (career-pattern scoring) **deferred** until prod data shows role+domain+depth+blockers can't explain errors. |
+| 3 — Job Tracker | 🔄 in progress — building a **real** corpus (target 500+ validated). Collection now captures a **metadata sidecar** (`corpus/raw/meta_{date}.jsonl`: title + structured location, keyed by `source_url`) — `raw_text` stays employer JD text only. **Pre-label filter** (`pipeline/prefilter.py` + `prefilter.py`): deterministic location + role screen over the sidecar, cuts raw → survivors *before* paid labelling (`corpus/filtered/`). Next: label survivors (pass meta into the prompt as separate context), then weekly extraction-quality review (watch Enterprise Software / Product over-tagging) and a structured score review after 100+ real scored jobs. Option D (career-pattern scoring) **deferred** until prod data shows role+domain+depth+blockers can't explain errors. |
 | 4 — Discovery Layer | Not started |
 | 5 — UI | Not started |
 | 6 — Fine-Tuned Analyser | Deferred (Project 5) |
@@ -114,6 +114,19 @@ thing tests actually run against.
     exports** (`export.py` skips any `calibration` path). It is a **permanent
     scorer regression set** — re-run `python -m scripts.report_calibration --full`
     whenever the scorer changes, and re-validate the spread before locking a change.
+18. (Phase 3) **Collectors now return `CollectedJob` (record + metadata)**, not a
+    bare `JDRecord`. The ATS APIs expose `title` + structured location that the
+    schema-locked `JDRecord` has no field for; rather than overload `raw_text`
+    (which stays **employer JD text only**), `collect.py` writes a parallel
+    **metadata sidecar** `corpus/raw/meta_{date}.jsonl` (`base.META_FIELDS`,
+    keyed by `source_url`). Used by the pre-label filter now and passed to the
+    extraction prompt as separate context later — never injected into `raw_text`.
+19. (Phase 3) **Pre-label filter** = `pipeline/prefilter.py` (pure location + role
+    screens, generous by design) + `prefilter.py` CLI (clean+dedupe → screen →
+    `corpus/filtered/filtered_{date}.jsonl` + survivor-distribution report). Runs
+    **before** any Batch labelling spend. Screens read the sidecar only (no model,
+    no scoring). The survivors file is JDRecords only; the sidecar remains the
+    join source for the later labelling step.
 
 ---
 

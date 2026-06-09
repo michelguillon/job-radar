@@ -51,20 +51,26 @@ def test_fetch_json_raises_after_exhausting_retries(monkeypatch):
 # --- fetch_company ---
 
 
-def _job(content="<p>Hello</p>", url="https://boards.greenhouse.io/acme/jobs/1"):
+def _job(content="<p>Hello</p>", url="https://boards.greenhouse.io/acme/jobs/1",
+         title="Solutions Engineer", location="London, UK"):
     # Greenhouse returns the content HTML-entity-escaped.
     import html
 
-    return {"absolute_url": url, "content": html.escape(content)}
+    return {
+        "absolute_url": url,
+        "content": html.escape(content),
+        "title": title,
+        "location": {"name": location},
+    }
 
 
 def test_fetch_company_maps_jobs_to_records(monkeypatch):
     payload = {"jobs": [_job(), _job(url="https://x/2")]}
     patch_get(monkeypatch, [FakeResponse(200, payload)])
-    records = fetch_company("acme", "Acme", collected_at="2026-06-09")
+    jobs = fetch_company("acme", "Acme", collected_at="2026-06-09")
 
-    assert len(records) == 2
-    r = records[0]
+    assert len(jobs) == 2
+    r = jobs[0].record
     assert r.source_ats == "greenhouse"
     assert r.company == "Acme"
     assert r.collected_at == "2026-06-09"
@@ -76,6 +82,26 @@ def test_fetch_company_maps_jobs_to_records(monkeypatch):
     assert r.role_type is None
     assert r.seniority is None
     assert r.fit_score is None
+    # raw_text stays employer text only — title/location go to the sidecar
+    assert r.raw_text == ""
+
+
+def test_fetch_company_captures_metadata(monkeypatch):
+    patch_get(monkeypatch, [FakeResponse(200, {"jobs": [_job()]})])
+    meta = fetch_company("acme", "Acme")[0].meta
+    assert meta["source_url"] == "https://boards.greenhouse.io/acme/jobs/1"
+    assert meta["source_ats"] == "greenhouse"
+    assert meta["company"] == "Acme"
+    assert meta["title"] == "Solutions Engineer"
+    assert meta["location_str"] == "London, UK"
+    assert meta["country"] is None  # greenhouse exposes no country
+
+
+def test_fetch_company_infers_remote_from_location(monkeypatch):
+    patch_get(monkeypatch, [FakeResponse(200, {"jobs": [_job(location="Remote - US")]})])
+    meta = fetch_company("acme", "Acme")[0].meta
+    assert meta["is_remote"] is True
+    assert meta["workplace_type"] == "remote"
 
 
 def test_fetch_company_404_returns_empty(monkeypatch):
@@ -92,6 +118,6 @@ def test_fetch_company_records_round_trip(monkeypatch):
     from models.record import JDRecord
 
     patch_get(monkeypatch, [FakeResponse(200, {"jobs": [_job()]})])
-    record = fetch_company("acme", "Acme", collected_at="2026-06-09")[0]
+    record = fetch_company("acme", "Acme", collected_at="2026-06-09")[0].record
     # to_jsonl -> from_jsonl preserves the record (valid JSONL envelope).
     assert JDRecord.from_jsonl(record.to_jsonl()) == record

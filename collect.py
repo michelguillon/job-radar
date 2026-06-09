@@ -19,6 +19,7 @@ Lever, Ashby and VC-board collectors are registered here as they are built
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 from datetime import date
@@ -74,20 +75,20 @@ def collect(
     registry: dict | None = None,
     collected_at: str | None = None,
 ) -> list:
-    """Run the matching collector for each company and return all records."""
+    """Run the matching collector for each company and return all CollectedJobs."""
     registry = COLLECTORS if registry is None else registry
-    records = []
+    jobs = []
     for c in companies:
         fetch = registry.get(c["ats"])
         if fetch is None:
             log.warning("no collector for ats %r (%s) — skipping", c["ats"], c["name"])
             continue
-        records.extend(fetch(c["slug"], c["name"], collected_at=collected_at))
-    return records
+        jobs.extend(fetch(c["slug"], c["name"], collected_at=collected_at))
+    return jobs
 
 
-def write_records(records: list, *, out_dir: str = RAW_DIR, date_str: str | None = None) -> str:
-    """Append records as JSONL to ``corpus/raw/raw_{YYYYMMDD}.jsonl``.
+def write_records(jobs: list, *, out_dir: str = RAW_DIR, date_str: str | None = None) -> str:
+    """Append the raw ``JDRecord`` of each CollectedJob to ``raw_{YYYYMMDD}.jsonl``.
 
     Returns the path written to. Creates ``out_dir`` if needed.
     """
@@ -95,8 +96,24 @@ def write_records(records: list, *, out_dir: str = RAW_DIR, date_str: str | None
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f"raw_{date_str}.jsonl")
     with open(path, "a", encoding="utf-8") as fh:
-        for record in records:
-            fh.write(record.to_jsonl() + "\n")
+        for job in jobs:
+            fh.write(job.record.to_jsonl() + "\n")
+    return path
+
+
+def write_meta(jobs: list, *, out_dir: str = RAW_DIR, date_str: str | None = None) -> str:
+    """Append each CollectedJob's metadata sidecar to ``meta_{YYYYMMDD}.jsonl``.
+
+    The sidecar holds the structured title + location signal (keyed by
+    ``source_url``) used by the pre-label filter and, later, the extraction
+    prompt. ``raw_text`` is never modified — this stays a separate artifact.
+    """
+    date_str = date_str or date.today().strftime("%Y%m%d")
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, f"meta_{date_str}.jsonl")
+    with open(path, "a", encoding="utf-8") as fh:
+        for job in jobs:
+            fh.write(json.dumps(job.meta, ensure_ascii=False) + "\n")
     return path
 
 
@@ -110,18 +127,19 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
     companies = select(load_companies(), args.source, args.company)
-    records = collect(companies)
+    jobs = collect(companies)
 
     # VC boards are board-based, not company-based, and currently all skipped.
     if args.source in ("vc_boards", "all"):
-        records.extend(vc_boards.collect())
+        jobs.extend(vc_boards.collect())
 
     if args.dry_run:
-        print(f"[dry-run] {len(records)} records from {len(companies)} companies (not written)")
+        print(f"[dry-run] {len(jobs)} records from {len(companies)} companies (not written)")
         return 0
 
-    path = write_records(records)
-    print(f"Wrote {len(records)} records to {path}")
+    raw_path = write_records(jobs)
+    meta_path = write_meta(jobs)
+    print(f"Wrote {len(jobs)} records to {raw_path} and metadata to {meta_path}")
     return 0
 
 

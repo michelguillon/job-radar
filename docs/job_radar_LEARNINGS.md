@@ -253,6 +253,41 @@ from it — so the durable output stays stable while presentation flexes.
 
 ---
 
+### A cheap structured screen beats paying a model to read noise
+
+**Context:** Phase 3's first real collection pulled **2,507** global postings from
+10 ATS boards. Labelling all of them via the Batch API (~$0.016/record) is ~$40 to
+extract mostly off-target US engineering roles. The raw records also had no
+structured `title`/`location` — collectors had discarded the ATS fields.
+
+**Decision:** Capture the discarded ATS `title` + location into a **metadata
+sidecar** (`meta_{date}.jsonl`, keyed by `source_url`) rather than overloading the
+schema-locked `JDRecord` or injecting a synthetic header into `raw_text` (which
+stays employer text only). Then a pure, code-only **pre-label filter** screens on
+that metadata (location: UK / remote-EU / ambiguous keep, clear non-UK drop; role:
+target families keep, pure-sales / recruiting / off-target drop) *before* any
+labelling spend. The screen is deliberately generous — recall over precision.
+
+**Outcome:** 2,507 → 116 exact dupes → 2,391 unique → **66 survivors (3%)** — a
+~38× cut, dropping the labelling bill from ~$40 to ~$1. The biggest lessons came
+from *inspecting* the survivors and drops, not from the headline count: three
+recall bugs hid behind plausible totals — `Applied AI Architect` (Anthropic's
+densest on-target cluster) was dropped because the keep-list lacked the phrase;
+`Solutions Architecture` / `Field Engineering` were dropped by a `\barchitect\b` /
+`\bfield engineer\b` word-boundary bug (the `-ure`/`-ing` suffix); and **US-state
+remote** roles ("Remote - California") survived as "ambiguous" because the non-UK
+matcher knew "US" but not state names. Each was a generosity failure invisible in
+aggregate and obvious in a sampled list.
+
+**Reusability:** Before spending model tokens on a corpus, screen it with cheap
+deterministic code on whatever structured signal you can recover — and capture
+that signal in a sidecar rather than bending a locked schema. When tuning a
+keep/drop screen, **always sample the surviving and dropped sets**; counts confirm
+volume but only inspection reveals false negatives. Word-boundary regexes silently
+miss morphological variants (`architect`/`architecture`); enumerate suffixes.
+
+---
+
 ## Learning Entries
 
 ### Learning Entry Template
