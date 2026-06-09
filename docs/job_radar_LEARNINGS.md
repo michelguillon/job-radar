@@ -515,5 +515,33 @@ before keying requests on a domain identifier.
 
 ---
 
+### Learning 14 — One flat dataclass, two serialisation shapes, paid off twice
+
+#### Learning
+
+Step 1 modelled `JDRecord` as a *flat* dataclass but serialised it to a *nested*
+JSONL envelope (`extraction` / `annotation` groups) via a hand-written `to_dict`.
+Step 8's UI index needed the opposite shape — a fully denormalised flat row per
+record — and got it for free: `dataclasses.asdict(record)` returns the flat field
+map directly, so `export_index` is a one-liner. The same model serves the
+storage format (nested, ownership-grouped) and the UI contract (flat,
+query-friendly) without a second model or a mapping layer.
+
+#### Surprise
+
+The "extra" complexity added back in Step 1 — keeping the dataclass flat while
+translating to a nested envelope — looked like overhead at the time. It turned
+out to be exactly the seam that made two later, opposite serialisation needs
+trivial. The flat in-memory shape is the pivot both formats project from.
+
+#### Reusable Pattern
+
+Keep the in-memory model in its most neutral (usually flattest) shape and treat
+every serialisation — storage envelope, API payload, UI index — as a projection
+from it. Resist baking one wire format into the model. When a new consumer wants
+a different shape, it's a new projection, not a migration.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*
