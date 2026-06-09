@@ -44,7 +44,7 @@ bump `SCHEMA_VERSION`.
 
 | Phase | Status |
 |---|---|
-| 1 — Corpus Engine | Steps 0–6 complete (73 tests). Steps 7–9 pending. |
+| 1 — Corpus Engine | Steps 0–7 complete (83 tests). Steps 8–9 pending. |
 | 2 — Scoring Engine | Not started |
 | 3 — Job Tracker | Not started |
 | 4 — Discovery Layer | Not started |
@@ -64,8 +64,8 @@ bump `SCHEMA_VERSION`.
 | 4 — Lever + Ashby | ✅ complete | lever.py + ashby.py registered. Live: Mistral 170, Perplexity 71. |
 | 5 — VC boards | ✅ complete | All boards JS-rendered (requires_js) — skeleton skips all; scraping deferred to Phase 4 |
 | 6 — Tier 2 tooling | ✅ complete | tier2_review.py — a/e/s loop, resumable via corpus/tier2_progress.json. Extraction is a placeholder (Step 7 replaces). |
-| 7 — Batch API labelling | ⏳ next | Replaces tier2_review's extract_placeholder; pipeline/label.py + label.py |
-| 8 — Validation + stats | ❌ pending | stats.py needs --export-index for Phase 5 |
+| 7 — Batch API labelling | ✅ complete | pipeline/label.py + label.py. Live verified: 5/5 labelled, $0.055, cost→stats.json. opus-4-8, prompt from locked enums. |
+| 8 — Validation + stats | ⏳ next | stats.py needs --export-index for Phase 5. NB: validate() checks annotation too — labelled records get neutral annotation defaults (see Learning 12). |
 | 9 — Export | ❌ pending | |
 
 ---

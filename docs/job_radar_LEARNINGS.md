@@ -449,5 +449,71 @@ records are never re-prompted.
 
 ---
 
+### Learning 12 — Whole-record validation collides with the layered-ownership boundary
+
+#### Learning
+
+After Claude (Batch API) labelled the extraction fields of a Tier-4 record, every
+record still failed `validate()` — not on a single extraction field, but on the
+*annotation* fields (`applied`, `application_decision`, `location_workable`, …)
+being `None`. Collectors leave annotation `None`, and Claude correctly never
+writes annotation (the strict extraction/annotation boundary). So a
+freshly-labelled record is extraction-complete yet whole-record-invalid. Fix: the
+*pipeline* (`merge_results`) seeds neutral annotation defaults
+(`applied=False`, `application_decision="pending"`, …) — placeholders, not
+judgements — so the record is schema-valid and ready for a human to annotate.
+
+#### Surprise
+
+The three-layer separation (objective extraction / system product / human
+annotation) is enforced at *write* time — each owner writes only its layer — but
+`validate()` checks the *whole* record at once. The two views disagree: a record
+can be "done" for its current owner yet invalid as a whole. Nobody owns "fill the
+not-yet-relevant layers with neutral defaults" until you notice the gap.
+
+#### Reusable Pattern
+
+When data has layered ownership but a single all-fields validator, decide
+explicitly who seeds the not-yet-owned layers and when. Seed neutral
+machine-defaults at the transition point (here: on label-merge), keeping them
+distinct from real values so a later owner can tell "untouched default" from
+"deliberately set." Don't let a validator that spans all layers imply that one
+layer's writer is responsible for all of them.
+
+---
+
+### Learning 13 — Generate the model prompt from the executable schema, not a copy
+
+#### Learning
+
+`pipeline/label.py` builds the extraction system prompt's closed-vocabulary
+section directly from the `models.record` enums (`SENIORITY`, `DOMAIN`, …) rather
+than hand-listing the allowed values. Add a value to the schema and the prompt
+updates itself. Two batch-API mechanics also bit: `custom_id` must match
+`^[a-zA-Z0-9_-]{1,64}$`, so the `sha256:…` record id (illegal `:`, 71 chars) can't
+be used — requests are keyed by index and mapped back by position; and marking
+the shared system prompt with `cache_control` made prompt caching real (the live
+run billed 9,712 cache-read tokens against 7,045 fresh input — the schema+examples
+preamble was paid for once across the 5 requests).
+
+#### Surprise
+
+The prompt is the *third* copy of the schema (after `models/record.py` and
+CORPUS_FINDINGS §1.1) and the one most likely to silently rot — a model happily
+emits an enum value the code then rejects. Deriving it from the code removes the
+copy entirely. And batch caching "just worked" only because the volatile per-JD
+text was in the user turn, behind the cached system prefix — the standard
+caching prefix rule, but easy to break by templating the JD into the system block.
+
+#### Reusable Pattern
+
+Anything you tell a model about a schema should be generated from the schema's
+executable definition, not transcribed. For batch jobs, put the large shared
+context in a cache-marked system prefix and the per-item payload in the user turn
+so caching pays off; and check ID-format constraints (`custom_id` charset/length)
+before keying requests on a domain identifier.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

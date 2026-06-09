@@ -1,0 +1,231 @@
+"""Tests for pipeline.label — batch submit/poll/download/merge, parse, cost.
+
+The Anthropic client is faked (no network). Pure functions (parse_extraction,
+merge_results, estimate_cost, build_system_prompt) are tested directly.
+"""
+
+import json
+
+import pytest
+
+from collectors.base import build_raw_record
+from models.record import _EXTRACTION_FIELDS
+from pipeline import label
+
+
+def _rec(i: int):
+    r = build_raw_record(
+        source_url=f"https://x/{i}",
+        source_ats="greenhouse",
+        company=f"Co{i}",
+        collected_at="2026-06-09",
+        raw_text=f"Job description {i}",
+    )
+    r.id = f"sha256:{i:064d}"
+    return r
+
+
+def _full_extraction():
+    """A schema-complete extraction dict (all 17 keys present)."""
+    return {
+        "role_type": ["Product"],
+        "seniority": "ic",
+        "technical_depth": "hands_on",
+        "years_experience_required": "not_stated",
+        "required_technologies": ["Python"],
+        "required_competencies": [],
+        "nice_to_have_technologies": [],
+        "nice_to_have_competencies": [],
+        "domain": ["SaaS"],
+        "remote_policy": "remote",
+        "location": "London",
+        "delivery_motion": ["direct_delivery"],
+        "leadership_geography": [],
+        "company_size_signal": "startup",
+        "company_stage": "not_stated",
+        "culture_signals": [],
+        "raw_observations": "",
+    }
+
+
+# --- Fakes mimicking the SDK shapes used by label.py ---
+
+
+class _Usage:
+    def __init__(self):
+        self.input_tokens = 100
+        self.output_tokens = 50
+        self.cache_read_input_tokens = 0
+        self.cache_creation_input_tokens = 200
+
+
+class _Block:
+    def __init__(self, text):
+        self.type = "text"
+        self.text = text
+
+
+class _Msg:
+    def __init__(self, text):
+        self.content = [_Block(text)]
+        self.usage = _Usage()
+
+
+class _Result:
+    """Wraps result.result.{type, message, error}."""
+
+    def __init__(self, custom_id, type_, *, text=None, error_type=None):
+        self.custom_id = custom_id
+        self.result = self
+        self.type = type_
+        self.message = _Msg(text) if text is not None else None
+        self.error = type("E", (), {"type": error_type})() if error_type else None
+
+
+class _Batch:
+    def __init__(self, id_, status):
+        self.id = id_
+        self.processing_status = status
+
+
+class FakeBatches:
+    def __init__(self, *, statuses=None, results=None):
+        self._statuses = list(statuses or ["ended"])
+        self._results = results or []
+        self.created_requests = None
+
+    def create(self, *, requests):
+        self.created_requests = requests
+        return _Batch("batch_123", self._statuses[0])
+
+    def retrieve(self, batch_id):
+        status = self._statuses.pop(0) if len(self._statuses) > 1 else self._statuses[0]
+        return _Batch(batch_id, status)
+
+    def results(self, batch_id):
+        return iter(self._results)
+
+
+class FakeClient:
+    def __init__(self, batches):
+        self.messages = type("M", (), {"batches": batches})()
+
+
+# --- build_system_prompt ---
+
+
+def test_system_prompt_includes_enums_and_keys():
+    p = label.build_system_prompt()
+    assert "series_c_plus" in p  # a company_stage enum value
+    assert "Solutions Engineering" in p  # a role_type enum value
+    for field in _EXTRACTION_FIELDS:
+        assert field in p
+    assert "JSON" in p
+
+
+# --- run_batch ---
+
+
+def test_run_batch_keys_requests_by_index_and_returns_id():
+    batches = FakeBatches()
+    client = FakeClient(batches)
+    bid = label.run_batch([_rec(0), _rec(1)], client=client)
+    assert bid == "batch_123"
+    assert [r["custom_id"] for r in batches.created_requests] == ["rec-0", "rec-1"]
+
+
+# --- poll_batch ---
+
+
+def test_poll_batch_waits_until_ended():
+    batches = FakeBatches(statuses=["in_progress", "in_progress", "ended"])
+    client = FakeClient(batches)
+    slept = []
+    bid = label.poll_batch("batch_123", client=client, sleep=lambda s: slept.append(s), interval=5)
+    assert bid == "batch_123"
+    assert slept == [5, 5]  # polled twice before ending
+
+
+def test_poll_batch_times_out():
+    batches = FakeBatches(statuses=["in_progress"])
+    client = FakeClient(batches)
+    with pytest.raises(TimeoutError):
+        label.poll_batch("b", client=client, sleep=lambda s: None, interval=10, max_wait=10)
+
+
+# --- download_results ---
+
+
+def test_download_results_shapes_entries():
+    results = [
+        _Result("rec-0", "succeeded", text=json.dumps(_full_extraction())),
+        _Result("rec-1", "errored", error_type="invalid_request"),
+    ]
+    client = FakeClient(FakeBatches(results=results))
+    out = label.download_results("batch_123", client=client)
+    assert out[0]["status"] == "succeeded"
+    assert out[0]["usage"]["input"] == 100 and out[0]["usage"]["cache_write"] == 200
+    assert out[1]["status"] == "errored" and out[1]["error"] == "invalid_request"
+
+
+# --- parse_extraction ---
+
+
+def test_parse_extraction_plain_and_with_prose():
+    obj = _full_extraction()
+    assert label.parse_extraction(json.dumps(obj)) == obj
+    wrapped = f"Here is the JSON:\n{json.dumps(obj)}\nDone."
+    assert label.parse_extraction(wrapped) == obj
+
+
+# --- merge_results ---
+
+
+def test_merge_applies_fields_and_sets_tier():
+    records = [_rec(0), _rec(1)]
+    results = [
+        {"custom_id": "rec-0", "status": "succeeded", "raw_text": json.dumps(_full_extraction())},
+        {"custom_id": "rec-1", "status": "errored", "error": "server_error"},
+    ]
+    labelled, failures = label.merge_results(records, results, tier=4)
+    assert len(labelled) == 1 and labelled[0].company == "Co0"
+    assert labelled[0].tier == 4
+    assert labelled[0].role_type == ["Product"]
+    assert labelled[0].seniority == "ic"
+    assert len(failures) == 1 and failures[0]["custom_id"] == "rec-1"
+
+
+def test_merge_produces_schema_valid_record():
+    from models.record import validate
+
+    records = [_rec(0)]
+    results = [{"custom_id": "rec-0", "status": "succeeded", "raw_text": json.dumps(_full_extraction())}]
+    labelled, _ = label.merge_results(records, results, tier=4)
+    # annotation defaults are seeded so the labelled record passes full validation
+    assert validate(labelled[0]) == []
+    assert labelled[0].applied is False
+    assert labelled[0].application_decision == "pending"
+
+
+def test_merge_records_missing_key_as_failure():
+    records = [_rec(0)]
+    incomplete = _full_extraction()
+    del incomplete["seniority"]  # missing required key
+    results = [{"custom_id": "rec-0", "status": "succeeded", "raw_text": json.dumps(incomplete)}]
+    labelled, failures = label.merge_results(records, results, tier=3)
+    assert labelled == []
+    assert len(failures) == 1 and "parse" in failures[0]["error"]
+
+
+# --- estimate_cost ---
+
+
+def test_estimate_cost_applies_batch_rates():
+    results = [
+        {"usage": {"input": 1_000_000, "output": 0, "cache_read": 0, "cache_write": 0}},
+        {"usage": {"input": 0, "output": 1_000_000, "cache_read": 0, "cache_write": 0}},
+    ]
+    cost = label.estimate_cost(results)
+    # 1M input @ $2.50 + 1M output @ $12.50 = $15.00 (batch rates)
+    assert cost["cost_usd"] == pytest.approx(15.0)
+    assert cost["tokens"]["input"] == 1_000_000
