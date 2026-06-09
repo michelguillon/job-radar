@@ -38,9 +38,17 @@ thing tests actually run against.
 - **Extraction vs annotation boundary is strict** — Claude never
   populates annotation fields; human never populates extraction fields
 - **CLI writes, UI reads** — all state changes through CLI scripts only
-- **Decisions & learnings** — record architecture decisions and reusable
-  lessons in `docs/job_radar_LEARNINGS.md`, appended after each step/phase
-  (append-only; never rewrite existing entries)
+- **Definition of done (EVERY task)** — a change is not complete until the
+  docs are current. This is not optional and not an afterthought:
+  1. **`docs/job_radar_SPEC.md`** — if anything about the architecture,
+     pipeline, schema, or phase scope changed, update the SPEC in the **same**
+     change. The SPEC must always describe the system as it actually is.
+  2. **`docs/job_radar_LEARNINGS.md`** — append a learning entry for every
+     decision, finding, reversal, or surprise (append-only; never rewrite
+     existing entries). Capture the *why*, not just the *what*.
+  3. The nearest **`CLAUDE.md`** — update conventions/state in the same change.
+  Treat SPEC + LEARNINGS as part of the commit, alongside code and tests —
+  never a "later" task.
 
 ---
 
