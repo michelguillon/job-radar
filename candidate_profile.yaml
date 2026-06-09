@@ -1,0 +1,229 @@
+# candidate_profile.yaml — Job Radar Phase 2 scoring input
+#
+# Candidate definition used by the scoring engine.
+#
+# This is a MANAGED, VERSIONED asset. It evolves as skills, projects, target
+# roles, and search strategy change. Bump profile_version and last_updated on
+# every edit.
+#
+# Design principle:
+# - This file describes Michel.
+# - It does not contain scoring logic.
+# - It does not contain generic blocking rules.
+# - It should represent long-term career direction, not recent application activity.
+#
+# Important schema boundary:
+# - Enum-bound fields must use exact values from models/record.py.
+# - Nuance that is not represented in the closed vocabulary belongs in:
+#   career_patterns, skills, experience_anchors, positive_signals, or negative_signals.
+#
+# search_mode:
+#   selective = high-conviction opportunities only
+#   active    = stretch opportunities surfaced separately
+#   broad     = all opportunities surfaced with contextual fit labels
+
+profile_version: "1.0"
+last_updated: "2026-06-09"
+
+candidate:
+  name: Michel Guillon
+
+  search_mode: selective
+
+  target_roles:
+    primary:
+      - Product
+      - Solutions Engineering
+      - Solutions Architecture
+      - Solutions Consulting
+      - AI Delivery
+      - Partner SA
+
+  target_seniority:
+    - director
+    - manager
+    - lead
+    - senior_ic
+
+  target_delivery_motion:
+    - pre_sales
+    - direct_delivery
+    - partner_delivery
+    - partner_enablement
+
+  target_technical_depth:
+    - hybrid
+    - leadership
+
+  acceptable_technical_depth:
+    - hands_on
+
+  location:
+    base: London
+    acceptable_remote_policy:
+      - hybrid
+      - remote
+    relocation: false
+
+  domains:
+    strong:
+      - AdTech
+      - Enterprise Software
+
+    adjacent:
+      - AI Platform
+      - AI/ML
+      - FinTech
+      - Customer Experience
+      - Infrastructure
+      - Developer Tools
+      - Data & Analytics
+
+    lower_priority:
+      - Revenue Technology
+      - Consulting
+      - Product Design
+      - Financial Services
+
+  career_patterns:
+    - building and scaling solutions consulting organisations
+    - leading technical pre-sales and solutions teams
+    - translating customer and market requirements into product strategy
+    - owning products and solutions through definition and delivery
+    - operating at the intersection of product, engineering, and go-to-market teams
+    - translating technical complexity into commercial outcomes
+    - creating operating models, engagement frameworks, and delivery playbooks
+    - shaping go-to-market strategy for complex technical products
+    - executive stakeholder management
+    - partner and customer success through technical adoption
+    - influencing product roadmap from customer and partner needs
+    - balancing technical feasibility, commercial outcomes, and customer value
+
+  skills:
+    technologies:
+      strong:
+        - API platforms
+        - identity infrastructure
+        - consent technology
+        - digital advertising platforms
+
+      developing:
+        - Python
+        - LLM APIs
+        - RAG pipelines
+        - vector databases
+        - AI-assisted workflow systems
+
+      familiar:
+        - cloud-native architectures
+        - data pipelines
+        - AI/ML concepts
+
+    competencies:
+      strong:
+        - pre-sales team leadership
+        - enterprise sales cycle support
+        - executive communication
+        - solution design and architecture
+        - GTM strategy ownership
+        - EMEA and multi-regional collaboration
+        - product roadmap influence
+        - technical discovery
+        - proof of value ownership
+        - partner enablement
+        - operating model design
+        - cross-functional leadership
+        - customer-to-product translation
+
+      developing:
+        - AI deployment strategy
+        - AI solution prototyping
+        - RAG evaluation
+        - model-assisted workflow design
+        - structured AI system evaluation
+
+  experience_anchors:
+    - company: Imagination Technologies
+      themes:
+        - semiconductor IP
+        - GPU and SoC engineering
+        - technical customer engagement
+        - partner-led platform business models
+
+    - company: Xandr
+      themes:
+        - built and led 15-person solutions consulting organisation
+        - managed approximately $25M book of business
+        - delivered approximately 20 percent year-on-year growth
+        - designed scalable solutions consulting operating model
+        - enterprise technical pre-sales leadership
+        - strategic customer engagement
+
+    - company: Microsoft
+      themes:
+        - identity product management
+        - product delivery
+        - customer and platform requirement translation
+        - engineering collaboration
+
+    - company: Utiq
+      themes:
+        - established UK solutions consulting function
+        - identity graph design
+        - privacy and partner ecosystem strategy
+        - go-to-market development
+        - pilot activation and commercialisation
+
+    - project: AI RFI Response Platform
+      themes:
+        - production RAG pipeline
+        - hybrid retrieval and reranking
+        - evaluation across multiple configurations
+        - business workflow automation
+        - low-cost production deployment
+
+    - project: cv-tailor
+      themes:
+        - multi-model orchestration
+        - grounding and evaluation
+        - human-in-the-loop workflow design
+        - production web application
+
+    - project: Job Radar
+      themes:
+        - structured job intelligence
+        - schema design
+        - recommendation systems thinking
+        - fit scoring and prioritisation
+
+  requirement_gap_watchlist:
+    - M&A transaction experience
+    - post-merger integration leadership
+    - deep Salesforce administration
+    - contact centre transformation expertise
+    - CRM and revenue operations expertise
+    - hands-on production data science ownership
+    - specialist cloud architecture certification
+    - formal management consulting background
+
+  positive_signals:
+    - enterprise AI platform
+    - technical GTM leadership
+    - solutions consulting leadership
+    - partner solution architecture
+    - AI deployment and adoption
+    - executive technical sponsorship
+    - product strategy with delivery ownership
+    - product roadmap influence
+    - pre-commercial environment
+    - scale-up environment
+    - partner ecosystem enablement
+    - complex technical product adoption
+
+  negative_signals:
+    - pure quota-carrying sales role
+    - pure project delivery without product or GTM influence
+    - narrow implementation consultant role
+    - role centred primarily on CRM administration
+    - role requiring relocation outside London
+    - role requiring deep specialist software engineering as the primary value proposition

@@ -20,6 +20,10 @@ Formerly: jd-refinery (renamed 2026-06-09 during respec).
 If CORPUS_FINDINGS §1.1 and `models/record.py` diverge, fix both and
 bump `SCHEMA_VERSION`.
 
+**Tie-break rule:** When spec prose and `models/record.py` disagree,
+trust the executable artifact and fix the prose. The dataclass is the
+thing tests actually run against.
+
 ---
 
 ## Build conventions
@@ -45,7 +49,7 @@ bump `SCHEMA_VERSION`.
 | Phase | Status |
 |---|---|
 | 1 — Corpus Engine | ✅ complete — Steps 0–9, 95 tests. Pipeline end-to-end. |
-| 2 — Scoring Engine | Not started |
+| 2 — Scoring Engine | 🔄 in progress — candidate_profile.yaml done (enum-clean). Scorer pending. Decision: **Option A** — add `ApplicationRecord`, bump `SCHEMA_VERSION`→`1.3`, don't migrate JDRecord annotation yet, no JobPosting yet. Full plan: `docs/job_radar_PHASE2_PLAN.md`. |
 | 3 — Job Tracker | Not started |
 | 4 — Discovery Layer | Not started |
 | 5 — UI | Not started |
@@ -60,13 +64,13 @@ bump `SCHEMA_VERSION`.
 | 0 — Scaffold | ✅ complete | Docker, dirs, seeds, 10 manual records |
 | 1 — JDRecord model | ✅ complete | v1.2, validate(), round-trip tests |
 | 2 — Clean + dedupe | ✅ complete | clean(), record_hash(). SHA-256 backfill run in Step 3. |
-| 3 — Greenhouse | ✅ complete | collectors/base.py + greenhouse.py + collect.py. Backfill done — 10 unique hashes, 0 pending. |
-| 4 — Lever + Ashby | ✅ complete | lever.py + ashby.py registered. Live: Mistral 170, Perplexity 71. |
+| 3 — Greenhouse | ✅ complete | collectors/base.py + greenhouse.py + collect.py. Backfill done — 10 unique hashes, 0 pending. html.unescape() required on response body. |
+| 4 — Lever + Ashby | ✅ complete | lever.py + ashby.py registered. Lever returns bare array + split description fields. Live: Mistral 170, Perplexity 71. |
 | 5 — VC boards | ✅ complete | All boards JS-rendered (requires_js) — skeleton skips all; scraping deferred to Phase 4 |
-| 6 — Tier 2 tooling | ✅ complete | tier2_review.py — a/e/s loop, resumable via corpus/tier2_progress.json. Extraction is a placeholder (Step 7 replaces). |
-| 7 — Batch API labelling | ✅ complete | pipeline/label.py + label.py. Live verified: 5/5 labelled, $0.055, cost→stats.json. opus-4-8, prompt from locked enums. |
+| 6 — Tier 2 tooling | ✅ complete | tier2_review.py — a/e/s loop, resumable via corpus/tier2_progress.json. IO + extract injectable for tests. |
+| 7 — Batch API labelling | ✅ complete | pipeline/label.py + label.py. Live verified: 5/5 labelled, $0.055, cost→stats.json. Prompt generated from executable schema enums. |
 | 8 — Validation + stats | ✅ complete | validate.py → corpus/validated/{validated,failures}_*.jsonl; stats.py summary + --export-index → corpus/index.json (flat, UI contract). |
-| 9 — Export | ✅ complete | export.py — prompt/completion JSONL; eval(1-3)/train(all)/full sets; excludes validation failures, wrong schema_version, unlabelled. NB: train≈full until spec clarifies. |
+| 9 — Export | ✅ complete | export.py — prompt/completion JSONL; eval(1-3)/train(all-validated)/full(superset) sets. |
 
 ---
 
@@ -74,19 +78,22 @@ bump `SCHEMA_VERSION`.
 
 1. `SCHEMA_VERSION = "1.2"` (spec Step 1 text said 1.1 — typo, 1.2 is correct)
 2. Records stored as compact single-line JSONL (not pretty-printed)
-3. `.gitignore` uses `corpus/**/*` + negations (not bare `corpus/`) to
-   track directory skeleton while ignoring data
+3. `.gitignore` uses `corpus/**/*` + negations to track skeleton, ignore data
 4. Added: `models/__init__.py`, root `conftest.py`, `tests/factories.py`,
-   `.gitattributes`, this `CLAUDE.md`
+   `.gitattributes`, this `CLAUDE.md`, `collectors/base.py`, `scripts/`
 5. `docker-compose.yml` marks `env_file` as `required: false`
-6. SHA-256 backfill on 10 manual records run in Step 3 (was deferred
-   from Step 2 — raw_text was placeholder then)
-7. Added `collectors/base.py` (shared `fetch_json` retry/backoff +
-   `build_raw_record`) so Lever/Ashby are URL + field mapping only
-8. Added `scripts/` package for one-off corpus maintenance
-   (`backfill_manual_hashes.py`)
+6. SHA-256 backfill on 10 manual records run in Step 3 (deferred from Step 2)
+7. `collectors/base.py` added — shared `fetch_json` retry/backoff +
+   `build_raw_record`; each collector is URL + field mapping only
+8. `scripts/` package for one-off corpus maintenance
 9. `docker-compose.yml` service renamed `jd-refinery` → `job-radar`
-   (completing the rename so the documented run command works)
+10. Greenhouse `?content=true` returns HTML entity-escaped content —
+    `html.unescape()` run on response body before storing `raw_html`
+11. Lever returns bare JSON array + split description fields (not `{"jobs":[...]}`)
+12. `pipeline/merge_results` seeds neutral annotation defaults after labelling
+    so whole-record validation passes before human annotates
+13. Prompt closed-vocabulary section generated from `models.record` enums —
+    not hand-listed; prompt caching active on system prefix
 
 ---
 
@@ -105,23 +112,16 @@ They migrate to `ApplicationRecord` in Phase 2.
 
 ---
 
-## Pending tasks
+## Export set definitions
 
-- [x] SHA-256 backfill — done in Step 3 (10 unique hashes, 0 pending)
-- [x] Verify Greenhouse slugs — Anthropic (377 jobs) and Figma (167)
-      confirmed live
-- [ ] Verify remaining Lever/Ashby slugs before Step 4 live runs
-- [x] Inspect VC board pages — done (Step 5 gate). All JS-rendered SPAs;
-      scraping deferred to Phase 4 (see Learning 10)
+```
+eval    Tier 1+2+3 human-reviewed only — held-out eval set, never training
+train   All tiers validated — fine-tuning input
+full    Everything including failures — inspection only, never training
+```
 
----
-
-## Decisions & learnings
-
-Architecture decisions and reusable learnings live in
-`docs/job_radar_LEARNINGS.md` (Cross-Cutting Decisions + Learning Entries),
-appended after each step or phase. This file stays lean — conventions and
-current state, not a learning log.
+`train` ≈ `full` currently (few Tier 4 records, low failure rate).
+The separation exists by design for when scale makes it matter.
 
 ---
 
@@ -129,7 +129,7 @@ current state, not a learning log.
 
 Keep this file lean. Add area-specific conventions to nested files:
 
-- `collectors/CLAUDE.md` — API client patterns, rate limiting, error handling
-- `pipeline/CLAUDE.md` — batch API patterns, cost tracking
+- `collectors/CLAUDE.md` — API client patterns, rate limiting, encoding gotchas
+- `pipeline/CLAUDE.md` — batch API patterns, cost tracking, label-merge defaults
 - `scoring/CLAUDE.md` — scoring logic, profile schema (Phase 2+)
 - `ui/CLAUDE.md` — UI conventions, index.json contract (Phase 5+)
