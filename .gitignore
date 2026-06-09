@@ -1,0 +1,15 @@
+# Secrets — never commit
+.env
+
+# Python
+__pycache__/
+.pytest_cache/
+*.py[cod]
+
+# JSONL data anywhere
+*.jsonl
+
+# Corpus data: ignore all contents, keep the directory skeleton (.gitkeep)
+corpus/**/*
+!corpus/**/
+!corpus/**/.gitkeep

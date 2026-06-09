@@ -1,0 +1,12 @@
+services:
+  jd-refinery:
+    build: .
+    image: jd-refinery
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - .:/app
+    working_dir: /app
+    # Override with: docker compose run --rm jd-refinery python collect.py ...
+    command: ["python", "--version"]

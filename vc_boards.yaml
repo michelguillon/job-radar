@@ -1,0 +1,77 @@
+# VC portfolio job boards (HTML scrape, scoped — docs/SPEC_JD_REFINERY.md §3.5).
+# BeautifulSoup only. If a board requires JavaScript, set status: requires_js and skip.
+# Selectors are EMPTY by design — inspect each board manually and populate before Step 5.
+# Do not guess selectors.
+boards:
+  - name: a16z
+    url: https://jobs.a16z.com
+    status: active
+    selector: ""
+    fields:
+      title: ""
+      company: ""
+      url: ""
+    notes: "US AI, infrastructure"
+  - name: Sequoia
+    url: https://jobs.sequoiacap.com
+    status: active
+    selector: ""
+    fields:
+      title: ""
+      company: ""
+      url: ""
+    notes: "US AI, SaaS, fintech"
+  - name: Index Ventures
+    url: https://jobs.indexventures.com
+    status: active
+    selector: ""
+    fields:
+      title: ""
+      company: ""
+      url: ""
+    notes: "EU/US B2B SaaS, fintech"
+  - name: Balderton
+    url: https://jobs.balderton.com
+    status: active
+    selector: ""
+    fields:
+      title: ""
+      company: ""
+      url: ""
+    notes: "EU deep tech, B2B"
+  - name: Atomico
+    url: https://jobs.atomico.com
+    status: active
+    selector: ""
+    fields:
+      title: ""
+      company: ""
+      url: ""
+    notes: "EU AI, infrastructure"
+  - name: Accel
+    url: https://accel.com/jobs
+    status: active
+    selector: ""
+    fields:
+      title: ""
+      company: ""
+      url: ""
+    notes: "US/EU enterprise SaaS"
+  - name: General Catalyst
+    url: https://jobs.generalcatalyst.com
+    status: active
+    selector: ""
+    fields:
+      title: ""
+      company: ""
+      url: ""
+    notes: "US AI, healthtech"
+  - name: Lightspeed
+    url: https://jobs.lsvp.com
+    status: active
+    selector: ""
+    fields:
+      title: ""
+      company: ""
+      url: ""
+    notes: "US/EU enterprise, AI"
