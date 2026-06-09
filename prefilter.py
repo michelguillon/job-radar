@@ -28,7 +28,7 @@ from datetime import date
 
 from models.record import JDRecord
 from pipeline.dedupe import dedupe
-from pipeline.prefilter import screen
+from pipeline.prefilter import collapse_near_duplicates, screen
 
 log = logging.getLogger(__name__)
 
@@ -66,13 +66,10 @@ def run(
     raw_count = len(records)
     kept_records, dropped_dupes = dedupe(records, set())
 
-    survivors: list[JDRecord] = []
+    entries: list[dict] = []
     drop_reasons: Counter = Counter()
     role_fail: Counter = Counter()
     loc_fail: Counter = Counter()
-    by_company: Counter = Counter()
-    by_role_bucket: Counter = Counter()
-    by_loc_bucket: Counter = Counter()
     no_meta = 0
 
     for record in kept_records:
@@ -87,17 +84,30 @@ def run(
         if not result.loc_keep:
             loc_fail[result.loc_bucket] += 1
         if result.keep:
-            survivors.append(record)
-            by_company[record.company] += 1
-            by_role_bucket[result.role_bucket] += 1
-            by_loc_bucket[result.loc_bucket] += 1
+            entries.append({
+                "record": record,
+                "company": record.company,
+                "title": meta.get("title", ""),
+                "role_bucket": result.role_bucket,
+                "loc_bucket": result.loc_bucket,
+            })
         else:
             drop_reasons[result.drop_reason] += 1
+
+    screened_kept = len(entries)
+    kept_entries, collapsed = collapse_near_duplicates(entries)
+    survivors = [e["record"] for e in kept_entries]
+
+    by_company: Counter = Counter(e["company"] for e in kept_entries)
+    by_role_bucket: Counter = Counter(e["role_bucket"] for e in kept_entries)
+    by_loc_bucket: Counter = Counter(e["loc_bucket"] for e in kept_entries)
 
     report = {
         "raw_count": raw_count,
         "dropped_dupes": dropped_dupes,
         "deduped_count": len(kept_records),
+        "screened_kept": screened_kept,
+        "near_dupes_collapsed": collapsed,
         "kept_count": len(survivors),
         "no_meta": no_meta,
         "drop_reasons": drop_reasons,
@@ -141,8 +151,10 @@ def print_report(report: dict) -> None:
     print(f"  unique after dedupe: {report['deduped_count']}")
     if report["no_meta"]:
         print(f"  WARNING no metadata: {report['no_meta']} (treated as dropped)")
+    print(f"passed screens     : {report['screened_kept']}")
+    print(f"  near-dupes collapsed: {report['near_dupes_collapsed']}")
     pct = (100 * kept / raw) if raw else 0
-    print(f"kept (survivors)   : {kept}  ({pct:.0f}% of raw)")
+    print(f"kept (survivors)   : {kept}  ({pct:.0f}% of raw, distinct roles)")
     print(f"dropped            : {report['deduped_count'] - kept}")
 
     _print_counter("drop reason (role checked before location):", report["drop_reasons"])

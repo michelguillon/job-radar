@@ -88,7 +88,7 @@ _STRONG_KEEP = re.compile(
     r"\b(?:solutions? (?:engineer|architect(?:ure)?|consultant|consulting)|"
     r"sales engineer|pre[- ]?sales|presales|technical account manager|"
     r"customer engineer|forward[- ]deployed|field engineer(?:ing)?|value engineer|"
-    r"(?:applied )?ai architect(?:ure)?|"
+    r"(?:applied )?ai architect(?:ure)?|deployment strategist|"
     r"implementation (?:architect|consultant|engineer|specialist)|"
     r"solutions? lead|ai delivery|partner (?:solutions?|architect|engineer)|"
     r"delivery (?:lead|manager|architect))\b"
@@ -116,7 +116,7 @@ _CUSTOMER_KEEP = re.compile(
 )
 _GTM_PARTNER_KEEP = re.compile(
     r"\b(?:go[- ]to[- ]market|gtm|partner manager|partnerships?|alliances?|"
-    r"partner enablement|business value)\b"
+    r"partner (?:enablement|success|programs?|experience)|business value)\b"
 )
 
 
@@ -175,6 +175,46 @@ def screen_role(title: str) -> tuple[bool, str]:
     if _GTM_PARTNER_KEEP.search(t):
         return True, "gtm_partner"
     return False, "off_target"
+
+
+# --- Near-duplicate collapse ------------------------------------------------
+# Exact-body dedupe (pipeline.dedupe) can't catch the same role posted to many
+# locations or language variants — their bodies differ. After screening, collapse
+# survivors that share a company and a normalised title, keeping the single
+# best-located representative (UK first). Language qualifiers like "(French
+# speaking)" are stripped from the key so the Stripe CSM language variants merge;
+# specialisation parentheticals ("(Enterprise Accounts)") are NOT stripped, so two
+# genuinely distinct Senior Solutions Architect roles stay separate.
+
+_LANG_QUALIFIER = re.compile(r"\s*\([a-z]+(?:[\s/&-][a-z]+)*\s+speaking\)\s*", re.I)
+_LOC_RANK = {"uk": 0, "europe_remote": 1, "remote_ambiguous": 2, "not_stated": 3}
+
+
+def dedupe_key(company: str, title: str) -> tuple[str, str]:
+    """Near-dup key: company + title with language qualifiers removed, normalised."""
+    t = _LANG_QUALIFIER.sub(" ", title or "")
+    t = re.sub(r"\s+", " ", t).strip().lower()
+    return ((company or "").strip().lower(), t)
+
+
+def collapse_near_duplicates(entries: list[dict]) -> tuple[list[dict], int]:
+    """Collapse same-role survivors to one best-located representative.
+
+    Each entry is a dict with at least ``company``, ``title`` and ``loc_bucket``.
+    Preserves first-seen order of the kept representatives. Returns
+    ``(kept_entries, collapsed_count)``.
+    """
+    best: dict[tuple[str, str], dict] = {}
+    order: list[tuple[str, str]] = []
+    for e in entries:
+        key = dedupe_key(e["company"], e["title"])
+        if key not in best:
+            best[key] = e
+            order.append(key)
+        elif _LOC_RANK.get(e["loc_bucket"], 9) < _LOC_RANK.get(best[key]["loc_bucket"], 9):
+            best[key] = e
+    kept = [best[k] for k in order]
+    return kept, len(entries) - len(kept)
 
 
 def screen(meta: dict) -> ScreenResult:

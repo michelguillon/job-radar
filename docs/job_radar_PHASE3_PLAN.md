@@ -72,18 +72,34 @@ and is passed to the extraction prompt as **separate context** at labelling time
 Identity is unaffected — `pipeline.dedupe` hashes `clean(raw_html)`, which the
 sidecar never touches.
 
-### Filter design (to iterate on)
+### Filter design — BUILT (`pipeline/prefilter.py` + `prefilter.py`)
 
-- **Location screen:** keep London / UK / remote-EU / remote-global; drop clearly
-  non-workable (US-onsite, APAC-onsite, relocation-required). Be permissive on
-  ambiguous (let the scorer's location gate handle nuance later).
-- **Role screen:** keep titles matching the target families (Solutions *, Pre-Sales,
-  AI Delivery, Partner SA, Product-in-relevant-context, GTM-adjacent); drop pure
-  SWE / data-eng / recruiting / finance / ops. Keep it generous — better to label
-  a few extra than miss a fit.
-- Output a filtered JSONL + a **report of survivors by company / inferred role /
-  location**, and iterate the thresholds against that before any labelling spend.
-- Then: clean → dedupe → **filter** → label (Batch, Tier 4) → validate → score.
+- **Location screen:** keep UK / London / UK-remote / Europe-remote / EMEA-remote /
+  multi-location-incl-UK / bare-Remote / not-stated (ambiguous kept); drop clear
+  non-UK onsite and remote tied to a non-European country (incl. **US state names**
+  — "Remote – California" — which have no country field on Greenhouse).
+- **Role screen (generous):** STRONG_KEEP target families (Solutions
+  *eng/arch/consult*, Pre-Sales, Sales Engineer, **Applied AI Architect**, Forward
+  Deployed, Field Engineering, **Deployment Strategist**, Partner SA, AI Delivery)
+  → drop pure sales (AE/AM/SDR/BDR) → drop recruiting/HR → keep Product, Customer
+  (Success/Experience), GTM/Partner (incl. **Partner Success/Programs**) → else
+  drop off-target. Strong-keep precedes the sales drop so "Technical Account
+  Manager" survives.
+- **Near-dedupe:** after screening, `collapse_near_duplicates` merges
+  `(company, language-stripped title)` groups to one UK-preferred representative —
+  the same role posted to N locations / language variants that exact-body dedupe
+  misses.
+- Output: `corpus/filtered/filtered_{date}.jsonl` (survivors, JDRecords only) +
+  a stdout report (raw / dupes / screen pass / collapsed / survivors; drop reasons;
+  kept by company / role bucket / location bucket).
+- Pipeline: re-collect (+meta) → clean → dedupe → **filter** → label (Batch, Tier 4,
+  meta passed as prompt context) → validate → score.
+
+**First live cut (2026-06-09):** 2,507 raw → 116 exact dupes → 2,391 unique →
+screened → near-deduped → survivors written to `corpus/filtered/`. Three recall
+bugs found by inspecting survivors/drops and fixed before locking the cut (Applied
+AI Architect family; `architectu**re**`/`field engineer**ing**` boundary; US-state
+remote). Re-run after seed-list expansion to widen coverage.
 
 ### Seed-list maintenance (parallel, low priority)
 

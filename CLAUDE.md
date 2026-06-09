@@ -123,10 +123,14 @@ thing tests actually run against.
     extraction prompt as separate context later — never injected into `raw_text`.
 19. (Phase 3) **Pre-label filter** = `pipeline/prefilter.py` (pure location + role
     screens, generous by design) + `prefilter.py` CLI (clean+dedupe → screen →
-    `corpus/filtered/filtered_{date}.jsonl` + survivor-distribution report). Runs
-    **before** any Batch labelling spend. Screens read the sidecar only (no model,
-    no scoring). The survivors file is JDRecords only; the sidecar remains the
-    join source for the later labelling step.
+    **near-dedupe** → `corpus/filtered/filtered_{date}.jsonl` + survivor-distribution
+    report). Runs **before** any Batch labelling spend. Screens read the sidecar
+    only (no model, no scoring). `collapse_near_duplicates` merges survivors that
+    share `(company, language-stripped title)` — the same role posted to many
+    locations / language variants that exact-body dedupe can't catch — keeping the
+    single best-located representative (UK first); specialisation parentheticals
+    are preserved so distinct roles aren't merged. The survivors file is JDRecords
+    only; the sidecar remains the join source for the later labelling step.
 
 ---
 

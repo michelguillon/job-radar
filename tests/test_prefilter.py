@@ -3,7 +3,12 @@ prefilter.py CLI run()/IO."""
 
 import prefilter
 from collectors.base import build_meta, build_raw_record
-from pipeline.prefilter import screen, screen_location, screen_role
+from pipeline.prefilter import (
+    collapse_near_duplicates,
+    screen,
+    screen_location,
+    screen_role,
+)
 
 
 def _meta(title="Solutions Engineer", location_str="London, UK", **kw):
@@ -63,6 +68,12 @@ def test_role_keeps_product_and_customer():
     assert screen_role("Senior Product Manager")[0]
     assert screen_role("Director, Product")[0]
     assert screen_role("Customer Success Manager")[0]
+
+
+def test_role_keeps_deployment_strategist_and_partner_success():
+    for t in ["Deployment Strategist", "AI Deployment Strategist - UK",
+              "Head of Partner Success", "Head of Partner Programs"]:
+        assert screen_role(t)[0], t
 
 
 def test_role_drops_off_target():
@@ -129,6 +140,43 @@ def test_screen_requires_both_role_and_location():
     # both good → keep
     r = screen(_meta(title="Solutions Engineer", location_str="London"))
     assert r.keep and r.drop_reason == ""
+
+
+# --- near-duplicate collapse -------------------------------------------------
+
+
+def _entry(rec, company, title, loc_bucket):
+    return {"record": rec, "company": company, "title": title, "loc_bucket": loc_bucket}
+
+
+def test_collapse_merges_language_variants():
+    entries = [
+        _entry("a", "Stripe", "Customer Success Manager", "uk"),
+        _entry("b", "Stripe", "Customer Success Manager (French speaking)", "uk"),
+        _entry("c", "Stripe", "Customer Success Manager (German speaking)", "uk"),
+    ]
+    kept, collapsed = collapse_near_duplicates(entries)
+    assert len(kept) == 1 and collapsed == 2
+
+
+def test_collapse_prefers_uk_representative():
+    entries = [
+        _entry("de", "Databricks", "AI Engineer - FDE (Forward Deployed Engineer)", "europe_remote"),
+        _entry("uk", "Databricks", "AI Engineer - FDE (Forward Deployed Engineer)", "uk"),
+        _entry("es", "Databricks", "AI Engineer - FDE (Forward Deployed Engineer)", "europe_remote"),
+    ]
+    kept, collapsed = collapse_near_duplicates(entries)
+    assert collapsed == 2 and len(kept) == 1 and kept[0]["record"] == "uk"
+
+
+def test_collapse_keeps_distinct_specialisations():
+    # same base title, different (non-language) specialisation → NOT merged
+    entries = [
+        _entry("1", "Databricks", "Senior Solutions Architect (Enterprise Accounts)", "uk"),
+        _entry("2", "Databricks", "Senior Solutions Architect (Utilities/Energy)", "uk"),
+    ]
+    kept, collapsed = collapse_near_duplicates(entries)
+    assert len(kept) == 2 and collapsed == 0
 
 
 # --- CLI run() + IO ----------------------------------------------------------
