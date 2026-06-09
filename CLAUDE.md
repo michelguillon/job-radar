@@ -49,7 +49,7 @@ thing tests actually run against.
 | Phase | Status |
 |---|---|
 | 1 — Corpus Engine | ✅ complete — Steps 0–9, 95 tests. Pipeline end-to-end. |
-| 2 — Scoring Engine | 🔄 in progress — candidate_profile.yaml done (enum-clean). Scorer pending. Decision: **Option A** — add `ApplicationRecord`, bump `SCHEMA_VERSION`→`1.3`, don't migrate JDRecord annotation yet, no JobPosting yet. Full plan: `docs/job_radar_PHASE2_PLAN.md`. |
+| 2 — Scoring Engine | 🔄 scorer built (awaiting review) — `scoring/{profile,scorer}.py` + `score.py`, 162 tests. **Option A** shipped: `ApplicationRecord` (v1.3) → `corpus/scored/`; `SCHEMA_VERSION=1.3` / `JDRECORD_SCHEMA_VERSION=1.2` (JD corpus not migrated). 3-stage rule scorer. Conventions: `scoring/CLAUDE.md`. Plan: `docs/job_radar_PHASE2_PLAN.md`. |
 | 3 — Job Tracker | Not started |
 | 4 — Discovery Layer | Not started |
 | 5 — UI | Not started |
@@ -94,21 +94,29 @@ thing tests actually run against.
     so whole-record validation passes before human annotates
 13. Prompt closed-vocabulary section generated from `models.record` enums —
     not hand-listed; prompt caching active on system prefix
+14. (Phase 2) Schema versioned **per record type**: `SCHEMA_VERSION="1.3"`
+    (ApplicationRecord) + `JDRECORD_SCHEMA_VERSION="1.2"` (frozen). The three
+    sites that hard-coded `SCHEMA_VERSION` for a JDRecord envelope (`factories`,
+    `test_record`, `stats.export_index`) were repointed at `JDRECORD_SCHEMA_VERSION`.
 
 ---
 
-## Schema summary (v1.2)
+## Schema summary
 
-Three layers — never mixed:
+Two record types live in `models/record.py`, versioned **per type** (Option A):
 
 ```
-JDRecord          extraction    Claude populates    objective
-JobPosting        product       system populates    operational (Phase 2+)
-ApplicationRecord annotation    Michel populates    subjective  (Phase 2+)
+JDRecord          extraction   Claude populates   objective    v1.2 (frozen)
+ApplicationRecord assessment   scorer populates   subjective   v1.3 (built)
+JobPosting        product      system populates   operational  (deferred)
 ```
 
-For Phase 1, annotation fields live temporarily in `JDRecord`.
-They migrate to `ApplicationRecord` in Phase 2.
+- `SCHEMA_VERSION = "1.3"` (project / `ApplicationRecord`);
+  `JDRECORD_SCHEMA_VERSION = "1.2"` (JDRecord envelope, **not migrated**).
+- `JDRecord`'s Phase-1 annotation fields are now **legacy stubs** — the scorer
+  never reads or writes them. New scoring output lives only in `ApplicationRecord`
+  (`corpus/scored/`). `JobPosting` and the full annotation migration are a later,
+  explicit step.
 
 ---
 

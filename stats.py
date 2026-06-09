@@ -18,7 +18,7 @@ import logging
 from collections import Counter
 from dataclasses import asdict
 
-from models.record import SCHEMA_VERSION, JDRecord
+from models.record import JDRECORD_SCHEMA_VERSION, JDRecord
 
 INDEX_PATH = "corpus/index.json"
 
@@ -78,7 +78,7 @@ def print_summary(summary: dict) -> None:
 
 def export_index(records: list[JDRecord], path: str = INDEX_PATH) -> str:
     """Write a flat (denormalised) JSON array of all records for the UI."""
-    flat = [{"schema_version": SCHEMA_VERSION, **asdict(r)} for r in records]
+    flat = [{"schema_version": JDRECORD_SCHEMA_VERSION, **asdict(r)} for r in records]
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(flat, fh, ensure_ascii=False, indent=2)
     return path

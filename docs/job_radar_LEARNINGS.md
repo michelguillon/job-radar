@@ -189,6 +189,70 @@ where the user's constraints change over time.
 
 ---
 
+### Output model Option A — a new record type beats migrating the old one
+
+**Context:** Phase 2 needed somewhere to put scoring output (fit_score, fit_label,
+priority, gaps). Phase 1 had parked annotation fields *inside* `JDRecord` as a
+temporary home. Two paths: migrate those fields out of `JDRecord` into a new
+record now, or add the new record and leave `JDRecord` alone.
+
+**Decision (Option A, locked by Michel 2026-06-09):** Add an `ApplicationRecord`
+dataclass as the scorer's *only* output. Do **not** migrate `JDRecord`'s legacy
+annotation fields (they become dead stubs the scorer never reads or writes). Do
+not introduce `JobPosting` yet. Bump the project `SCHEMA_VERSION` to `1.3` for the
+new record type, but keep `JDRecord`'s on-disk envelope frozen at `1.2` via a
+separate `JDRECORD_SCHEMA_VERSION` constant — the existing corpus is not rewritten
+(CLAUDE.md: append-only, never migrate in place).
+
+**Outcome:** The 10 v1.2 JD records keep loading, validating, and round-tripping
+unchanged; all 95 Phase-1 tests stayed green through the version bump (only the
+three call sites that hard-coded `SCHEMA_VERSION` for a *JDRecord* envelope —
+`factories`, `test_record`, `stats.export_index` — were repointed at
+`JDRECORD_SCHEMA_VERSION`). `ApplicationRecord` is a flat, single-owner record
+(no extraction/annotation envelope) written to `corpus/scored/`. Two schema
+versions now coexist in the same module, keyed by record type.
+
+**Reusability:** When a new consumer needs new fields, prefer a new record type
+over migrating a record that other stages already depend on. Version *per record
+type*, not globally — a single project-wide version constant forces a migration
+every time any one record evolves. The cost is two constants and a one-line
+repoint of every site that conflated "the project version" with "this record's
+version"; the benefit is zero data migration and an untouched, still-valid corpus.
+
+---
+
+### Scoring: profile says WHAT, scorer says HOW; mode is presentation not scoring
+
+**Context:** The candidate profile is a managed asset Michel edits; the scorer is
+code. Where does each rule live? Two specific tensions: (1) requirement-gap
+detection — the profile lists gaps to watch for, but detecting them in a JD needs
+regex; (2) `search_mode` — it changes what the user sees, but the scoring must
+stay stable so scores are comparable over time.
+
+**Decision:** Split ownership by what changes and who changes it. The profile's
+`requirement_gap_watchlist` declares WHAT to watch (Michel's vocabulary); the
+scorer's `_GAP_TRIGGERS` defines HOW to detect each phrase (regex, keyed by the
+exact phrase). Generic blocking rules (clearance/language/sponsorship) are
+entirely scorer-owned — they are not personal, so they are not in the profile.
+And `search_mode`/`--min-fit` are pure presentation: they live in `score.py`'s
+`is_shown` filter (§6.3 table), never in `scorer.py`. The scored file always holds
+every record; filtering only changes the printed/served view.
+
+**Outcome:** Running the scorer on the 10 manual records produced a plausible,
+honest spread (8 strong_fit, 2 good_fit — the corpus is curated relevant roles),
+with requirement_gaps firing where expected (data-science, contact-centre,
+Salesforce/RevOps) and no language false-positives. `scorer.py` is pure and
+deterministic (`scored_at` injected), so the same inputs always reproduce the same
+ApplicationRecord — re-scoring is safe and diff-able.
+
+**Reusability:** For any rule-based system driven partly by a user-edited config:
+put declarative intent in the config and detection/mechanism in code, keyed so a
+config change can't silently break detection. Keep the scoring function pure and
+inject the clock; make filtering a view over a complete artifact, not a deletion
+from it — so the durable output stays stable while presentation flexes.
+
+---
+
 ## Learning Entries
 
 ### Learning Entry Template

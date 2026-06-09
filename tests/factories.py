@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from models.record import SCHEMA_VERSION, JDRecord
+from models.record import JDRECORD_SCHEMA_VERSION, JDRecord
 
 
 def base_envelope() -> dict:
     """A minimal, schema-valid JSONL envelope."""
     return {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": JDRECORD_SCHEMA_VERSION,
         "id": "sha256:pending",
         "source_url": "unknown",
         "source_ats": "manual",

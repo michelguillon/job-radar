@@ -2,10 +2,10 @@
 ## Corpus Schema, Labelling Rules, and JD Records
 
 **Project:** job-radar (Project 4)  
-**Schema version:** 1.2  
-**Last updated:** 2026-06-06  
+**Schema version:** 1.3 (project) — `JDRecord` envelope frozen at 1.2 (not migrated)  
+**Last updated:** 2026-06-09  
 **Records:** 10 (Tier 1: 6, Tier 2: 4)  
-**Status:** Tier 1 complete ✅ — Tier 2 in progress
+**Status:** Tier 1 complete ✅ — Tier 2 in progress; Phase 2 `ApplicationRecord` added (§1.4)
 
 ---
 
@@ -109,6 +109,41 @@ class JDRecord:
 | 1.0 | Seed schema | Initial spec |
 | 1.1 | Split required_skills → 4 fields; add company_stage, culture_signals, application_decision, location, location_workable, location_notes, blocking_constraints; seniority "lead" added; role_type → list[str]; fit_score → 1–10; "AI Platform" domain added | Tier 1 (6 JDs) |
 | 1.2 | Add delivery_motion, leadership_geography, domain_distance; application_decision "want_to_apply" added; "Customer Experience" and "Revenue Technology" domain values added | Tier 2 (4 JDs) |
+| 1.3 | Add `ApplicationRecord` record type (Phase 2 scoring output, §1.4) with `FIT_LABEL`/`APPLICATION_STATUS` enums. `JDRecord` schema **unchanged** — its on-disk envelope stays tagged `1.2` (Option A: not migrated). The `1.3` tag applies to `ApplicationRecord` only. | Phase 2 (Option A) |
+
+---
+
+### 1.4 — ApplicationRecord (Phase 2 scoring output, v1.3)
+
+Personal-assessment / workflow-state layer. Produced by `scoring/scorer.py`
+(one per `JDRecord`), written to `corpus/scored/scored_{ts}.jsonl`. Single-owner
+record — serialises as a **flat** envelope (no extraction/annotation grouping).
+The scorer reads `JDRecord` *extraction* fields only; it never reads or writes
+`JDRecord`'s legacy annotation stub (Option A, `docs/job_radar_PHASE2_PLAN.md`).
+
+```python
+@dataclass
+class ApplicationRecord:
+    job_id: str               # links to JDRecord.id
+    profile_version: str      # candidate_profile.yaml profile_version used
+    scored_at: str            # ISO datetime the score was produced
+    fit_score: int            # 1–10 (Stage 1 structural fit)
+    fit_label: str            # "strong_fit" | "good_fit" | "stretch" |
+                              # "blocked_fit" | "interview_practice" | "income_bridge"
+    fit_label_reason: str     # one sentence, shown in UI
+    requirement_gaps: list[str]
+    blocking_constraints: list[str]
+    priority_score: int       # 1–10 (fit + urgency adjustments)
+    application_status: str   # "new" | "review" | "shortlisted" | "applied" |
+                              # "interviewing" | "offer" | "rejected" | "archived"
+                              # scorer always emits "new"
+    notes: str                # free-form, "" from scorer
+```
+
+`validate_application_record()` mirrors `validate()`: enum checks on
+`fit_label`/`application_status`, 1–10 range on `fit_score`/`priority_score`,
+list-of-str on `requirement_gaps`/`blocking_constraints`, and
+`schema_version == "1.3"`.
 
 ---
 

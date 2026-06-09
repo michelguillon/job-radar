@@ -11,10 +11,13 @@ from pathlib import Path
 import pytest
 
 from models.record import (
+    JDRECORD_SCHEMA_VERSION,
     SCHEMA_VERSION,
+    ApplicationRecord,
     JDRecord,
     SchemaVersionError,
     validate,
+    validate_application_record,
 )
 
 MANUAL_JSONL = (
@@ -31,7 +34,7 @@ def _manual_lines() -> list[str]:
 def _valid_dict() -> dict:
     """A minimal, schema-valid envelope used to build known-bad mutations."""
     return {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": JDRECORD_SCHEMA_VERSION,
         "id": "sha256:pending",
         "source_url": "unknown",
         "source_ats": "manual",
@@ -189,3 +192,72 @@ def test_applied_must_be_bool_not_int():
     d["annotation"]["applied"] = 1
     errors = validate(JDRecord.from_dict(d))
     assert any("applied" in e for e in errors)
+
+
+# --- ApplicationRecord (Phase 2, schema v1.3) ---
+
+
+def _valid_application() -> ApplicationRecord:
+    return ApplicationRecord(
+        job_id="sha256:abc123",
+        profile_version="1.0",
+        scored_at="2026-06-09T12:00:00Z",
+        fit_score=8,
+        fit_label="strong_fit",
+        fit_label_reason="Strong role and seniority match in an adjacent domain.",
+        requirement_gaps=["preferred Salesforce experience"],
+        blocking_constraints=[],
+        priority_score=8,
+        application_status="new",
+        notes="",
+    )
+
+
+def test_application_record_is_v13_not_jdrecord_version():
+    # The version split is the whole point of Option A: JDRecord stays 1.2.
+    assert SCHEMA_VERSION == "1.3"
+    assert JDRECORD_SCHEMA_VERSION == "1.2"
+    assert _valid_application().to_dict()["schema_version"] == "1.3"
+
+
+def test_application_record_round_trips():
+    rec = _valid_application()
+    assert ApplicationRecord.from_jsonl(rec.to_jsonl()) == rec
+
+
+def test_application_record_validates_clean():
+    assert validate_application_record(_valid_application()) == []
+
+
+def test_application_record_wrong_version_raises():
+    d = _valid_application().to_dict()
+    d["schema_version"] = JDRECORD_SCHEMA_VERSION  # a JDRecord must not load as one
+    with pytest.raises(SchemaVersionError):
+        ApplicationRecord.from_dict(d)
+
+
+def test_application_record_missing_field_raises():
+    d = _valid_application().to_dict()
+    del d["fit_label"]
+    with pytest.raises(ValueError):
+        ApplicationRecord.from_dict(d)
+
+
+@pytest.mark.parametrize(
+    "field,value,needle",
+    [
+        ("fit_label", "amazing_fit", "fit_label"),
+        ("application_status", "pending", "application_status"),
+        ("fit_score", 0, "fit_score"),
+        ("fit_score", 11, "fit_score"),
+        ("fit_score", True, "fit_score"),  # bool is not a valid score
+        ("priority_score", 0, "priority_score"),
+        ("requirement_gaps", "not a list", "requirement_gaps"),
+        ("blocking_constraints", [1, 2], "blocking_constraints"),
+    ],
+)
+def test_application_record_known_bad_values_fail(field, value, needle):
+    rec = _valid_application()
+    setattr(rec, field, value)
+    errors = validate_application_record(rec)
+    assert any(needle in e for e in errors), f"expected error on {field}, got {errors}"

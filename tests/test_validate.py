@@ -1,7 +1,7 @@
 """Tests for pipeline.validate and the validate.py CLI loader."""
 
 import validate as cli
-from models.record import SCHEMA_VERSION
+from models.record import JDRECORD_SCHEMA_VERSION
 from pipeline.validate import validate_records
 from tests.factories import base_envelope, make_record
 
@@ -43,5 +43,5 @@ def test_cli_load_lines_treats_bad_lines_as_failures(tmp_path):
 
 
 def test_schema_version_constant_is_current():
-    # guard: the test fixture and the model agree on the locked version
-    assert base_envelope()["schema_version"] == SCHEMA_VERSION
+    # guard: the JDRecord fixture and the model agree on JDRecord's frozen version
+    assert base_envelope()["schema_version"] == JDRECORD_SCHEMA_VERSION

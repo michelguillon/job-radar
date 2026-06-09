@@ -13,7 +13,15 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-SCHEMA_VERSION = "1.2"
+# Current project schema version. Phase 2 (Option A) added ApplicationRecord,
+# so the project version is now 1.3. JDRecord's on-disk envelope is NOT migrated
+# (CLAUDE.md: append-only, never migrate in place) — it stays frozen at the
+# version it was authored under. New record types are versioned at SCHEMA_VERSION.
+SCHEMA_VERSION = "1.3"
+
+# JDRecord serialises/validates against its own frozen version. The existing
+# v1.2 corpus on disk must keep loading and round-tripping unchanged.
+JDRECORD_SCHEMA_VERSION = "1.2"
 
 # --- Allowed values (closed enums from docs/CORPUS_FINDINGS.md §1.1) ---
 
@@ -96,6 +104,33 @@ APPLICATION_DECISION = frozenset(
 LOCATION_WORKABLE = frozenset({"yes", "no", "conditional", "unknown"})
 DOMAIN_DISTANCE = frozenset({"low", "medium", "high", "not_assessed"})
 
+# --- ApplicationRecord enums (Phase 2, schema v1.3) ---
+# Stage-3 opportunity classification (scoring/scorer.py, job_radar_SPEC §6.2).
+FIT_LABEL = frozenset(
+    {
+        "strong_fit",
+        "good_fit",
+        "stretch",
+        "blocked_fit",
+        "interview_practice",
+        "income_bridge",
+    }
+)
+# Application lifecycle (Phase 3 tracker, job_radar_SPEC §7.2). The scorer
+# always emits "new"; later states are set by the tracker.
+APPLICATION_STATUS = frozenset(
+    {
+        "new",
+        "review",
+        "shortlisted",
+        "applied",
+        "interviewing",
+        "offer",
+        "rejected",
+        "archived",
+    }
+)
+
 ROLE_TYPE_MAX = 3
 
 # Field groupings used for envelope (de)serialisation.
@@ -133,7 +168,7 @@ _ANNOTATION_FIELDS = (
 
 
 class SchemaVersionError(ValueError):
-    """Raised when a record's schema_version does not match SCHEMA_VERSION."""
+    """Raised when a record's schema_version does not match the expected one."""
 
 
 @dataclass
@@ -184,7 +219,7 @@ class JDRecord:
     def to_dict(self) -> dict:
         """Return the nested JSONL envelope (docs/SPEC_JD_REFINERY.md §4.2)."""
         return {
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": JDRECORD_SCHEMA_VERSION,
             "id": self.id,
             "source_url": self.source_url,
             "source_ats": self.source_ats,
@@ -204,9 +239,9 @@ class JDRecord:
     @classmethod
     def from_dict(cls, d: dict) -> "JDRecord":
         version = d.get("schema_version")
-        if version != SCHEMA_VERSION:
+        if version != JDRECORD_SCHEMA_VERSION:
             raise SchemaVersionError(
-                f"schema_version {version!r} does not match {SCHEMA_VERSION!r}"
+                f"schema_version {version!r} does not match {JDRECORD_SCHEMA_VERSION!r}"
             )
         try:
             extraction = d["extraction"]
@@ -312,5 +347,99 @@ def validate(record: JDRecord) -> list[str]:
     for name in ("application_decision_notes", "location_notes", "notes"):
         if not isinstance(getattr(record, name), str):
             errors.append(f"{name}: must be a string")
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# ApplicationRecord — Phase 2 scoring output (schema v1.3, Option A).
+#
+# Personal-assessment / workflow-state layer (job_radar_SPEC §3.3, §4.2).
+# Produced by scoring/scorer.py, one per JDRecord, written to corpus/scored/.
+# The scorer reads JDRecord *extraction* fields only — never JDRecord's legacy
+# annotation stub, and never writes back to it (PHASE2_PLAN locked decision).
+#
+# This record is single-owner, so it serialises as a flat envelope (no
+# extraction/annotation grouping like JDRecord).
+# ---------------------------------------------------------------------------
+
+_APPLICATION_FIELDS = (
+    "job_id",
+    "profile_version",
+    "scored_at",
+    "fit_score",
+    "fit_label",
+    "fit_label_reason",
+    "requirement_gaps",
+    "blocking_constraints",
+    "priority_score",
+    "application_status",
+    "notes",
+)
+
+
+@dataclass
+class ApplicationRecord:
+    """Personal assessment + workflow state for one scored opportunity."""
+
+    job_id: str               # links to JDRecord.id
+    profile_version: str      # candidate_profile.yaml profile_version used
+    scored_at: str            # ISO datetime the score was produced
+    fit_score: int            # 1–10 (Stage 1, structural fit)
+    fit_label: str            # FIT_LABEL (Stage 3 classification)
+    fit_label_reason: str     # one sentence, shown in UI
+    requirement_gaps: list[str]
+    blocking_constraints: list[str]
+    priority_score: int       # 1–10 (fit + urgency adjustments)
+    application_status: str   # APPLICATION_STATUS; scorer always emits "new"
+    notes: str                # free-form, "" from scorer
+
+    def to_dict(self) -> dict:
+        """Return the flat JSONL envelope (schema_version + all fields)."""
+        return {
+            "schema_version": SCHEMA_VERSION,
+            **{f: getattr(self, f) for f in _APPLICATION_FIELDS},
+        }
+
+    def to_jsonl(self) -> str:
+        """Serialise to a single JSONL line (no trailing newline)."""
+        return json.dumps(self.to_dict(), ensure_ascii=False)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ApplicationRecord":
+        version = d.get("schema_version")
+        if version != SCHEMA_VERSION:
+            raise SchemaVersionError(
+                f"schema_version {version!r} does not match {SCHEMA_VERSION!r}"
+            )
+        try:
+            return cls(**{f: d[f] for f in _APPLICATION_FIELDS})
+        except KeyError as exc:
+            raise ValueError(f"missing required field: {exc.args[0]}") from exc
+
+    @classmethod
+    def from_jsonl(cls, line: str) -> "ApplicationRecord":
+        """Parse one JSONL line. Raises SchemaVersionError on version mismatch."""
+        return cls.from_dict(json.loads(line))
+
+
+def _check_int_range(errors: list[str], name: str, value, lo: int, hi: int) -> None:
+    if not isinstance(value, int) or isinstance(value, bool) or not (lo <= value <= hi):
+        errors.append(f"{name}: must be an integer {lo}-{hi}")
+
+
+def validate_application_record(record: ApplicationRecord) -> list[str]:
+    """Return a list of validation error strings; empty list means valid."""
+    errors: list[str] = []
+
+    for name in ("job_id", "profile_version", "scored_at", "fit_label_reason", "notes"):
+        if not isinstance(getattr(record, name), str):
+            errors.append(f"{name}: must be a string")
+    _check_int_range(errors, "fit_score", record.fit_score, 1, 10)
+    _check_int_range(errors, "priority_score", record.priority_score, 1, 10)
+    _check_enum(errors, "fit_label", record.fit_label, FIT_LABEL)
+    _check_enum(errors, "application_status", record.application_status, APPLICATION_STATUS)
+    _check_str_list(errors, "requirement_gaps", record.requirement_gaps)
+    _check_str_list(errors, "blocking_constraints", record.blocking_constraints)
 
     return errors
