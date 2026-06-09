@@ -44,7 +44,7 @@ bump `SCHEMA_VERSION`.
 
 | Phase | Status |
 |---|---|
-| 1 — Corpus Engine | Steps 0–5 complete (69 tests). Steps 6–9 pending. |
+| 1 — Corpus Engine | Steps 0–6 complete (73 tests). Steps 7–9 pending. |
 | 2 — Scoring Engine | Not started |
 | 3 — Job Tracker | Not started |
 | 4 — Discovery Layer | Not started |
@@ -63,8 +63,8 @@ bump `SCHEMA_VERSION`.
 | 3 — Greenhouse | ✅ complete | collectors/base.py + greenhouse.py + collect.py. Backfill done — 10 unique hashes, 0 pending. |
 | 4 — Lever + Ashby | ✅ complete | lever.py + ashby.py registered. Live: Mistral 170, Perplexity 71. |
 | 5 — VC boards | ✅ complete | All boards JS-rendered (requires_js) — skeleton skips all; scraping deferred to Phase 4 |
-| 6 — Tier 2 tooling | ⏳ next | Interactive review CLI; resumable checkpoint |
-| 7 — Batch API labelling | ❌ pending | |
+| 6 — Tier 2 tooling | ✅ complete | tier2_review.py — a/e/s loop, resumable via corpus/tier2_progress.json. Extraction is a placeholder (Step 7 replaces). |
+| 7 — Batch API labelling | ⏳ next | Replaces tier2_review's extract_placeholder; pipeline/label.py + label.py |
 | 8 — Validation + stats | ❌ pending | stats.py needs --export-index for Phase 5 |
 | 9 — Export | ❌ pending | |
 

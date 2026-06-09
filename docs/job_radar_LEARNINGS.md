@@ -420,5 +420,34 @@ pipeline.
 
 ---
 
+### Learning 11 — Make interactive CLIs testable by injecting IO and side effects
+
+#### Learning
+
+`tier2_review.py` is an interactive accept/edit/skip loop, normally driven by a
+human at a TTY. The review loop takes `input_fn`, `output_fn` and `extract` as
+parameters (defaulting to `input`, `print`, and the placeholder extractor). The
+test suite drives the whole flow — including field-by-field edit mode and
+checkpoint/resume — with a scripted input iterator and a no-op output, no TTY
+or mocking of builtins required.
+
+#### Surprise
+
+The same seam that makes the loop testable (injecting `extract`) is exactly the
+seam Step 7 needs to swap the placeholder for the real Claude Batch extractor.
+The testability boundary and the extension boundary turned out to be the same
+line.
+
+#### Reusable Pattern
+
+For any interactive or side-effecting CLI, pass IO (`input`/`print`) and the
+external dependency (here, extraction) as injectable parameters with sensible
+defaults. Tests supply scripted fakes; production uses the defaults. A scripted
+input iterator that raises `StopIteration` if over-consumed also asserts "no
+unexpected prompt" for free — e.g. the resume test proves already-reviewed
+records are never re-prompted.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*
