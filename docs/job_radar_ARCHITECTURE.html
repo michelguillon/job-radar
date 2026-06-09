@@ -160,16 +160,16 @@ td:first-child { font-family: 'Courier New', monospace; font-size: 12px; white-s
   <h3>System facts</h3>
   <table>
     <tr><th>Dimension</th><th>Value</th></tr>
-    <tr><td>Collection sources</td><td>Greenhouse · Lever · Ashby (public APIs, no auth) · 8 VC portfolio boards · manual drop folder</td></tr>
-    <tr><td>Extraction schema</td><td>15 fields · v1.2 · validated on 10 real JDs before any automation · Claude Batch API labelling</td></tr>
+    <tr><td>Collection sources</td><td>Greenhouse · Lever · Ashby (public APIs, no auth) · VC boards (JS-rendered, deferred to Phase 4) · manual drop folder</td></tr>
+    <tr><td>Extraction schema</td><td>17 extraction fields · v1.2 · validated on 10 real JDs before any automation · Claude Batch API labelling · prompt generated from executable schema</td></tr>
     <tr><td>Schema layers</td><td>JDRecord (extraction) · JobPosting (product) · ApplicationRecord (annotation) — never mixed</td></tr>
-    <tr><td>Scoring</td><td>Rule-based · 5 dimensions · separate fit_score and priority_score</td></tr>
+    <tr><td>Scoring</td><td>Rule-based · 3-stage (structural fit → blocking constraints → opportunity classification) · fit_label + search_mode</td></tr>
     <tr><td>Storage</td><td>JSONL files only — no database, no ORM, no migrations</td></tr>
     <tr><td>UI</td><td>Read-only · static index.json · single HTML file · nginx · never writes to JSONL</td></tr>
-    <tr><td>AI provider</td><td>Anthropic claude-sonnet-4-6 · Batch API (50% cost discount) · cost tracked per run</td></tr>
+    <tr><td>AI provider</td><td>Anthropic claude-opus-4-8 · Batch API (50% cost discount) · cost tracked per run · prompt caching active</td></tr>
     <tr><td>Deployment</td><td>Lenovo M720q · Ubuntu Server 24.04 · Docker Compose</td></tr>
     <tr><td>Integration point</td><td>Job Radar shortlist → cv-tailor (one-way handoff)</td></tr>
-    <tr><td>Phase 1 status</td><td>Steps 0–2 complete · 42 tests passing · Steps 3–9 in progress</td></tr>
+    <tr><td>Phase 1 status</td><td>✅ Complete — Steps 0–9 · 95 tests passing · pipeline end-to-end proven · commit efb8d41</td></tr>
   </table>
 </div>
 
@@ -313,8 +313,8 @@ td:first-child { font-family: 'Courier New', monospace; font-size: 12px; white-s
   <h3>Phase status</h3>
   <table>
     <tr><th>Phase</th><th>Status</th><th>Output</th></tr>
-    <tr><td>1 — Corpus Engine</td><td>Steps 0–2 complete · 42 tests passing</td><td>Labelled JD corpus · fine-tuning export</td></tr>
-    <tr><td>2 — Scoring Engine</td><td>Planned</td><td>fit_score · priority_score per role</td></tr>
+    <tr><td>1 — Corpus Engine</td><td>✅ Complete — Steps 0–9 · 95 tests · pipeline end-to-end</td><td>Labelled JD corpus · fine-tuning export</td></tr>
+    <tr><td>2 — Scoring Engine</td><td>Planned</td><td>fit_score · priority_score · fit_label per role</td></tr>
     <tr><td>3 — Job Tracker</td><td>Planned</td><td>Application workflow state</td></tr>
     <tr><td>4 — Discovery Layer</td><td>Planned</td><td>Continuous ingestion · daily digest</td></tr>
     <tr><td>5 — UI</td><td>Planned</td><td>Read-only browse and filter interface</td></tr>
@@ -559,48 +559,55 @@ td:first-child { font-family: 'Courier New', monospace; font-size: 12px; white-s
 
   <div class="decision">
     <strong>2. Three schema layers; never mixed.</strong>
-    <span>JDRecord is what the JD says — objective, Claude-populated, consistent across all labellers. JobPosting is what the product knows — operational state, system-populated. ApplicationRecord is what Michel thinks — subjective, human-only. Conflating extraction with personal judgement contaminates the training corpus: the fit_score Michel assigns to a role is not a signal a model can generalise from. Conflating product state with extraction creates migration debt the first time the product evolves. Three layers with named owners keep each concern clean. This is not a preference; it is a correctness requirement for a labelling pipeline that feeds fine-tuning.</span>
+    <span>JDRecord is what the JD says — objective, Claude-populated, consistent across all labellers. JobPosting is what the product knows — operational state, system-populated. ApplicationRecord is what Michel thinks — subjective, human-only. Conflating extraction with personal judgement contaminates the training corpus. Conflating product state with extraction creates migration debt. Three layers with named owners keep each concern clean. This is not a preference; it is a correctness requirement for a labelling pipeline that feeds fine-tuning.</span>
   </div>
 
   <div class="decision">
-    <strong>3. CLI writes; UI reads.</strong>
-    <span>All state changes — collection, labelling, scoring, tracking — go through CLI scripts. The UI reads a pre-built index file. This is not a convenience; it is a correctness guarantee. A UI that writes directly to JSONL files creates concurrent write risks, bypasses the validation pipeline, and makes the CLI an optional interface rather than the single source of truth. The index file is regenerated by the CLI after each pipeline run. The UI is stateless. These properties are worth the operational cost of a two-step update cycle.</span>
+    <strong>3. Score structural fit, not keyword overlap.</strong>
+    <span>Most job recommendation systems optimise for keyword overlap — count matching skills, rank accordingly. This fails for non-linear career paths. Job Radar evaluates opportunities in three stages: (1) Structural Fit — does the role match career trajectory, seniority, delivery motion, technical depth, and domain? Produces fit_score. (2) Blocking Constraint Assessment — does the role have hard requirements that prevent success regardless of structural fit? Produces requirement_gaps and blocking_constraints. (3) Opportunity Classification — combines stages 1 and 2 into a plain-English fit_label: strong_fit, good_fit, stretch, blocked_fit, interview_practice, income_bridge. The objective is to identify roles that align with the candidate's trajectory, not to maximise keyword matches.</span>
   </div>
 
   <div class="decision">
-    <strong>4. Rule-based scoring before fine-tuning.</strong>
-    <span>200 labelled records is insufficient for meaningful fine-tuning of a domain-specific scorer. A well-designed rule-based scorer on a structured 15-field schema produces comparable results immediately, without GPU, without training cost, and without the data requirements of fine-tuning. Fine-tuning adds value when: the corpus exceeds 500 records, the rule-based scorer's systematic failure modes are documented, and the eval set provides an uncontaminated comparison baseline. None of those conditions hold at Phase 2. Deferring fine-tuning is not a concession — it is the correct sequencing.</span>
+    <strong>4. Search mode governs filtering, not scoring.</strong>
+    <span>Job searching is not a static optimisation problem. In month 1, structural fit is the primary filter — you want career-defining moves. In month 4, low-fit roles become worth pursuing for interview practice. In month 6 under time pressure, structural misalignment matters less than income continuity. The scorer never changes — only the filter threshold does. search_mode in candidate_profile.yaml controls this: selective (low fit filtered), active (low fit labelled and surfaced separately), broad (all roles shown, fit is context not a gate). Low-fit roles are never silently discarded — they are labelled honestly and surfaced at the appropriate threshold.</span>
   </div>
 
   <div class="decision">
-    <strong>5. Fit score and priority score are separate dimensions.</strong>
-    <span>Fit measures match quality — how well a role aligns with skills, seniority, domain, and working style. Priority measures urgency — deadline, competition, company stage, strategic importance. A role can be high fit but low priority (a large enterprise always hiring for this role) or lower fit but high priority (a fast-growing AI startup closing a round with a short window). A single score conflates these. Sorting a shortlist by fit alone produces a list ordered by match quality, not by where to invest time. Sorting by priority_score × fit_score produces an actionable queue.</span>
+    <strong>5. CLI writes; UI reads.</strong>
+    <span>All state changes — collection, labelling, scoring, tracking — go through CLI scripts. The UI reads a pre-built index file. This is not a convenience; it is a correctness guarantee. A UI that writes directly to JSONL files creates concurrent write risks, bypasses the validation pipeline, and makes the CLI an optional interface rather than the single source of truth. The index file is regenerated by the CLI after each pipeline run. The UI is stateless.</span>
   </div>
 
   <div class="decision">
-    <strong>6. Batch API as default for all labelling.</strong>
-    <span>200 JDs at ~2,000 tokens each costs roughly half as much via the Batch API as synchronous. The pipeline is not latency-sensitive — a labelling job running overnight is fine. There is no justification for paying double on an offline processing pipeline. Cost is tracked per run, logged to corpus/stats.json. This cost baseline is the input to the fine-tuning budget decision in Phase 6. A pipeline that doesn't track its own costs cannot make a principled argument about when to upgrade from rule-based to fine-tuned scoring.</span>
+    <strong>6. Batch API as default for offline processing.</strong>
+    <span>200 JDs at ~2,000 tokens each costs roughly half as much via the Batch API as synchronous. The pipeline is not latency-sensitive. Cost is tracked per run, logged to corpus/stats.json. This cost baseline is the input to the fine-tuning budget decision in Phase 6. A pipeline that doesn't track its own costs cannot make a principled argument about when to upgrade from rule-based to fine-tuned scoring. Live verified: 5 records labelled at $0.055 with prompt caching active — schema+examples preamble paid once across the batch.</span>
   </div>
 
   <div class="decision">
-    <strong>7. JSONL files as the universal format.</strong>
-    <span>The pipeline produces JSONL at every stage because that is what fine-tuning pipelines consume. Adding a database would require an export step to return to JSONL for Phase 6 — a round-trip that adds complexity without adding capability. JSONL is also inspectable with standard Unix tools, appendable without migrations, and versionable with schema_version on every record. The schema version is not metadata; it is a filter. Downstream consumers select records by schema_version. Append-only with a version field is a lightweight alternative to database migrations that carries the same correctness guarantees for this access pattern.</span>
+    <strong>7. Generate the model prompt from the executable schema, not a copy.</strong>
+    <span>The labelling prompt's closed-vocabulary section is generated directly from the models.record enums — add a value to the schema and the prompt updates itself. This eliminates the third copy of the schema (after models/record.py and CORPUS_FINDINGS §1.1) that would otherwise silently rot. The model happily emits enum values the code then rejects if the prompt and schema diverge. Deriving the prompt from the code removes the copy entirely.</span>
   </div>
 
   <div class="decision">
-    <strong>8. Job Radar and cv-tailor are separate products with a single integration point.</strong>
-    <span>Job Radar answers which opportunities are worth pursuing. cv-tailor answers how to pursue them. These are distinct problems with distinct architectures. The integration is a one-way handoff: a shortlisted role from Job Radar becomes the JD input to cv-tailor. cv-tailor does not feed back into Job Radar. A deeper integration — Job Radar providing pre-computed JD analysis to cv-tailor's Phase 0 — is possible but deferred until both systems are stable and the actual delta between their extraction outputs is known. Designing the interface before either system's data model is settled produces a contract that immediately needs changing. The integration point will be designed when both systems are live.</span>
+    <strong>8. JSONL files as the universal format.</strong>
+    <span>The pipeline produces JSONL at every stage because that is what fine-tuning pipelines consume. Adding a database would require an export step to return to JSONL for Phase 6 — a round-trip that adds complexity without adding capability. JSONL is inspectable with standard Unix tools, appendable without migrations, and versionable with schema_version on every record. Append-only with a version field is a lightweight alternative to database migrations for this access pattern.</span>
+  </div>
+
+  <div class="decision">
+    <strong>9. Job Radar and cv-tailor are separate products with a single integration point.</strong>
+    <span>Job Radar answers which opportunities are worth pursuing. cv-tailor answers how to pursue them. These are distinct problems with distinct architectures. The integration is a one-way handoff: a shortlisted role from Job Radar becomes the JD input to cv-tailor. cv-tailor does not feed back into Job Radar. Job Radar is not a networking or contact CRM — that scope is explicitly excluded.</span>
   </div>
 
   <h3>What this system demonstrates</h3>
   <table>
     <tr><th>Capability</th><th>Where it shows up</th></tr>
-    <tr><td>Empirical schema design</td><td>10 schema changes from 10 real JDs before automation · formalisation gate · freeze point</td></tr>
+    <tr><td>Empirical schema design</td><td>10 schema changes from 10 real JDs · formalisation gate · freeze point</td></tr>
     <tr><td>Weak supervision pipeline</td><td>Claude as labeller · 4-tier validation model · eval set construction with contamination prevention</td></tr>
-    <tr><td>Three-layer data architecture</td><td>JDRecord / JobPosting / ApplicationRecord · strict ownership boundaries · no mixing</td></tr>
-    <tr><td>Cost-aware AI pipeline</td><td>Batch API default · cost per run tracked · fine-tuning deferred on principled grounds</td></tr>
+    <tr><td>Three-layer data architecture</td><td>JDRecord / JobPosting / ApplicationRecord · strict ownership boundaries</td></tr>
+    <tr><td>Structural fit scoring</td><td>3-stage model · fit_label taxonomy · search_mode for dynamic filtering</td></tr>
+    <tr><td>Cost-aware AI pipeline</td><td>Batch API · prompt caching · cost per run tracked · fine-tuning deferred on principled grounds</td></tr>
+    <tr><td>Prompt generation from schema</td><td>Closed-vocabulary prompt derived from executable enums · no schema copy drift</td></tr>
     <tr><td>Incremental value delivery</td><td>6 phases · each independently useful · Phase 1 complete before Phase 2 starts</td></tr>
-    <tr><td>Multi-source data engineering</td><td>3 public ATS APIs + VC board scraper + manual · SHA-256 dedup · boilerplate normalisation</td></tr>
+    <tr><td>Multi-source data engineering</td><td>3 public ATS APIs · SHA-256 dedup · boilerplate normalisation · VC board deferral decision</td></tr>
     <tr><td>System boundary design</td><td>CLI writes / UI reads · Job Radar vs cv-tailor ownership · one-way integration point</td></tr>
   </table>
 </div>

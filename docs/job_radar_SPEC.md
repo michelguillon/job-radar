@@ -1,4 +1,4 @@
-# SPEC_JOB_RADAR.md — job-radar
+# job_radar_SPEC.md — job-radar
 ## Architecture Specification
 
 > **This document reflects the original design intent.**
@@ -6,11 +6,11 @@
 
 **Project:** 4 — Job Radar
 **Repository:** job-radar (renamed from jd-refinery)
-**Status:** Phase 1 in progress — Steps 0–2 complete, Step 3 next
+**Status:** Phase 1 complete — Steps 0–9, 95 tests, pipeline end-to-end ✅
 **Last updated:** 2026-06-09
 **Deployment target:** M720q home server, Ubuntu Server 24.04, Docker
 **Schema version:** 1.2 (locked for Phase 1)
-**Predecessor:** jd-refinery (Steps 0–2 complete, 42 tests passing)
+**Predecessor:** jd-refinery (renamed; Phase 1 complete, 95 tests, commit efb8d41)
 
 ---
 
@@ -21,6 +21,7 @@ assesses, prioritises, and tracks job opportunities. It answers one
 question: **which opportunities are worth pursuing?**
 
 It does not generate application materials. That is cv-tailor's job.
+It does not manage networking contacts or relationships. That is a CRM's job.
 
 ```
 Job Radar owns:        cv-tailor owns:
@@ -46,7 +47,7 @@ cv-tailor workflow
 
 | Phase | Name | Status | Primary output |
 |---|---|---|---|
-| 1 | Corpus Engine | In progress (Steps 0–2 done) | Labelled JD corpus |
+| 1 | Corpus Engine | ✅ Complete — 95 tests, pipeline proven | Labelled JD corpus |
 | 2 | Scoring Engine | Not started | Fit + priority scores per role |
 | 3 | Job Tracker | Not started | Application workflow state |
 | 4 | Discovery Layer | Not started | Continuous role ingestion |
@@ -194,15 +195,26 @@ class ApplicationRecord:
     """Personal assessment and workflow state. Human-only. Never Claude."""
     job_id: str                  # matches JobPosting.id
     fit_score: int | None        # 1–10
-    priority_score: int | None   # 1–10, separate from fit (see §5.2)
+    priority_score: int | None   # 1–10, separate from fit (see §6.3)
+    fit_label: str               # "strong_fit"|"good_fit"|"stretch"|
+                                 # "blocked_fit"|"interview_practice"|
+                                 # "income_bridge"
+    fit_label_reason: str        # one sentence plain-English interpretation
     fit_reasons: str             # free text, written for high-priority roles
+    requirement_gaps: list[str]  # capabilities that may reduce competitiveness
+                                 # but do not prevent application
     domain_distance: str         # "low"|"medium"|"high"|"not_assessed"
     location_workable: str       # "yes"|"no"|"conditional"|"unknown"
     location_notes: str
-    blocking_constraints: list[str]
+    blocking_constraints: list[str]  # hard stops that likely prevent success
     application_status: str      # "new"|"review"|"shortlisted"|"applied"|
                                  # "interviewing"|"rejected"|"offer"|"archived"
     application_date: str | None
+    outcome: str | None          # None until terminal state reached
+                                 # "rejected_pre_screen"|"rejected_post_screen"|
+                                 # "rejected_interview"|"rejected_final"|
+                                 # "offer_declined"|"offer_accepted"|"withdrew"
+    outcome_notes: str
     notes: str
 ```
 
@@ -234,9 +246,9 @@ export.py     → corpus/finetune_export/export_{timestamp}.jsonl
               → corpus/stats.json
 ```
 
-### 5.2 — What is already built (Steps 0–2)
+### 5.2 — Phase 1 complete (Steps 0–9)
 
-Steps 0–2 are complete. 42 tests pass. Do not re-implement.
+Steps 0–9 complete. 95 tests pass. Phase 1 pipeline proven end-to-end. Do not re-implement.
 
 - **Step 0** — Project scaffold, directory structure, Docker, YAML seed
   files, 10 manual JSONL records
@@ -259,7 +271,7 @@ current one passes its verification check.
 
 ---
 
-#### Step 3 — Greenhouse collector
+#### Step 3 — Greenhouse collector ✅ Complete
 
 Build `collectors/greenhouse.py` and `collect.py` CLI.
 
@@ -273,6 +285,15 @@ def fetch_company(slug: str, company_name: str) -> list[JDRecord]:
     # tier = 4 default
 ```
 
+**Implementation note — Greenhouse HTML entity encoding:**
+Greenhouse's `?content=true` response returns HTML entity-escaped content
+(`&lt;p&gt;` etc). Run `html.unescape()` on the raw response body before
+storing `raw_html`, otherwise BeautifulSoup strips no tags in the clean
+step. The bug is invisible at collection time — the fetch succeeds, the
+JSONL looks fine — and only surfaces in cleaned output downstream.
+
+**Verified live:** Anthropic (377 jobs), Figma (167 jobs) confirmed.
+
 **CLI:**
 ```bash
 python collect.py --source greenhouse
@@ -284,9 +305,9 @@ python collect.py --dry-run
 Output: appends to `corpus/raw/raw_{YYYYMMDD}.jsonl`
 
 **Claude Code prompt:**
-> Steps 0–2 are complete. Continue from Step 3.
+> Phase 1 is complete (Steps 0–9, 95 tests). Continue from Phase 2.
 > Build collectors/greenhouse.py and collect.py CLI as defined in
-> SPEC_JOB_RADAR.md §5.3 Step 3. Read slugs from company_seeds.yaml.
+> job_radar_SPEC.md §5.3 Step 3. Read slugs from company_seeds.yaml.
 > Exponential backoff on 429. Log and skip on 404. Leave all extraction
 > fields as None — collector does not extract. Tests with mocked HTTP
 > responses using pytest-httpx or responses library.
@@ -301,12 +322,20 @@ complete — no `sha256:pending` remaining in manual records.
 
 ---
 
-#### Step 4 — Lever and Ashby collectors
+#### Step 4 — Lever and Ashby collectors ✅ Complete
 
 Same pattern as Step 3.
 
 **Lever:** `GET https://api.lever.co/v0/postings/{slug}?mode=json`
 **Ashby:** `GET https://api.ashbyhq.com/posting-api/job-board/{slug}`
+
+**Implementation note — Lever response shape:**
+Lever returns a bare JSON array (not `{"jobs": [...]}` like Greenhouse/Ashby).
+Lever also splits a JD across `description` + `lists` + `additional` fields —
+the collector reassembles them into one `raw_html` string. Handle this in the
+per-source field mapping, not in `collectors/base.py`.
+
+**Verified live:** Mistral (170 jobs), Perplexity (71 jobs) confirmed.
 
 **Claude Code prompt:**
 > Build collectors/lever.py and collectors/ashby.py following the same
@@ -318,29 +347,65 @@ Same pattern as Step 3.
 
 ---
 
-#### Step 5 — VC board scraper
+#### Step 5 — VC board scraper ✅ Complete (skeleton — all boards requires_js)
 
 Build `collectors/vc_boards.py`.
 
-**Constraints:** BeautifulSoup only — no Playwright, no Selenium.
-If a board requires JS, mark `status: requires_js` in `vc_boards.yaml`
-and skip. Per-board selector config in YAML, not hardcoded.
+**Finding from Phase 1 investigation:** All major VC portfolio job
+boards (Balderton via Consider, Atomico via Getro, Index Ventures via
+Vue + Elasticsearch) use JavaScript-rendered frontends with no
+accessible public APIs. BeautifulSoup scraping is not viable.
 
-> **Before building:** Inspect 2 boards manually and populate their
-> selectors in vc_boards.yaml. Do not guess selectors.
+**Step 5 scope is therefore minimal:**
+- Load `vc_boards.yaml`
+- Log all boards as skipped with platform and reason
+- Exit cleanly with a summary
+- Add TODO comment for future Playwright or paid API approach
+
+```python
+# TODO: VC board scraping requires Playwright or a paid aggregator API
+# (e.g. Apify VC portfolio scraper) — deferred to Phase 4 Discovery Layer.
+# All current boards use JS-rendered frontends (Consider, Getro, Vue+ES)
+# with no accessible public APIs.
+```
+
+**`vc_boards.yaml` format:**
+```yaml
+boards:
+  - name: Balderton
+    url: https://careers.balderton.com/jobs
+    platform: consider
+    status: requires_js
+    notes: "React SPA via Consider platform. No public API found."
+
+  - name: Atomico
+    url: https://careers.atomico.com/jobs
+    platform: getro
+    status: requires_js
+    notes: "React SPA via Getro platform. API is authenticated, not public."
+
+  - name: Index Ventures
+    url: https://www.indexventures.com/startup-jobs/1
+    platform: vue_elasticsearch
+    status: requires_js
+    notes: "Vue.js SPA. ES credentials in source but read-only, no search perms."
+```
 
 **Claude Code prompt:**
-> Build collectors/vc_boards.py with per-board config from vc_boards.yaml.
-> BeautifulSoup scraping, selector-driven. Extend collect.py with
-> --source vc_boards. Skip boards with status: requires_js gracefully.
-> Log record count per board.
+> Build collectors/vc_boards.py as defined in job_radar_SPEC.md Step 5.
+> Load vc_boards.yaml, log all boards marked requires_js as skipped with
+> platform and reason, exit cleanly. Add the TODO comment as specified.
+> Extend collect.py with --source vc_boards. Add a learning entry to
+> docs/job_radar_LEARNINGS.md documenting why VC board scraping was
+> deferred (see Learning 4 already present — append a build note
+> confirming the finding was validated during Step 5).
 
-*Verification:* Two boards scraped. requires_js boards skipped without
-error.
+*Verification:* `python collect.py --source vc_boards` runs without
+error, logs all boards as skipped with reasons, exits cleanly.
 
 ---
 
-#### Step 6 — Tier 2 review tooling
+#### Step 6 — Tier 2 review tooling ✅ Complete
 
 Build `tier2_review.py` CLI for the interactive deep-review workflow.
 
@@ -360,7 +425,7 @@ For each unlabelled record:
 Resumable via `corpus/tier2_progress.json` checkpoint.
 
 **Claude Code prompt:**
-> Build tier2_review.py as defined in SPEC_JOB_RADAR.md §5.3 Step 6.
+> Build tier2_review.py as defined in job_radar_SPEC.md §5.3 Step 6.
 > Use extraction prompt placeholder (Step 7 replaces it). Review loop
 > must be interruptible and resumable via checkpoint file.
 
@@ -369,7 +434,7 @@ Checkpoint written. Resuming skips already-reviewed records.
 
 ---
 
-#### Step 7 — Claude Batch API labelling
+#### Step 7 — Claude Batch API labelling ✅ Complete
 
 Build `pipeline/label.py` and `label.py` CLI.
 
@@ -405,7 +470,7 @@ Cost entry written to stats.json.
 
 ---
 
-#### Step 8 — Schema validation + stats
+#### Step 8 — Schema validation + stats ✅ Complete
 
 Build `pipeline/validate.py` and `stats.py`.
 
@@ -435,26 +500,39 @@ plausible summary. --export-index writes valid JSON array.
 
 #### Step 9 — Fine-tuning export
 
-Build `export.py`.
+Build `export.py`. ✅ Complete (Phase 1)
 
 **Format:**
 ```json
 {"prompt": "<full JD text>", "completion": "<extraction JSON>"}
 ```
 
-**Modes:**
-```bash
-python export.py --set eval     # Tier 1+2+3 only
-python export.py --set train    # all tiers
-python export.py --set full     # everything
+**Export set definitions:**
+
+```
+--set eval    Tier 1+2+3 only, validated records only.
+              Human-reviewed ground truth. Held-out evaluation set.
+              Never used for training. Excludes Tier 4 — evaluating a
+              model against its own automated labels is not a real test.
+
+--set train   All tiers (1–4), validated records only.
+              Full fine-tuning corpus. Excludes schema validation
+              failures and wrong schema_version. True training input.
+
+--set full    All tiers including schema validation failures.
+              No failure filter, no tier filter. True superset of train.
+              For inspection and debugging only — never pass to training.
 ```
 
-Exclude: schema validation failures, wrong schema_version. Tier 4
-excluded from eval set.
+The key distinction: `train` ≈ `full` until Tier 4 records accumulate
+at scale and the failure rate becomes non-trivial. The separation exists
+by design — `full` is always the inspection tool, `train` is always the
+clean corpus.
 
 **Claude Code prompt:**
-> Build export.py as defined in Step 9. Three --set modes. All
-> exclusion filters. Print export count and cost per tier.
+> Build export.py as defined in Step 9. Three --set modes with the
+> definitions above. All exclusion filters. Print export count and
+> cost per tier.
 
 *Verification:* eval export excludes Tier 4. Every record has prompt
 and completion fields. Completion is valid JSON.
@@ -523,7 +601,7 @@ Human labels every field. Claude structures output. Used to discover
 and iterate the schema. Contamination rule: Claude extraction runs
 only after human labels are saved.
 
-**Tier 2 — Deep review (15 JDs — 10 complete, 5 remaining)**
+**Tier 2 — Deep review (15 JDs — 10 complete, 5 remaining — resume in Phase 2 prep)**
 Claude extracts first. Human does field-by-field review. Schema
 stress-tested on harder cases.
 
@@ -563,17 +641,162 @@ Claude extracts. Schema validation in code. No per-JD human review.
 ### 6.1 — Purpose
 
 Consumes `JDRecord` extraction fields and a candidate profile to
-produce fit and priority scores per role. Initial implementation is
-rule-based — no fine-tuning required.
+produce fit scores, requirement gap assessments, fit labels, and
+priority scores per role. Initial implementation is rule-based —
+no fine-tuning required.
 
-### 6.2 — Candidate profile
+### 6.2 — Design principle: structural fit before requirement matching
+
+Most job recommendation systems optimise for keyword overlap. They
+compare a CV against a JD, count matching skills or titles, and rank
+accordingly. This works for linear career paths. It performs poorly
+for candidates whose careers span multiple disciplines, where the
+strongest opportunities are defined by patterns of experience rather
+than shared keywords.
+
+Job Radar is designed around a different assumption:
+
+> A good opportunity is one that fits the candidate's trajectory,
+> not simply their vocabulary.
+
+The scorer evaluates opportunities in three stages:
+
+---
+
+**Stage 1 — Structural Fit Assessment**
+
+Measures whether the role aligns with the candidate's broader career
+pattern. Produces `fit_score: int` (1–10).
+
+Structural fit considers:
+- role alignment (`role_type`)
+- seniority alignment (`seniority`)
+- delivery motion alignment (`delivery_motion`)
+- technical depth alignment (`technical_depth`)
+- domain alignment (`domain`)
+- leadership pattern alignment
+
+The fit score deliberately ignores individual requirements and focuses
+on overall alignment. A role may have excellent structural fit even if
+one or more requirements are currently unmet.
+
+---
+
+**Stage 2 — Blocking Constraint Assessment**
+
+Identifies specific requirements that may prevent success even when
+structural fit is high. Produces `requirement_gaps: list[str]` and
+`blocking_constraints: list[str]`.
+
+```
+requirement_gap
+    A missing capability that may reduce competitiveness.
+    Example: "Preferred Salesforce experience"
+
+blocking_constraint
+    A requirement that is likely to prevent success regardless
+    of structural fit.
+    Examples: "Native German speaker required"
+              "M&A transaction leadership required"
+              "Active security clearance required"
+```
+
+---
+
+**Stage 3 — Opportunity Classification**
+
+The user-facing output is not a raw score. It is an interpretation.
+Combines structural fit and requirement assessment to produce
+`fit_label: str` and `fit_label_reason: str`.
+
+```python
+fit_label: str
+# "strong_fit"         — high structural fit, no blocking constraints
+# "good_fit"           — solid structural fit, minor gaps
+# "stretch"            — moderate structural fit, meaningful gaps
+# "blocked_fit"        — high structural fit, blocking constraint present;
+#                        structurally excellent but not viable currently
+# "interview_practice" — low structural fit, no blocking constraints;
+#                        worth pursuing for experience, not a career move
+# "income_bridge"      — low structural fit; apply under time pressure only
+
+fit_label_reason: str  # one sentence shown in UI
+# e.g. "Strong role and seniority match, adjacent domain — high conviction."
+# e.g. "Strong structural fit but lacks required M&A experience."
+# e.g. "Moderate structural fit with multiple domain gaps — useful practice."
+# e.g. "Weak structural fit — good interview experience, unlikely career move."
+```
+
+---
+
+**Core principle:**
+
+> Identify opportunities that align with the candidate's career
+> trajectory, explain any meaningful gaps, and present those
+> opportunities in a way that supports good decision making.
+
+Keyword matching is useful evidence, but it is not the objective.
+Keyword overlap is a byproduct of structural alignment, not the
+signal itself.
+
+---
+
+### 6.3 — Search mode: dynamic fit filtering
+
+The scoring system remains constant. What changes over time is how
+opportunities are filtered and presented, controlled by `search_mode`
+in `candidate_profile.yaml`.
+
+```python
+search_mode: str
+# "selective" — high-conviction opportunities only; low structural fit
+#               roles filtered out
+# "active"    — stretch opportunities visible but clearly labelled and
+#               separated from core targets
+# "broad"     — all opportunities shown; structural fit and requirement
+#               gaps are context, not filters; use under time pressure
+```
+
+**Why this exists:** Job searching is not a static optimisation
+problem. In month 1, structural fit is the primary filter — you are
+looking for career-defining moves. In month 4, low structural fit
+roles become worth pursuing for interview practice. In month 6, with
+urgency rising, structural misalignment matters less than income
+continuity. The scorer never changes — only the filter threshold does.
+
+**Filter behaviour by mode:**
+
+| fit_label | selective | active | broad |
+|---|---|---|---|
+| strong_fit | ✅ shown | ✅ shown | ✅ shown |
+| good_fit | ✅ shown | ✅ shown | ✅ shown |
+| stretch | ✅ shown | ✅ shown | ✅ shown |
+| blocked_fit | ✅ shown | ✅ shown | ✅ shown |
+| interview_practice | ❌ filtered | ⚠️ separate section | ✅ shown |
+| income_bridge | ❌ filtered | ❌ filtered | ⚠️ separate section |
+
+Low structural fit roles are never silently discarded — they are
+labelled honestly and surfaced at the appropriate mode threshold.
+
+---
+
+### 6.4 — Candidate profile
 
 A structured YAML file (`candidate_profile.yaml`) defining Michel's
 background against which every JD is scored.
 
+`profile_version` and `last_updated` are required fields from day one.
+The profile is a managed asset — it will evolve as skills, projects,
+and target roles change during the job search. Versioning prevents
+silent drift between what the scorer assumes and what is actually true.
+
 ```yaml
+profile_version: "1.0"
+last_updated: "2026-06-09"
+
 candidate:
   name: Michel Guillon
+  search_mode: selective    # selective | active | broad
   target_roles:
     - Solutions Engineering
     - Solutions Architecture
@@ -619,10 +842,10 @@ candidate:
       - EMEA multi-regional management
 ```
 
-### 6.3 — Scoring dimensions
+### 6.5 — Scoring dimensions
 
-Rule-based scoring across 5 dimensions. Each dimension scores 0–2.
-Total raw score: 0–10. Normalised to fit_score: 1–10.
+Rule-based scoring across 5 structural dimensions. Each scores 0–2.
+Total raw score: 0–10. Normalised to `fit_score`: 1–10.
 
 | Dimension | Weight | Logic |
 |---|---|---|
@@ -630,14 +853,30 @@ Total raw score: 0–10. Normalised to fit_score: 1–10.
 | seniority_match | 2 | JD seniority in target_seniority |
 | technical_depth_match | 2 | JD technical_depth matches candidate profile |
 | domain_match | 2 | JD domain intersects target_domains; domain_strengths bonus |
-| location_match | 2 | JD location + remote_policy vs candidate location rules |
+| location_match | 2 | JD location + remote_policy vs candidate rules |
 
 `priority_score` adds urgency signals on top of fit:
 - `company_stage` (startup/scale-up = higher urgency)
-- `application_decision` history (similar roles applied = calibration)
 - `blocking_constraints` (any = reduce priority)
+- `search_mode` (broad mode elevates lower-fit roles)
 
-### 6.4 — Output
+### 6.6 — ApplicationRecord schema additions for Phase 2
+
+Phase 2 adds two new fields to `ApplicationRecord` not present in
+the Phase 1 stub:
+
+```python
+requirement_gaps: list[str]     # capabilities that may reduce competitiveness
+                                 # but do not prevent application
+fit_label: str                   # see Stage 3 taxonomy above
+fit_label_reason: str            # one sentence plain-English interpretation
+```
+
+`blocking_constraints` already exists in `ApplicationRecord` from
+Phase 1. `requirement_gaps` is the new companion field — softer gaps
+that reduce competitiveness without being disqualifying.
+
+### 6.7 — Output
 
 `ApplicationRecord` is created for every scored role:
 
@@ -646,20 +885,20 @@ corpus/scored/scored_{timestamp}.jsonl
 ```
 
 One `ApplicationRecord` per `JobPosting`. Initial
-`application_status: "new"` for all. Human reviews and updates via
-CLI or UI filter.
+`application_status: "new"` for all.
 
-### 6.5 — Implementation
+### 6.8 — Implementation
 
 New files:
-- `candidate_profile.yaml` — candidate definition
+- `candidate_profile.yaml` — versioned candidate definition
 - `scoring/scorer.py` — rule-based scoring engine
-- `scoring/profile.py` — candidate profile loader
+- `scoring/profile.py` — candidate profile loader and validator
 - `score.py` — CLI entry point
 
 ```bash
 python score.py --input corpus/labelled/validated_*.jsonl
 python score.py --input corpus/labelled/validated_*.jsonl --min-fit 6
+python score.py --input corpus/labelled/validated_*.jsonl --mode active
 ```
 
 ---
@@ -689,12 +928,42 @@ offer / rejected
 archived
 ```
 
-### 7.3 — Implementation
+### 7.3 — Outcome tracking (future capability)
+
+The most valuable long-term signal from the tracker is the gap between
+predicted fit and actual outcome:
+
+```
+predicted fit_score + fit_label
+vs
+actual outcome (rejected / screen / interview / final / offer)
+```
+
+This feedback loop serves multiple purposes:
+- scoring calibration — are high fit_score roles actually progressing?
+- recommendation quality assessment — is structural fit predicting success?
+- future fine-tuning dataset — real outcome labels on scored JDs
+
+Implementation is lightweight initially: `outcome` field added to
+`ApplicationRecord` when status reaches `rejected`, `offer`, or
+`archived`. Full calibration analysis deferred until enough outcomes
+accumulate (target: 20+ completed applications).
+
+```python
+outcome: str | None
+# None until application reaches terminal state
+# "rejected_pre_screen" | "rejected_post_screen" | "rejected_interview" |
+# "rejected_final" | "offer_declined" | "offer_accepted" | "withdrew"
+outcome_notes: str
+```
+
+### 7.4 — Implementation
 
 New CLI:
 ```bash
 python track.py --job-id sha256:abc123 --status applied
 python track.py --job-id sha256:abc123 --status interviewing --notes "First round booked"
+python track.py --job-id sha256:abc123 --outcome rejected_post_screen
 python track.py list --status shortlisted
 python track.py list --min-fit 7 --location-workable yes
 ```
@@ -934,7 +1203,7 @@ Follows `PROJECT_DOCUMENTATION_STANDARD.md`.
 
 | File | Purpose | Status |
 |---|---|---|
-| `docs/SPEC_JOB_RADAR.md` | This file | ✅ |
+| `docs/job_radar_SPEC.md` | This file | ✅ |
 | `docs/CORPUS_FINDINGS.md` | Schema, records, labelling rules | ✅ |
 | `docs/job_radar_README.md` | Landing page | Stub |
 | `docs/job_radar_ARCHITECTURE.html` | Implemented system | Stub |
@@ -944,14 +1213,14 @@ Follows `PROJECT_DOCUMENTATION_STANDARD.md`.
 | `CLAUDE.md` | Build conventions | ✅ |
 
 **Post-build documentation prompt** (run after Phase 1 complete):
-> Read SPEC_JOB_RADAR.md, CORPUS_FINDINGS.md, PROJECT_DOCUMENTATION_STANDARD.md,
-> and all source files. Complete README.md and PROJECT_ARCHITECTURE.md
+> Read job_radar_SPEC.md, CORPUS_FINDINGS.md, PROJECT_DOCUMENTATION_STANDARD.md,
+> and all source files. Complete README.md and job_radar_ARCHITECTURE.html
 > with actual implementation details. Follow arrows-only diagram standard.
-> Do not modify SPEC_JOB_RADAR.md or CORPUS_FINDINGS.md.
+> Do not modify job_radar_SPEC.md or CORPUS_FINDINGS.md.
 
 **Retrospective and learnings prompt** (run after Phase 1 end-to-end verified):
-> Open SPEC_JOB_RADAR.md, CORPUS_FINDINGS.md, job_radar_ARCHITECTURE.html.
-> Help write PROJECT_RETROSPECTIVE.md and PROJECT_LEARNINGS.md following
+> Open job_radar_SPEC.md, CORPUS_FINDINGS.md, job_radar_ARCHITECTURE.html.
+> Help write job_radar_RETROSPECTIVE.md and job_radar_LEARNINGS.md following
 > PROJECT_DOCUMENTATION_STANDARD.md. Work through each section together.
 
 ---
