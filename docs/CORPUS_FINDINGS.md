@@ -1,7 +1,7 @@
-# CORPUS_FINDINGS.md — jd-refinery
+# CORPUS_FINDINGS.md — job-radar
 ## Corpus Schema, Labelling Rules, and JD Records
 
-**Project:** jd-refinery (Project 3.5)  
+**Project:** job-radar (Project 4)  
 **Schema version:** 1.2  
 **Last updated:** 2026-06-06  
 **Records:** 10 (Tier 1: 6, Tier 2: 4)  

@@ -1,12 +1,12 @@
 services:
-  jd-refinery:
+  job-radar:
     build: .
-    image: jd-refinery
+    image: job-radar
     env_file:
       - path: .env
         required: false
     volumes:
       - .:/app
     working_dir: /app
-    # Override with: docker compose run --rm jd-refinery python collect.py ...
+    # Override with: docker compose run --rm job-radar python collect.py ...
     command: ["python", "--version"]

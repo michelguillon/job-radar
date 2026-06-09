@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Job Radar — Architecture</title>
+<style>
+:root {
+  --bg: #f7f6f2; --card: #ffffff; --text: #1a1a18; --muted: #6b6b65;
+  --border: #e2e0d8; --tab-active: #1a1a18; --tab-hover: #f1efe8;
+  --purple-fill: #EEEDFE; --purple-stroke: #534AB7; --purple-text: #3C3489;
+  --teal-fill: #E1F5EE; --teal-stroke: #0F6E56; --teal-text: #085041;
+  --amber-fill: #FAEEDA; --amber-stroke: #854F0B; --amber-text: #633806;
+  --gray-fill: #F1EFE8; --gray-stroke: #5F5E5A; --gray-text: #444441;
+  --coral-fill: #FAECE7; --coral-stroke: #993C1D; --coral-text: #712B13;
+  --blue-fill: #EAF3FE; --blue-stroke: #1D5BA8; --blue-text: #153F78;
+  --arrow: #888780; --line: #C8C6BC;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1a18; --card: #232320; --text: #e8e6df; --muted: #9c9a92;
+    --border: #333330; --tab-active: #e8e6df; --tab-hover: #2c2c2a;
+    --purple-fill: #26215C; --purple-stroke: #AFA9EC; --purple-text: #CECBF6;
+    --teal-fill: #04342C; --teal-stroke: #5DCAA5; --teal-text: #9FE1CB;
+    --amber-fill: #412402; --amber-stroke: #EF9F27; --amber-text: #FAC775;
+    --gray-fill: #2C2C2A; --gray-stroke: #B4B2A9; --gray-text: #D3D1C7;
+    --coral-fill: #4A1B0C; --coral-stroke: #F0997B; --coral-text: #F5C4B3;
+    --blue-fill: #0D2545; --blue-stroke: #6BAEF5; --blue-text: #A8CEFA;
+    --arrow: #888780; --line: #444440;
+  }
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Georgia', serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+.header { padding: 32px 48px 0; border-bottom: 1px solid var(--border); }
+.header h1 { font-size: 22px; font-weight: 400; letter-spacing: -0.3px; margin-bottom: 4px; }
+.header p { font-size: 13px; color: var(--muted); margin-bottom: 0; }
+.tabs { display: flex; gap: 0; padding: 0 48px; border-bottom: 1px solid var(--border); margin-top: 0; overflow-x: auto; }
+.tab { padding: 14px 20px; font-size: 13px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; transition: color 0.15s; }
+.tab:hover { color: var(--text); background: var(--tab-hover); }
+.tab.active { color: var(--tab-active); border-bottom-color: var(--tab-active); font-weight: 600; }
+.content { padding: 40px 48px; max-width: 980px; }
+.panel { display: none; }
+.panel.active { display: block; }
+h2 { font-size: 20px; font-weight: 400; margin-bottom: 8px; letter-spacing: -0.3px; }
+h3 { font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); margin: 32px 0 12px; }
+p { font-size: 15px; line-height: 1.7; color: var(--muted); margin-bottom: 16px; max-width: 680px; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 28px; margin-bottom: 32px; overflow: hidden; }
+svg { width: 100%; display: block; }
+.legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.legend-item { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
+.legend-dot { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; }
+.decision { border-left: 3px solid var(--purple-stroke); padding: 12px 16px; margin-bottom: 16px; background: var(--purple-fill); border-radius: 0 6px 6px 0; }
+.decision strong { font-size: 13px; color: var(--purple-text); display: block; margin-bottom: 4px; }
+.decision span { font-size: 13px; color: var(--muted); line-height: 1.6; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 24px; }
+th { text-align: left; padding: 8px 12px; border-bottom: 2px solid var(--border); color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+td { padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text); line-height: 1.5; vertical-align: top; }
+td:first-child { font-family: 'Courier New', monospace; font-size: 12px; white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h2 style="font-size:11px;font-weight:400;text-transform:uppercase;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">Job Radar</h2>
+  <h1>Architecture Reference</h1>
+  <p>Personal job search intelligence system. CLI pipeline + scoring engine + read-only web UI. Six phases, deployed on home server.</p>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="show('overview')">Overview</div>
+  <div class="tab" onclick="show('phases')">Phases</div>
+  <div class="tab" onclick="show('schema')">Schema</div>
+  <div class="tab" onclick="show('journeys')">User Journeys</div>
+  <div class="tab" onclick="show('principles')">Design Principles</div>
+</div>
+
+<div class="content">
+
+<!-- ═══════════════════════════════════ OVERVIEW ═══════════════════════════════════ -->
+<div class="panel active" id="overview">
+  <h2>What this system is</h2>
+  <p>A personal job search intelligence system that collects job descriptions from public ATS APIs, labels them with a validated 15-field extraction schema, scores them against a candidate profile, and tracks application state. It answers one question: which opportunities are worth pursuing?</p>
+  <p>Job Radar owns discovery, extraction, scoring, prioritisation, and tracking. cv-tailor owns everything that happens after a role is shortlisted.</p>
+
+  <div class="card">
+    <svg viewBox="0 0 780 320">
+      <defs>
+        <marker id="ov-arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+          <path d="M2 1L8 5L2 9" fill="none" stroke="var(--arrow)" stroke-width="1.5" stroke-linecap="round"/>
+        </marker>
+      </defs>
+
+      <!-- Sources -->
+      <rect x="10" y="60" width="130" height="180" rx="8" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.8"/>
+      <text x="75" y="84" text-anchor="middle" font-family="Georgia,serif" font-size="12" fill="var(--gray-text)" font-weight="600">Sources</text>
+      <text x="75" y="104" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--muted)">Greenhouse API</text>
+      <text x="75" y="120" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--muted)">Lever API</text>
+      <text x="75" y="136" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--muted)">Ashby API</text>
+      <text x="75" y="152" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--muted)">VC Boards</text>
+      <text x="75" y="168" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--muted)">Manual drop</text>
+      <line x1="140" y1="150" x2="175" y2="150" stroke="var(--arrow)" stroke-width="1" marker-end="url(#ov-arr)"/>
+
+      <!-- System boundary -->
+      <rect x="175" y="20" width="430" height="280" rx="12" fill="none" stroke="var(--border)" stroke-width="1.5" stroke-dasharray="6 3"/>
+      <text x="390" y="40" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--muted)" letter-spacing="2">JOB RADAR</text>
+
+      <!-- Corpus Engine -->
+      <rect x="193" y="54" width="150" height="58" rx="7" fill="var(--teal-fill)" stroke="var(--teal-stroke)" stroke-width="0.8"/>
+      <text x="268" y="76" text-anchor="middle" font-family="Georgia,serif" font-size="12" fill="var(--teal-text)" font-weight="600">Corpus Engine</text>
+      <text x="268" y="93" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--teal-stroke)">collect · clean · dedupe</text>
+      <text x="268" y="107" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--teal-stroke)">label · validate · export</text>
+
+      <!-- Scoring Engine -->
+      <rect x="193" y="132" width="150" height="58" rx="7" fill="var(--amber-fill)" stroke="var(--amber-stroke)" stroke-width="0.8"/>
+      <text x="268" y="154" text-anchor="middle" font-family="Georgia,serif" font-size="12" fill="var(--amber-text)" font-weight="600">Scoring Engine</text>
+      <text x="268" y="171" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--amber-stroke)">rule-based · 5 dimensions</text>
+      <text x="268" y="185" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--amber-stroke)">fit score · priority score</text>
+
+      <!-- Job Tracker -->
+      <rect x="193" y="210" width="150" height="58" rx="7" fill="var(--purple-fill)" stroke="var(--purple-stroke)" stroke-width="0.8"/>
+      <text x="268" y="232" text-anchor="middle" font-family="Georgia,serif" font-size="12" fill="var(--purple-text)" font-weight="600">Job Tracker</text>
+      <text x="268" y="249" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--purple-stroke)">workflow state</text>
+      <text x="268" y="263" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--purple-stroke)">application activity log</text>
+
+      <!-- arrows between pipeline layers -->
+      <line x1="268" y1="112" x2="268" y2="132" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#ov-arr)"/>
+      <line x1="268" y1="190" x2="268" y2="210" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#ov-arr)"/>
+
+      <!-- Read-only UI -->
+      <rect x="383" y="90" width="200" height="140" rx="7" fill="var(--coral-fill)" stroke="var(--coral-stroke)" stroke-width="0.8"/>
+      <text x="483" y="114" text-anchor="middle" font-family="Georgia,serif" font-size="12" fill="var(--coral-text)" font-weight="600">Read-only UI</text>
+      <text x="483" y="132" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--coral-stroke)">browse · filter · inspect</text>
+      <text x="483" y="148" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--coral-stroke)">fit scores + reasons</text>
+      <text x="483" y="164" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--coral-stroke)">application pipeline view</text>
+      <text x="483" y="180" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--coral-stroke)">corpus stats</text>
+      <text x="483" y="200" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--coral-stroke)" font-style="italic">reads corpus/index.json only</text>
+      <text x="483" y="216" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--coral-stroke)" font-style="italic">never writes to JSONL</text>
+
+      <line x1="343" y1="113" x2="383" y2="130" stroke="var(--arrow)" stroke-width="0.8" stroke-dasharray="3 2" marker-end="url(#ov-arr)"/>
+      <line x1="343" y1="161" x2="383" y2="160" stroke="var(--arrow)" stroke-width="0.8" stroke-dasharray="3 2" marker-end="url(#ov-arr)"/>
+      <line x1="343" y1="239" x2="383" y2="200" stroke="var(--arrow)" stroke-width="0.8" stroke-dasharray="3 2" marker-end="url(#ov-arr)"/>
+
+      <!-- Output -->
+      <line x1="605" y1="160" x2="640" y2="160" stroke="var(--arrow)" stroke-width="1" marker-end="url(#ov-arr)"/>
+      <rect x="640" y="100" width="130" height="120" rx="8" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.8"/>
+      <text x="705" y="126" text-anchor="middle" font-family="Georgia,serif" font-size="12" fill="var(--gray-text)" font-weight="600">Shortlist</text>
+      <text x="705" y="146" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--muted)">fit_score ≥ 7</text>
+      <text x="705" y="162" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--muted)">status: shortlisted</text>
+      <text x="705" y="185" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--muted)">→ cv-tailor</text>
+    </svg>
+
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--teal-fill);border:1px solid var(--teal-stroke)"></div>Corpus Engine (Phase 1)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--amber-fill);border:1px solid var(--amber-stroke)"></div>Scoring Engine (Phase 2)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--purple-fill);border:1px solid var(--purple-stroke)"></div>Job Tracker (Phase 3)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--coral-fill);border:1px solid var(--coral-stroke)"></div>Read-only UI (Phase 5)</div>
+    </div>
+  </div>
+
+  <h3>System facts</h3>
+  <table>
+    <tr><th>Dimension</th><th>Value</th></tr>
+    <tr><td>Collection sources</td><td>Greenhouse · Lever · Ashby (public APIs, no auth) · 8 VC portfolio boards · manual drop folder</td></tr>
+    <tr><td>Extraction schema</td><td>15 fields · v1.2 · validated on 10 real JDs before any automation · Claude Batch API labelling</td></tr>
+    <tr><td>Schema layers</td><td>JDRecord (extraction) · JobPosting (product) · ApplicationRecord (annotation) — never mixed</td></tr>
+    <tr><td>Scoring</td><td>Rule-based · 5 dimensions · separate fit_score and priority_score</td></tr>
+    <tr><td>Storage</td><td>JSONL files only — no database, no ORM, no migrations</td></tr>
+    <tr><td>UI</td><td>Read-only · static index.json · single HTML file · nginx · never writes to JSONL</td></tr>
+    <tr><td>AI provider</td><td>Anthropic claude-sonnet-4-6 · Batch API (50% cost discount) · cost tracked per run</td></tr>
+    <tr><td>Deployment</td><td>Lenovo M720q · Ubuntu Server 24.04 · Docker Compose</td></tr>
+    <tr><td>Integration point</td><td>Job Radar shortlist → cv-tailor (one-way handoff)</td></tr>
+    <tr><td>Phase 1 status</td><td>Steps 0–2 complete · 42 tests passing · Steps 3–9 in progress</td></tr>
+  </table>
+</div>
+
+<!-- ═══════════════════════════════════ PHASES ═══════════════════════════════════ -->
+<div class="panel" id="phases">
+  <h2>Six-phase architecture</h2>
+  <p>Each phase is a working system before the next begins. Phase 6 is explicitly deferred — it becomes Project 5 when the corpus exceeds 500 records.</p>
+
+  <h3>Phase 1 — Corpus Engine</h3>
+  <div class="card">
+    <svg viewBox="0 0 760 120">
+      <defs>
+        <marker id="p1-arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+          <path d="M2 1L8 5L2 9" fill="none" stroke="var(--arrow)" stroke-width="1.5" stroke-linecap="round"/>
+        </marker>
+      </defs>
+      <rect x="10" y="30" width="90" height="60" rx="6" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.8"/>
+      <text x="55" y="55" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--gray-text)" font-weight="600">Sources</text>
+      <text x="55" y="71" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">APIs + boards</text>
+      <text x="55" y="84" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">+ manual</text>
+      <line x1="100" y1="60" x2="118" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#p1-arr)"/>
+
+      <rect x="118" y="30" width="90" height="60" rx="6" fill="var(--teal-fill)" stroke="var(--teal-stroke)" stroke-width="0.8"/>
+      <text x="163" y="55" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--teal-text)" font-weight="600">Collect</text>
+      <text x="163" y="71" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--teal-stroke)">raw JSONL</text>
+      <text x="163" y="84" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--teal-stroke)">corpus/raw/</text>
+      <line x1="208" y1="60" x2="226" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#p1-arr)"/>
+
+      <rect x="226" y="30" width="90" height="60" rx="6" fill="var(--teal-fill)" stroke="var(--teal-stroke)" stroke-width="0.8"/>
+      <text x="271" y="55" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--teal-text)" font-weight="600">Dedupe</text>
+      <text x="271" y="71" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--teal-stroke)">SHA-256 hash</text>
+      <text x="271" y="84" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--teal-stroke)">on norm text</text>
+      <line x1="316" y1="60" x2="334" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#p1-arr)"/>
+
+      <rect x="334" y="30" width="90" height="60" rx="6" fill="var(--teal-fill)" stroke="var(--teal-stroke)" stroke-width="0.8"/>
+      <text x="379" y="55" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--teal-text)" font-weight="600">Label</text>
+      <text x="379" y="71" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--teal-stroke)">Claude Batch API</text>
+      <text x="379" y="84" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--teal-stroke)">schema v1.2</text>
+      <line x1="424" y1="60" x2="442" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#p1-arr)"/>
+
+      <rect x="442" y="30" width="90" height="60" rx="6" fill="var(--teal-fill)" stroke="var(--teal-stroke)" stroke-width="0.8"/>
+      <text x="487" y="55" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--teal-text)" font-weight="600">Validate</text>
+      <text x="487" y="71" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--teal-stroke)">enum checks</text>
+      <text x="487" y="84" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--teal-stroke)">failures logged</text>
+      <line x1="532" y1="60" x2="550" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#p1-arr)"/>
+
+      <rect x="550" y="30" width="90" height="60" rx="6" fill="var(--teal-fill)" stroke="var(--teal-stroke)" stroke-width="0.8"/>
+      <text x="595" y="55" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--teal-text)" font-weight="600">Export</text>
+      <text x="595" y="71" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--teal-stroke)">prompt/completion</text>
+      <text x="595" y="84" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--teal-stroke)">eval set</text>
+      <line x1="640" y1="60" x2="658" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#p1-arr)"/>
+
+      <rect x="658" y="30" width="90" height="60" rx="6" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.8"/>
+      <text x="703" y="55" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--gray-text)" font-weight="600">Corpus</text>
+      <text x="703" y="71" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">200 labelled JDs</text>
+      <text x="703" y="84" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">fine-tune ready</text>
+    </svg>
+  </div>
+
+  <h3>Phase 2 — Scoring Engine</h3>
+  <div class="card">
+    <svg viewBox="0 0 680 120">
+      <defs>
+        <marker id="p2-arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+          <path d="M2 1L8 5L2 9" fill="none" stroke="var(--arrow)" stroke-width="1.5" stroke-linecap="round"/>
+        </marker>
+      </defs>
+      <rect x="10" y="30" width="110" height="60" rx="6" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.8"/>
+      <text x="65" y="55" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--gray-text)" font-weight="600">JDRecord</text>
+      <text x="65" y="71" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">validated corpus</text>
+      <text x="65" y="84" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">extraction fields</text>
+      <line x1="120" y1="60" x2="140" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#p2-arr)"/>
+
+      <rect x="140" y="10" width="140" height="100" rx="6" fill="var(--amber-fill)" stroke="var(--amber-stroke)" stroke-width="0.8"/>
+      <text x="210" y="33" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--amber-text)" font-weight="600">Rule-based Scorer</text>
+      <text x="210" y="50" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--amber-stroke)">role_match</text>
+      <text x="210" y="64" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--amber-stroke)">seniority_match</text>
+      <text x="210" y="78" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--amber-stroke)">technical_depth_match</text>
+      <text x="210" y="92" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--amber-stroke)">domain_match</text>
+      <text x="210" y="106" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--amber-stroke)">location_match</text>
+
+      <rect x="260" y="30" width="110" height="60" rx="6" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.8"/>
+      <text x="315" y="46" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--gray-text)" font-weight="600">candidate_</text>
+      <text x="315" y="60" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--gray-text)" font-weight="600">profile.yaml</text>
+      <text x="315" y="76" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">target roles</text>
+      <text x="315" y="89" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">skills · location</text>
+      <line x1="315" y1="90" x2="280" y2="90" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#p2-arr)"/>
+      <line x1="280" y1="60" x2="380" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#p2-arr)"/>
+
+      <rect x="380" y="30" width="140" height="60" rx="6" fill="var(--amber-fill)" stroke="var(--amber-stroke)" stroke-width="0.8"/>
+      <text x="450" y="52" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--amber-text)" font-weight="600">ApplicationRecord</text>
+      <text x="450" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--amber-stroke)">fit_score · priority_score</text>
+      <text x="450" y="82" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--amber-stroke)">status: new</text>
+      <line x1="520" y1="60" x2="540" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#p2-arr)"/>
+
+      <rect x="540" y="30" width="120" height="60" rx="6" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.8"/>
+      <text x="600" y="52" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--gray-text)" font-weight="600">corpus/scored/</text>
+      <text x="600" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">scored JSONL</text>
+      <text x="600" y="82" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">ready for UI</text>
+    </svg>
+  </div>
+
+  <h3>Phases 3–5 — Tracker, Discovery, UI</h3>
+  <div class="card">
+    <svg viewBox="0 0 740 130">
+      <defs>
+        <marker id="p35-arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+          <path d="M2 1L8 5L2 9" fill="none" stroke="var(--arrow)" stroke-width="1.5" stroke-linecap="round"/>
+        </marker>
+      </defs>
+
+      <rect x="10" y="35" width="150" height="60" rx="6" fill="var(--purple-fill)" stroke="var(--purple-stroke)" stroke-width="0.8"/>
+      <text x="85" y="57" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--purple-text)" font-weight="600">Phase 3 — Tracker</text>
+      <text x="85" y="73" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--purple-stroke)">track.py CLI</text>
+      <text x="85" y="87" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--purple-stroke)">new→review→shortlisted</text>
+      <text x="85" y="101" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--purple-stroke)">→applied→interviewing→offer</text>
+      <line x1="160" y1="65" x2="185" y2="65" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#p35-arr)"/>
+
+      <rect x="185" y="35" width="150" height="60" rx="6" fill="var(--blue-fill)" stroke="var(--blue-stroke)" stroke-width="0.8"/>
+      <text x="260" y="57" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--blue-text)" font-weight="600">Phase 4 — Discovery</text>
+      <text x="260" y="73" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--blue-stroke)">weekly cron collection</text>
+      <text x="260" y="87" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--blue-stroke)">auto-score new roles</text>
+      <text x="260" y="101" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--blue-stroke)">daily digest CLI</text>
+      <line x1="335" y1="65" x2="360" y2="65" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#p35-arr)"/>
+
+      <rect x="360" y="35" width="150" height="60" rx="6" fill="var(--coral-fill)" stroke="var(--coral-stroke)" stroke-width="0.8"/>
+      <text x="435" y="57" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--coral-text)" font-weight="600">Phase 5 — UI</text>
+      <text x="435" y="73" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--coral-stroke)">single HTML file</text>
+      <text x="435" y="87" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--coral-stroke)">reads index.json</text>
+      <text x="435" y="101" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--coral-stroke)">nginx · read-only</text>
+      <line x1="510" y1="65" x2="535" y2="65" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#p35-arr)"/>
+
+      <rect x="535" y="35" width="180" height="60" rx="6" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.8"/>
+      <text x="625" y="57" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--gray-text)" font-weight="600">cv-tailor handoff</text>
+      <text x="625" y="73" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">shortlisted roles</text>
+      <text x="625" y="87" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">fit_score ≥ 7</text>
+      <text x="625" y="101" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">one-way, no feedback</text>
+    </svg>
+  </div>
+
+  <h3>Phase status</h3>
+  <table>
+    <tr><th>Phase</th><th>Status</th><th>Output</th></tr>
+    <tr><td>1 — Corpus Engine</td><td>Steps 0–2 complete · 42 tests passing</td><td>Labelled JD corpus · fine-tuning export</td></tr>
+    <tr><td>2 — Scoring Engine</td><td>Planned</td><td>fit_score · priority_score per role</td></tr>
+    <tr><td>3 — Job Tracker</td><td>Planned</td><td>Application workflow state</td></tr>
+    <tr><td>4 — Discovery Layer</td><td>Planned</td><td>Continuous ingestion · daily digest</td></tr>
+    <tr><td>5 — UI</td><td>Planned</td><td>Read-only browse and filter interface</td></tr>
+    <tr><td>6 — Fine-Tuned Analyser</td><td>Deferred (Project 5)</td><td>Replace rule-based scorer</td></tr>
+  </table>
+</div>
+
+<!-- ═══════════════════════════════════ SCHEMA ═══════════════════════════════════ -->
+<div class="panel" id="schema">
+  <h2>Three-layer schema</h2>
+  <p>The schema separates what a JD says, what the product does with it, and what Michel thinks about it. These are never mixed in the same object. Each layer has a single owner.</p>
+
+  <div class="card">
+    <svg viewBox="0 0 760 240">
+      <defs>
+        <marker id="sch-arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+          <path d="M2 1L8 5L2 9" fill="none" stroke="var(--arrow)" stroke-width="1.5" stroke-linecap="round"/>
+        </marker>
+      </defs>
+
+      <!-- JDRecord -->
+      <rect x="20" y="20" width="200" height="200" rx="8" fill="var(--teal-fill)" stroke="var(--teal-stroke)" stroke-width="0.8"/>
+      <text x="120" y="44" text-anchor="middle" font-family="Georgia,serif" font-size="12" fill="var(--teal-text)" font-weight="600">JDRecord</text>
+      <text x="120" y="62" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--teal-stroke)" font-style="italic">extraction — Claude populates</text>
+      <text x="120" y="82" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--teal-text)">role_type · seniority</text>
+      <text x="120" y="98" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--teal-text)">technical_depth</text>
+      <text x="120" y="114" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--teal-text)">required_technologies</text>
+      <text x="120" y="130" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--teal-text)">required_competencies</text>
+      <text x="120" y="146" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--teal-text)">domain · location</text>
+      <text x="120" y="162" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--teal-text)">delivery_motion</text>
+      <text x="120" y="178" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--teal-text)">culture_signals</text>
+      <text x="120" y="194" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--teal-text)">+ 6 more fields</text>
+      <line x1="220" y1="120" x2="260" y2="120" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#sch-arr)"/>
+
+      <!-- JobPosting -->
+      <rect x="260" y="20" width="200" height="200" rx="8" fill="var(--amber-fill)" stroke="var(--amber-stroke)" stroke-width="0.8"/>
+      <text x="360" y="44" text-anchor="middle" font-family="Georgia,serif" font-size="12" fill="var(--amber-text)" font-weight="600">JobPosting</text>
+      <text x="360" y="62" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--amber-stroke)" font-style="italic">product layer — system populates</text>
+      <text x="360" y="82" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--amber-text)">id · company · role_title</text>
+      <text x="360" y="98" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--amber-text)">source_url · source_ats</text>
+      <text x="360" y="114" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--amber-text)">date_posted · first_seen</text>
+      <text x="360" y="130" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--amber-text)">last_seen · status</text>
+      <text x="360" y="154" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--amber-text)">extraction: JDRecord</text>
+      <text x="360" y="174" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--amber-stroke)" font-style="italic">(wraps JDRecord)</text>
+      <line x1="460" y1="120" x2="500" y2="120" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#sch-arr)"/>
+
+      <!-- ApplicationRecord -->
+      <rect x="500" y="20" width="240" height="200" rx="8" fill="var(--purple-fill)" stroke="var(--purple-stroke)" stroke-width="0.8"/>
+      <text x="620" y="44" text-anchor="middle" font-family="Georgia,serif" font-size="12" fill="var(--purple-text)" font-weight="600">ApplicationRecord</text>
+      <text x="620" y="62" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--purple-stroke)" font-style="italic">annotation — Michel only</text>
+      <text x="620" y="82" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--purple-text)">fit_score · priority_score</text>
+      <text x="620" y="98" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--purple-text)">fit_reasons (free text)</text>
+      <text x="620" y="114" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--purple-text)">domain_distance</text>
+      <text x="620" y="130" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--purple-text)">location_workable</text>
+      <text x="620" y="146" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--purple-text)">blocking_constraints</text>
+      <text x="620" y="162" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--purple-text)">application_status</text>
+      <text x="620" y="178" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--purple-text)">application_date · notes</text>
+    </svg>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--teal-fill);border:1px solid var(--teal-stroke)"></div>JDRecord — extraction (Claude, objective)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--amber-fill);border:1px solid var(--amber-stroke)"></div>JobPosting — product layer (system, operational)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--purple-fill);border:1px solid var(--purple-stroke)"></div>ApplicationRecord — annotation (Michel only, subjective)</div>
+    </div>
+  </div>
+
+  <h3>Extraction schema fields (v1.2 — locked)</h3>
+  <table>
+    <tr><th>Field</th><th>Type</th><th>Notes</th></tr>
+    <tr><td>role_type</td><td>list[str] max 3</td><td>e.g. ["Solutions Engineering", "Pre-Sales"]</td></tr>
+    <tr><td>seniority</td><td>str enum</td><td>ic · senior_ic · lead · manager · director · vp · exec</td></tr>
+    <tr><td>technical_depth</td><td>str enum</td><td>hands_on · hybrid · leadership</td></tr>
+    <tr><td>years_experience_required</td><td>str</td><td>e.g. "10+" · "not_stated" — never inferred</td></tr>
+    <tr><td>required_technologies</td><td>list[str]</td><td>tools, platforms, languages explicitly required</td></tr>
+    <tr><td>required_competencies</td><td>list[str]</td><td>behaviours, capabilities explicitly required</td></tr>
+    <tr><td>nice_to_have_technologies</td><td>list[str]</td><td>preferred but not blocking</td></tr>
+    <tr><td>nice_to_have_competencies</td><td>list[str]</td><td>preferred but not blocking</td></tr>
+    <tr><td>domain</td><td>list[str]</td><td>e.g. ["AI Platform", "Enterprise Software"]</td></tr>
+    <tr><td>remote_policy</td><td>str enum</td><td>remote · hybrid · onsite · not_stated</td></tr>
+    <tr><td>location</td><td>str</td><td>verbatim from JD — never normalised</td></tr>
+    <tr><td>delivery_motion</td><td>list[str]</td><td>pre_sales · direct_delivery · partner_delivery · partner_enablement · customer_success</td></tr>
+    <tr><td>leadership_geography</td><td>list[str]</td><td>e.g. ["EMEA"] · [] for IC roles</td></tr>
+    <tr><td>company_size_signal</td><td>str enum</td><td>startup · scale_up · enterprise · not_stated</td></tr>
+    <tr><td>company_stage</td><td>str enum</td><td>seed · series_a · series_b · series_c_plus · pre_ipo · listed · not_stated</td></tr>
+    <tr><td>culture_signals</td><td>list[str]</td><td>verbatim phrases only — no interpretation</td></tr>
+    <tr><td>raw_observations</td><td>str</td><td>free text — anything the schema doesn't capture</td></tr>
+  </table>
+
+  <h3>Schema version history</h3>
+  <table>
+    <tr><th>Version</th><th>Changes</th><th>Triggered by</th></tr>
+    <tr><td>1.0</td><td>Seed schema</td><td>Initial spec</td></tr>
+    <tr><td>1.1</td><td>Split required_skills → 4 fields; add company_stage, culture_signals, application_decision, location, location_workable, location_notes, blocking_constraints; seniority "lead"; role_type → list[str]; fit_score 1–10; "AI Platform" domain</td><td>Tier 1 (6 JDs)</td></tr>
+    <tr><td>1.2</td><td>Add delivery_motion, leadership_geography, domain_distance; application_decision "want_to_apply"; "Customer Experience" and "Revenue Technology" domain values</td><td>Tier 2 (4 JDs)</td></tr>
+  </table>
+</div>
+
+<!-- ═══════════════════════════════════ USER JOURNEYS ═══════════════════════════════════ -->
+<div class="panel" id="journeys">
+  <h2>User journeys</h2>
+  <p>Three primary workflows. All writes go through the CLI. The UI is a read-only view over pre-built state.</p>
+
+  <h3>Journey 1 — Manual Tier 1/2 labelling (schema validation)</h3>
+  <div class="card">
+    <svg viewBox="0 0 680 120">
+      <defs>
+        <marker id="j1-arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+          <path d="M2 1L8 5L2 9" fill="none" stroke="var(--arrow)" stroke-width="1.5" stroke-linecap="round"/>
+        </marker>
+      </defs>
+      <rect x="10" y="30" width="110" height="60" rx="6" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.8"/>
+      <text x="65" y="52" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--gray-text)" font-weight="600">Raw JD text</text>
+      <text x="65" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">paste or URL</text>
+      <text x="65" y="82" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">tier2_review.py</text>
+      <line x1="120" y1="60" x2="140" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#j1-arr)"/>
+
+      <rect x="140" y="30" width="120" height="60" rx="6" fill="var(--teal-fill)" stroke="var(--teal-stroke)" stroke-width="0.8"/>
+      <text x="200" y="52" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--teal-text)" font-weight="600">Human labels</text>
+      <text x="200" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--teal-stroke)">Michel judges</text>
+      <text x="200" y="82" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--teal-stroke)">Claude structures</text>
+      <line x1="260" y1="60" x2="280" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#j1-arr)"/>
+
+      <rect x="280" y="30" width="120" height="60" rx="6" fill="var(--amber-fill)" stroke="var(--amber-stroke)" stroke-width="0.8"/>
+      <text x="340" y="52" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--amber-text)" font-weight="600">Claude extract</text>
+      <text x="340" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--amber-stroke)">after human labels</text>
+      <text x="340" y="82" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--amber-stroke)">saved (Tier 1 only)</text>
+      <line x1="400" y1="60" x2="420" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#j1-arr)"/>
+
+      <rect x="420" y="30" width="120" height="60" rx="6" fill="var(--purple-fill)" stroke="var(--purple-stroke)" stroke-width="0.8"/>
+      <text x="480" y="52" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--purple-text)" font-weight="600">Comparison</text>
+      <text x="480" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--purple-stroke)">disagreements flagged</text>
+      <text x="480" y="82" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--purple-stroke)">corpus/eval_set/</text>
+      <line x1="540" y1="60" x2="560" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#j1-arr)"/>
+
+      <rect x="560" y="30" width="110" height="60" rx="6" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.8"/>
+      <text x="615" y="52" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--gray-text)" font-weight="600">Ground truth</text>
+      <text x="615" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">corpus/manual/</text>
+      <text x="615" y="82" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">tier 1–2 JSONL</text>
+    </svg>
+  </div>
+
+  <h3>Journey 2 — Automated collection and scoring</h3>
+  <div class="card">
+    <svg viewBox="0 0 740 120">
+      <defs>
+        <marker id="j2-arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+          <path d="M2 1L8 5L2 9" fill="none" stroke="var(--arrow)" stroke-width="1.5" stroke-linecap="round"/>
+        </marker>
+      </defs>
+      <rect x="10" y="30" width="90" height="60" rx="6" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.8"/>
+      <text x="55" y="52" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--gray-text)" font-weight="600">cron</text>
+      <text x="55" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">weekly trigger</text>
+      <text x="55" y="82" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">collect --all</text>
+      <line x1="100" y1="60" x2="118" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#j2-arr)"/>
+
+      <rect x="118" y="30" width="90" height="60" rx="6" fill="var(--teal-fill)" stroke="var(--teal-stroke)" stroke-width="0.8"/>
+      <text x="163" y="52" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--teal-text)" font-weight="600">Collect</text>
+      <text x="163" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--teal-stroke)">APIs + boards</text>
+      <text x="163" y="82" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--teal-stroke)">raw JSONL</text>
+      <line x1="208" y1="60" x2="226" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#j2-arr)"/>
+
+      <rect x="226" y="30" width="90" height="60" rx="6" fill="var(--teal-fill)" stroke="var(--teal-stroke)" stroke-width="0.8"/>
+      <text x="271" y="52" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--teal-text)" font-weight="600">Label</text>
+      <text x="271" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--teal-stroke)">Batch API</text>
+      <text x="271" y="82" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--teal-stroke)">Tier 4 auto</text>
+      <line x1="316" y1="60" x2="334" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#j2-arr)"/>
+
+      <rect x="334" y="30" width="90" height="60" rx="6" fill="var(--amber-fill)" stroke="var(--amber-stroke)" stroke-width="0.8"/>
+      <text x="379" y="52" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--amber-text)" font-weight="600">Score</text>
+      <text x="379" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--amber-stroke)">rule-based</text>
+      <text x="379" y="82" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--amber-stroke)">fit + priority</text>
+      <line x1="424" y1="60" x2="442" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#j2-arr)"/>
+
+      <rect x="442" y="30" width="90" height="60" rx="6" fill="var(--purple-fill)" stroke="var(--purple-stroke)" stroke-width="0.8"/>
+      <text x="487" y="52" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--purple-text)" font-weight="600">Digest</text>
+      <text x="487" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--purple-stroke)">new roles ≥ 6</text>
+      <text x="487" y="82" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--purple-stroke)">daily summary</text>
+      <line x1="532" y1="60" x2="550" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#j2-arr)"/>
+
+      <rect x="550" y="30" width="90" height="60" rx="6" fill="var(--coral-fill)" stroke="var(--coral-stroke)" stroke-width="0.8"/>
+      <text x="595" y="52" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--coral-text)" font-weight="600">UI</text>
+      <text x="595" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--coral-stroke)">browse + filter</text>
+      <text x="595" y="82" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--coral-stroke)">index.json</text>
+      <line x1="640" y1="60" x2="658" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#j2-arr)"/>
+
+      <rect x="658" y="30" width="72" height="60" rx="6" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.8"/>
+      <text x="694" y="52" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--gray-text)" font-weight="600">Review</text>
+      <text x="694" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">shortlist</text>
+      <text x="694" y="82" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">track.py</text>
+    </svg>
+  </div>
+
+  <h3>Journey 3 — Application tracking to cv-tailor handoff</h3>
+  <div class="card">
+    <svg viewBox="0 0 680 120">
+      <defs>
+        <marker id="j3-arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+          <path d="M2 1L8 5L2 9" fill="none" stroke="var(--arrow)" stroke-width="1.5" stroke-linecap="round"/>
+        </marker>
+      </defs>
+      <rect x="10" y="30" width="110" height="60" rx="6" fill="var(--purple-fill)" stroke="var(--purple-stroke)" stroke-width="0.8"/>
+      <text x="65" y="52" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--purple-text)" font-weight="600">new role</text>
+      <text x="65" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--purple-stroke)">status: new</text>
+      <text x="65" y="82" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--purple-stroke)">fit ≥ 6</text>
+      <line x1="120" y1="60" x2="140" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#j3-arr)"/>
+
+      <rect x="140" y="30" width="110" height="60" rx="6" fill="var(--purple-fill)" stroke="var(--purple-stroke)" stroke-width="0.8"/>
+      <text x="195" y="52" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--purple-text)" font-weight="600">review</text>
+      <text x="195" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--purple-stroke)">track.py --status</text>
+      <text x="195" y="82" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--purple-stroke)">review</text>
+      <line x1="250" y1="60" x2="270" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#j3-arr)"/>
+
+      <rect x="270" y="30" width="110" height="60" rx="6" fill="var(--purple-fill)" stroke="var(--purple-stroke)" stroke-width="0.8"/>
+      <text x="325" y="52" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--purple-text)" font-weight="600">shortlisted</text>
+      <text x="325" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--purple-stroke)">track.py --status</text>
+      <text x="325" y="82" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--purple-stroke)">shortlisted</text>
+      <line x1="380" y1="60" x2="400" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#j3-arr)"/>
+
+      <rect x="400" y="20" width="130" height="80" rx="6" fill="var(--coral-fill)" stroke="var(--coral-stroke)" stroke-width="0.8"/>
+      <text x="465" y="44" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--coral-text)" font-weight="600">cv-tailor</text>
+      <text x="465" y="62" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--coral-stroke)">JD + candidate profile</text>
+      <text x="465" y="78" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--coral-stroke)">tailored CV</text>
+      <text x="465" y="94" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--coral-stroke)">cover letter</text>
+      <line x1="530" y1="60" x2="550" y2="60" stroke="var(--arrow)" stroke-width="0.8" marker-end="url(#j3-arr)"/>
+
+      <rect x="550" y="30" width="110" height="60" rx="6" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.8"/>
+      <text x="605" y="52" text-anchor="middle" font-family="Georgia,serif" font-size="10" fill="var(--gray-text)" font-weight="600">applied</text>
+      <text x="605" y="68" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">track.py --status</text>
+      <text x="605" y="82" text-anchor="middle" font-family="Georgia,serif" font-size="9" fill="var(--muted)">applied</text>
+    </svg>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════ DESIGN PRINCIPLES ═══════════════════════════════════ -->
+<div class="panel" id="principles">
+  <h2>Design principles</h2>
+  <p>Eight load-bearing decisions. Each one is a concise statement plus the reasoning that would survive a challenge.</p>
+
+  <div class="decision">
+    <strong>1. Validate the schema on real data before building any automation.</strong>
+    <span>The extraction schema was validated on 10 real job descriptions before any collector code was written. It changed 10 times. The most significant change — splitting required_skills into four fields (required_technologies, required_competencies, nice_to_have_technologies, nice_to_have_competencies) — was not foreseeable from first principles. It emerged from labelling JDs that don't use these headings explicitly. A schema designed upfront and validated downstream produces a migration problem. A schema discovered through practice and locked before automation is a design constraint that everything else satisfies.</span>
+  </div>
+
+  <div class="decision">
+    <strong>2. Three schema layers; never mixed.</strong>
+    <span>JDRecord is what the JD says — objective, Claude-populated, consistent across all labellers. JobPosting is what the product knows — operational state, system-populated. ApplicationRecord is what Michel thinks — subjective, human-only. Conflating extraction with personal judgement contaminates the training corpus: the fit_score Michel assigns to a role is not a signal a model can generalise from. Conflating product state with extraction creates migration debt the first time the product evolves. Three layers with named owners keep each concern clean. This is not a preference; it is a correctness requirement for a labelling pipeline that feeds fine-tuning.</span>
+  </div>
+
+  <div class="decision">
+    <strong>3. CLI writes; UI reads.</strong>
+    <span>All state changes — collection, labelling, scoring, tracking — go through CLI scripts. The UI reads a pre-built index file. This is not a convenience; it is a correctness guarantee. A UI that writes directly to JSONL files creates concurrent write risks, bypasses the validation pipeline, and makes the CLI an optional interface rather than the single source of truth. The index file is regenerated by the CLI after each pipeline run. The UI is stateless. These properties are worth the operational cost of a two-step update cycle.</span>
+  </div>
+
+  <div class="decision">
+    <strong>4. Rule-based scoring before fine-tuning.</strong>
+    <span>200 labelled records is insufficient for meaningful fine-tuning of a domain-specific scorer. A well-designed rule-based scorer on a structured 15-field schema produces comparable results immediately, without GPU, without training cost, and without the data requirements of fine-tuning. Fine-tuning adds value when: the corpus exceeds 500 records, the rule-based scorer's systematic failure modes are documented, and the eval set provides an uncontaminated comparison baseline. None of those conditions hold at Phase 2. Deferring fine-tuning is not a concession — it is the correct sequencing.</span>
+  </div>
+
+  <div class="decision">
+    <strong>5. Fit score and priority score are separate dimensions.</strong>
+    <span>Fit measures match quality — how well a role aligns with skills, seniority, domain, and working style. Priority measures urgency — deadline, competition, company stage, strategic importance. A role can be high fit but low priority (a large enterprise always hiring for this role) or lower fit but high priority (a fast-growing AI startup closing a round with a short window). A single score conflates these. Sorting a shortlist by fit alone produces a list ordered by match quality, not by where to invest time. Sorting by priority_score × fit_score produces an actionable queue.</span>
+  </div>
+
+  <div class="decision">
+    <strong>6. Batch API as default for all labelling.</strong>
+    <span>200 JDs at ~2,000 tokens each costs roughly half as much via the Batch API as synchronous. The pipeline is not latency-sensitive — a labelling job running overnight is fine. There is no justification for paying double on an offline processing pipeline. Cost is tracked per run, logged to corpus/stats.json. This cost baseline is the input to the fine-tuning budget decision in Phase 6. A pipeline that doesn't track its own costs cannot make a principled argument about when to upgrade from rule-based to fine-tuned scoring.</span>
+  </div>
+
+  <div class="decision">
+    <strong>7. JSONL files as the universal format.</strong>
+    <span>The pipeline produces JSONL at every stage because that is what fine-tuning pipelines consume. Adding a database would require an export step to return to JSONL for Phase 6 — a round-trip that adds complexity without adding capability. JSONL is also inspectable with standard Unix tools, appendable without migrations, and versionable with schema_version on every record. The schema version is not metadata; it is a filter. Downstream consumers select records by schema_version. Append-only with a version field is a lightweight alternative to database migrations that carries the same correctness guarantees for this access pattern.</span>
+  </div>
+
+  <div class="decision">
+    <strong>8. Job Radar and cv-tailor are separate products with a single integration point.</strong>
+    <span>Job Radar answers which opportunities are worth pursuing. cv-tailor answers how to pursue them. These are distinct problems with distinct architectures. The integration is a one-way handoff: a shortlisted role from Job Radar becomes the JD input to cv-tailor. cv-tailor does not feed back into Job Radar. A deeper integration — Job Radar providing pre-computed JD analysis to cv-tailor's Phase 0 — is possible but deferred until both systems are stable and the actual delta between their extraction outputs is known. Designing the interface before either system's data model is settled produces a contract that immediately needs changing. The integration point will be designed when both systems are live.</span>
+  </div>
+
+  <h3>What this system demonstrates</h3>
+  <table>
+    <tr><th>Capability</th><th>Where it shows up</th></tr>
+    <tr><td>Empirical schema design</td><td>10 schema changes from 10 real JDs before automation · formalisation gate · freeze point</td></tr>
+    <tr><td>Weak supervision pipeline</td><td>Claude as labeller · 4-tier validation model · eval set construction with contamination prevention</td></tr>
+    <tr><td>Three-layer data architecture</td><td>JDRecord / JobPosting / ApplicationRecord · strict ownership boundaries · no mixing</td></tr>
+    <tr><td>Cost-aware AI pipeline</td><td>Batch API default · cost per run tracked · fine-tuning deferred on principled grounds</td></tr>
+    <tr><td>Incremental value delivery</td><td>6 phases · each independently useful · Phase 1 complete before Phase 2 starts</td></tr>
+    <tr><td>Multi-source data engineering</td><td>3 public ATS APIs + VC board scraper + manual · SHA-256 dedup · boilerplate normalisation</td></tr>
+    <tr><td>System boundary design</td><td>CLI writes / UI reads · Job Radar vs cv-tailor ownership · one-way integration point</td></tr>
+  </table>
+</div>
+
+</div><!-- .content -->
+
+<script>
+function show(id) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  document.querySelector(`[onclick="show('${id}')"]`).classList.add('active');
+}
+</script>
+</body>
+</html>
