@@ -34,6 +34,9 @@ bump `SCHEMA_VERSION`.
 - **Extraction vs annotation boundary is strict** — Claude never
   populates annotation fields; human never populates extraction fields
 - **CLI writes, UI reads** — all state changes through CLI scripts only
+- **Decisions & learnings** — record architecture decisions and reusable
+  lessons in `docs/job_radar_LEARNINGS.md`, appended after each step/phase
+  (append-only; never rewrite existing entries)
 
 ---
 
@@ -113,37 +116,12 @@ They migrate to `ApplicationRecord` in Phase 2.
 
 ---
 
-## Learnings captured during build
+## Decisions & learnings
 
-*(Add new entries as the build progresses)*
-
-### 2026-06-09 — Schema v1.1 typo in Step 1 spec text
-Step 1 of the spec said `SCHEMA_VERSION = "1.1"` but CORPUS_FINDINGS
-and the locked schema both said 1.2. Used 1.2. Lesson: the dataclass
-in `models/record.py` is the executable source of truth — when in
-doubt, check it against CORPUS_FINDINGS §1.1, not the step text.
-
-### 2026-06-09 — Greenhouse `content` is HTML-entity-escaped
-The `?content=true` field comes back entity-escaped (`&lt;p&gt;`).
-BeautifulSoup would treat that as literal text, not tags, so the
-collector runs `html.unescape()` before storing `raw_html`. Otherwise
-`clean()` would never strip the tags.
-
-### 2026-06-09 — Backfill reuses the dedupe pipeline for free verification
-`scripts/backfill_manual_hashes.py` assigns ids by running the real
-`dedupe(records, set())` rather than hashing by hand. This guarantees
-the manual ids match what the live pipeline would produce, and the
-`dropped == 0` check doubles as the "no two records share a hash"
-verification. Lesson: assign corpus ids through the pipeline, never
-by a parallel hand-rolled hash.
-
-### 2026-06-09 — SHA-256 backfill blocked by placeholder raw_text
-All 10 manual records had `raw_text: "stored separately"` when Step 2
-was built. Running `record_hash()` on this placeholder would have
-collapsed 9 records as duplicates. Backfill deferred until
-`JD_SOURCE_TEXTS.md` was in place. Lesson: the dedup pipeline must
-run on real content, not placeholders. Populate raw_text before
-running dedup.
+Architecture decisions and reusable learnings live in
+`docs/job_radar_LEARNINGS.md` (Cross-Cutting Decisions + Learning Entries),
+appended after each step or phase. This file stays lean — conventions and
+current state, not a learning log.
 
 ---
 
