@@ -5,29 +5,63 @@ Consumes a ``JDRecord``'s **extraction** fields + a ``Profile`` and produces one
 annotation stub (Option A, ``docs/job_radar_PHASE2_PLAN.md``).
 
   Stage 1 — Structural fit  → ``fit_score`` (1–10)
-            5 dimensions, each 0–2 (domain can score 0.5), summed and rounded.
+            Signal vs gates (see "Stage 1 model" below).
   Stage 2 — Constraints     → ``blocking_constraints`` + ``requirement_gaps``
             blocking = generic scorer-owned regex (clearance / language /
             sponsorship); gaps = profile.requirement_gap_watchlist, detected by
             scorer-defined regex (profile says WHAT to watch, scorer says HOW).
   Stage 3 — Classification  → ``fit_label`` + ``fit_label_reason`` + ``priority_score``
 
-Heuristics here are tunable; the rationale lives in scoring/CLAUDE.md.
-``search_mode`` filtering (§6.3) is presentation — it lives in score.py, not here,
-except for the documented broad-mode priority nudge.
+Stage 1 model (Option A+B — gates vs signal, decided 2026-06-09):
+  The earlier flat "5 equal 0–2 dims summed" model gave no resolution on a
+  curated corpus — seniority and location saturated at max for every realistic
+  JD, so 4 of 5 dimensions did almost no discriminating work. Now:
+
+  * **Signal** (sets the 0–10 scale): role, domain, technical_depth.
+    These are what differentiate fit. Weighted role ×2, domain ×2 (primary
+    discriminators) and technical_depth ×1 (secondary, coarser) → max 10.
+  * **Gates** (penalties only): seniority, location. A *hit* contributes 0; a
+    *miss* subtracts. Table-stakes dimensions can only pull a score down, never
+    inflate it. No partial credit (the old "within one rank" seniority tier is
+    gone — a gate is binary, with one graded "unclear" tier for location).
+
+  fit_score = round_half_up(signal − seniority_penalty − location_penalty),
+  clamped to 1–10.
+
+Heuristics here are tunable; the rationale lives in scoring/CLAUDE.md. The penalty
+magnitudes and fit_label thresholds are **provisional** — they are being
+calibrated against a corpus that deliberately includes negative JDs (§6).
+``search_mode`` filtering (§6.3) is presentation — it lives in score.py.
 """
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 
 from models.record import ApplicationRecord, JDRecord
 from scoring.profile import Profile
 
-# Seniority is an ordered ladder; "within one rank" of a target scores a partial.
-SENIORITY_RANK = ("ic", "senior_ic", "lead", "manager", "director", "vp", "exec")
-_RANK = {name: i for i, name in enumerate(SENIORITY_RANK)}
+# --- Weights and penalties (provisional — calibrated against negatives, §6) ---
+
+ROLE_WEIGHT = 2.0    # primary discriminator   (sub-score 0/2  → 0..4)
+DOMAIN_WEIGHT = 2.0  # primary discriminator   (sub-score 0..2 → 0..4)
+DEPTH_WEIGHT = 1.0   # secondary discriminator (sub-score 0..2 → 0..2)
+#                                                       signal max = 10
+
+SENIORITY_MISS_PENALTY = 3.0   # seniority not in target band
+LOCATION_UNCLEAR_PENALTY = 1.0  # hybrid/unspecified policy, city unknown
+LOCATION_FAIL_PENALTY = 3.0    # cannot work there (non-base onsite, relocation:false)
+
+# Capability-blocker rule (Stage 2 overrides a misleadingly high Stage 1).
+# A hands-on role that mandates a cluster of specialist technologies the candidate
+# cannot execute on is not feasible, however well the enums line up (the Databricks
+# calibration case: SA + AI Platform structural match, but required Spark/SQL/
+# Databricks/multi-cloud hands-on depth). Threshold calibrated against the manual
+# corpus — Databricks has 6 unmet required techs vs JP Morgan 2 / Mistral 1; >=3
+# isolates the genuine blocker. PROVISIONAL — re-tune as negative JDs are added.
+UNMET_REQUIRED_THRESHOLD = 3
 
 # company_stage values treated as early-stage for the priority urgency nudge.
 # (PHASE2_PLAN wrote "startup", but that is a company_size_signal value — the
@@ -38,45 +72,43 @@ EARLY_STAGE = frozenset({"seed", "series_a", "series_b"})
 _UNCLEAR_LOCATION = frozenset({"", "not_stated", "unknown"})
 
 
-# --- Stage 1: structural fit -----------------------------------------------
+def _round_half_up(value: float) -> int:
+    """Round halves up (6.5 → 7), unlike Python's round() banker's rounding."""
+    return math.floor(value + 0.5)
+
+
+# --- Stage 1: structural fit (signal − gate penalties) ---------------------
 
 
 @dataclass
-class Dimensions:
-    """The five 0–2 structural sub-scores, kept for the fit_label_reason."""
+class Breakdown:
+    """Per-record scoring detail, kept for fit_label_reason and review."""
 
+    # Signal sub-scores (0–2 before weighting).
     role: float
-    seniority: float
-    technical_depth: float
     domain: float
-    location: float
+    technical_depth: float
+    # Gate outcomes + the penalty each contributed.
+    seniority_gate: str   # "pass" | "miss"
+    location_gate: str    # "pass" | "unclear" | "fail"
+    seniority_penalty: float
+    location_penalty: float
 
-    def raw(self) -> float:
-        return self.role + self.seniority + self.technical_depth + self.domain + self.location
+    @property
+    def signal(self) -> float:
+        return (
+            self.role * ROLE_WEIGHT
+            + self.domain * DOMAIN_WEIGHT
+            + self.technical_depth * DEPTH_WEIGHT
+        )
+
+    @property
+    def fit_raw(self) -> float:
+        return self.signal - self.seniority_penalty - self.location_penalty
 
 
 def _role_score(jd: JDRecord, profile: Profile) -> float:
     return 2.0 if set(jd.role_type) & profile.target_roles else 0.0
-
-
-def _seniority_score(jd: JDRecord, profile: Profile) -> float:
-    if jd.seniority in profile.target_seniority:
-        return 2.0
-    jd_rank = _RANK.get(jd.seniority)
-    if jd_rank is None:
-        return 0.0
-    target_ranks = [_RANK[s] for s in profile.target_seniority if s in _RANK]
-    if target_ranks and min(abs(jd_rank - t) for t in target_ranks) == 1:
-        return 1.0
-    return 0.0
-
-
-def _technical_depth_score(jd: JDRecord, profile: Profile) -> float:
-    if jd.technical_depth in profile.target_technical_depth:
-        return 2.0
-    if jd.technical_depth in profile.acceptable_technical_depth:
-        return 1.0
-    return 0.0
 
 
 def _domain_score(jd: JDRecord, profile: Profile) -> float:
@@ -90,32 +122,54 @@ def _domain_score(jd: JDRecord, profile: Profile) -> float:
     return 0.0
 
 
-def _location_score(jd: JDRecord, profile: Profile) -> float:
+def _depth_score(jd: JDRecord, profile: Profile) -> float:
+    if jd.technical_depth in profile.target_technical_depth:
+        return 2.0
+    if jd.technical_depth in profile.acceptable_technical_depth:
+        return 0.5  # acceptable, but a clear step below target (Option B)
+    return 0.0
+
+
+def _seniority_gate(jd: JDRecord, profile: Profile) -> tuple[str, float]:
+    """Binary gate — in the target band or not (no within-one-rank credit)."""
+    if jd.seniority in profile.target_seniority:
+        return "pass", 0.0
+    return "miss", SENIORITY_MISS_PENALTY
+
+
+def _location_gate(jd: JDRecord, profile: Profile) -> tuple[str, float]:
+    """Gate with one graded 'unclear' tier. Base-city onsite still passes —
+    the candidate already lives there; relocation:false is encoded by NOT
+    excusing a named non-base city."""
     loc = jd.location.strip().lower()
     base = profile.location_base.strip().lower()
     if jd.remote_policy == "remote":
-        return 2.0
-    if base and base in loc:  # London (base) — any policy works, candidate is there
-        return 2.0
-    if jd.remote_policy == "onsite":  # non-London onsite, relocation:false
-        return 0.0
+        return "pass", 0.0
+    if base and base in loc:  # base city, any policy
+        return "pass", 0.0
+    if jd.remote_policy == "onsite":  # non-base onsite, relocation:false
+        return "fail", LOCATION_FAIL_PENALTY
     # hybrid or not_stated, and not the base city:
     if loc in _UNCLEAR_LOCATION:
-        return 1.0  # city unclear — benefit of the doubt
-    return 0.0  # a named non-London city with no remote option
+        return "unclear", LOCATION_UNCLEAR_PENALTY
+    return "fail", LOCATION_FAIL_PENALTY  # a named non-base city, no remote option
 
 
-def stage1_fit(jd: JDRecord, profile: Profile) -> tuple[int, Dimensions]:
-    """Return ``(fit_score 1–10, Dimensions)``."""
-    dims = Dimensions(
+def stage1_fit(jd: JDRecord, profile: Profile) -> tuple[int, Breakdown]:
+    """Return ``(fit_score 1–10, Breakdown)``."""
+    seniority_gate, seniority_penalty = _seniority_gate(jd, profile)
+    location_gate, location_penalty = _location_gate(jd, profile)
+    bd = Breakdown(
         role=_role_score(jd, profile),
-        seniority=_seniority_score(jd, profile),
-        technical_depth=_technical_depth_score(jd, profile),
         domain=_domain_score(jd, profile),
-        location=_location_score(jd, profile),
+        technical_depth=_depth_score(jd, profile),
+        seniority_gate=seniority_gate,
+        location_gate=location_gate,
+        seniority_penalty=seniority_penalty,
+        location_penalty=location_penalty,
     )
-    fit = max(1, min(10, round(dims.raw())))
-    return fit, dims
+    fit = max(1, min(10, _round_half_up(bd.fit_raw)))
+    return fit, bd
 
 
 # --- Stage 2: blocking constraints + requirement gaps ----------------------
@@ -184,6 +238,41 @@ _GAP_TRIGGERS = {
 }
 
 
+def _is_proficient(tech: str, proficient: frozenset[str]) -> bool:
+    """A required technology is 'met' if it overlaps a candidate proficient skill
+    by substring (either direction), lowercased. Deliberately simple and
+    reproducible; revisit if it mis-matches as the corpus grows."""
+    t = tech.strip().lower()
+    if not t:
+        return True  # empty/garbage requirement is not a gap
+    return any(t in skill or skill in t for skill in proficient)
+
+
+def unmet_required_technologies(jd: JDRecord, profile: Profile) -> list[str]:
+    """Required technologies the candidate has no proficient skill for."""
+    return [t for t in jd.required_technologies if not _is_proficient(t, profile.proficient_technologies)]
+
+
+def capability_blocker(jd: JDRecord, profile: Profile) -> str | None:
+    """A hands-on specialist requirement the candidate fundamentally lacks.
+
+    Fires only when the candidate is not a hands-on specialist (target depth
+    excludes ``hands_on``), the JD demands ``hands_on`` execution, and >= the
+    threshold of required technologies are unmet. Returns a human-readable
+    blocking string, or None.
+    """
+    if "hands_on" in profile.target_technical_depth:
+        return None  # a hands-on candidate is not blocked by a specialist stack
+    if jd.technical_depth != "hands_on":
+        return None  # leadership/hybrid roles: the candidate leads, not executes
+    unmet = unmet_required_technologies(jd, profile)
+    if len(unmet) < UNMET_REQUIRED_THRESHOLD:
+        return None
+    shown = ", ".join(unmet[:3])
+    extra = f", +{len(unmet) - 3} more" if len(unmet) > 3 else ""
+    return f"hands-on specialist requirements exceed profile ({shown}{extra})"
+
+
 def _haystack(jd: JDRecord) -> str:
     parts = [
         *jd.required_competencies,
@@ -197,10 +286,18 @@ def _haystack(jd: JDRecord) -> str:
 
 
 def stage2_constraints(jd: JDRecord, profile: Profile) -> tuple[list[str], list[str]]:
-    """Return ``(requirement_gaps, blocking_constraints)``."""
+    """Return ``(requirement_gaps, blocking_constraints)``.
+
+    blocking_constraints = generic scorer-owned hard stops + the capability
+    blocker (a mandatory hands-on specialist requirement the candidate lacks).
+    The capability blocker is how Stage 2 overrides a misleadingly high Stage 1.
+    """
     text = _haystack(jd)
 
     blocking = [label for label, pattern in _BLOCKING_RULES if pattern.search(text)]
+    cap = capability_blocker(jd, profile)
+    if cap:
+        blocking.append(cap)
 
     gaps = [
         phrase
@@ -216,7 +313,10 @@ def stage2_constraints(jd: JDRecord, profile: Profile) -> tuple[list[str], list[
 
 
 def stage3_label(fit_score: int, blocking: list[str]) -> str:
-    """Map fit_score + blocker presence to a FIT_LABEL (job_radar_SPEC §6.2)."""
+    """Map fit_score + blocker presence to a FIT_LABEL (job_radar_SPEC §6.2).
+
+    Thresholds are PROVISIONAL pending calibration against negative JDs (§6).
+    """
     has_block = bool(blocking)
     if has_block and fit_score >= 7:
         return "blocked_fit"
@@ -246,23 +346,34 @@ def priority_score(fit_score: int, jd: JDRecord, blocking: list[str], mode: str)
 # --- fit_label_reason ------------------------------------------------------
 
 _ROLE_PHRASE = {2.0: "strong role match", 0.0: "role mismatch"}
-_SENIORITY_PHRASE = {2.0: "on-target seniority", 1.0: "near-target seniority", 0.0: "seniority gap"}
-_DEPTH_PHRASE = {2.0: "ideal technical depth", 1.0: "acceptable technical depth", 0.0: "technical-depth mismatch"}
 _DOMAIN_PHRASE = {2.0: "strong domain", 1.0: "adjacent domain", 0.5: "peripheral domain", 0.0: "domain gap"}
-_LOCATION_PHRASE = {2.0: "location works", 1.0: "location unclear", 0.0: "location blocker"}
+_DEPTH_PHRASE = {2.0: "ideal technical depth", 0.5: "acceptable technical depth", 0.0: "technical-depth mismatch"}
+_GATE_NOTE = {
+    ("seniority", "miss"): "seniority off-target",
+    ("location", "unclear"): "location unclear",
+    ("location", "fail"): "location blocker",
+}
 
 
-def fit_label_reason(label: str, dims: Dimensions, gaps: list[str], blocking: list[str]) -> str:
-    """One templated sentence summarising the dimensions + top blocker/gap."""
+def fit_label_reason(label: str, bd: Breakdown, gaps: list[str], blocking: list[str]) -> str:
+    """One templated sentence: the three signal dimensions, then any failed gate,
+    then the top blocker/gap."""
     summary = ", ".join(
         [
-            _ROLE_PHRASE[dims.role],
-            _SENIORITY_PHRASE[dims.seniority],
-            _DEPTH_PHRASE[dims.technical_depth],
-            _DOMAIN_PHRASE[dims.domain],
-            _LOCATION_PHRASE[dims.location],
+            _ROLE_PHRASE[bd.role],
+            _DOMAIN_PHRASE[bd.domain],
+            _DEPTH_PHRASE[bd.technical_depth],
         ]
     )
+    gate_notes = [
+        note
+        for key, note in _GATE_NOTE.items()
+        if (key[0] == "seniority" and bd.seniority_gate == key[1])
+        or (key[0] == "location" and bd.location_gate == key[1])
+    ]
+    if gate_notes:
+        summary += " (" + "; ".join(gate_notes) + ")"
+
     sentence = f"{label.replace('_', ' ').capitalize()}: {summary}."
     if blocking:
         sentence += f" Blocked by: {blocking[0]}."
@@ -282,7 +393,7 @@ def score(jd: JDRecord, profile: Profile, scored_at: str, mode: str | None = Non
     """
     active_mode = mode or profile.search_mode
 
-    fit, dims = stage1_fit(jd, profile)
+    fit, bd = stage1_fit(jd, profile)
     gaps, blocking = stage2_constraints(jd, profile)
     label = stage3_label(fit, blocking)
     priority = priority_score(fit, jd, blocking, active_mode)
@@ -293,7 +404,7 @@ def score(jd: JDRecord, profile: Profile, scored_at: str, mode: str | None = Non
         scored_at=scored_at,
         fit_score=fit,
         fit_label=label,
-        fit_label_reason=fit_label_reason(label, dims, gaps, blocking),
+        fit_label_reason=fit_label_reason(label, bd, gaps, blocking),
         requirement_gaps=gaps,
         blocking_constraints=blocking,
         priority_score=priority,

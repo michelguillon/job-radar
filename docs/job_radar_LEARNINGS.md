@@ -674,5 +674,48 @@ is low — the separation exists by design for when scale makes it matter.
 
 ---
 
+### Learning 16 — A scorer that only sees positive examples scores everything high
+
+#### Learning
+
+The first real run of the Phase-2 scorer (flat 5-dimension, equal-weight, summed
+model from SPEC §6.5) put 8 of 10 curated JDs in `strong_fit`. The instinct was
+"the labels must be wrong" — they weren't. The per-dimension breakdown showed the
+cause: on a corpus of roles the candidate had hand-picked, `seniority` scored 2/2
+for **all 10** records and `location` and `role` were nearly saturated too. Four
+of five dimensions did no discriminating work; only `domain` varied. The fix split
+dimensions into **signal** (role/domain/depth — set the scale) and **gates**
+(seniority/location — penalty-only, never inflate). Separately, the Databricks JD
+exposed a second gap: strong SA/AI-Platform enums but mandatory hands-on Spark/
+SQL/Databricks/multi-cloud the candidate can't execute — so a **capability
+blocker** was added that lets Stage 2 (requirement assessment) override a high
+Stage 1 (structural) score. Threshold (≥3 unmet required techs on a hands-on role)
+was set from where real examples fell: Databricks 6 unmet vs JP Morgan 2 / Mistral
+1.
+
+#### Surprise
+
+Two surprises. First, a dimension that never varies *looks* like it's working —
+it contributes points to every score — but it is pure noise dressed as signal; you
+only see it by printing the per-dimension spread, not the final scores. Second,
+the saturation was an artifact of the **corpus**, not the model: every example was
+a role the candidate already liked, so "table stakes" dimensions were always met.
+Without a negative example, there was nothing to reveal that seniority did no work
+— or that structural fit and feasibility had silently been conflated.
+
+#### Reusable Pattern
+
+Calibrate a scorer against **negative examples**, not just positives — roles that
+should score low, and structurally-attractive-but-infeasible roles. Add them to
+the corpus deliberately, set thresholds from where real positives/negatives fall,
+and pin the calibration with a test ("X must be blocked_fit"). Audit each
+dimension's variance across the corpus, not just the output: a near-constant
+dimension is inflating every score and should become a gate (penalty-only) or be
+reweighted. And keep "does it fit" separate from "can they do it" — let the
+feasibility check override structural fit, or you ship "everything is a strong
+fit."
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

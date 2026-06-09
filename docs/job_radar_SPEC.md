@@ -901,6 +901,54 @@ python score.py --input corpus/labelled/validated_*.jsonl --min-fit 6
 python score.py --input corpus/labelled/validated_*.jsonl --mode active
 ```
 
+> **As-built note:** the default input is `corpus/validated/validated_*.jsonl`
+> (Step 8 writes there, not `corpus/labelled/`), and the scoring model below
+> (§6.9) refines the flat §6.5 model. `docs/job_radar_PHASE2_PLAN.md` and
+> `scoring/CLAUDE.md` are authoritative for the implementation.
+
+### 6.9 — Scoring model refinement: gates vs signal, and calibration
+
+The flat §6.5 model (5 equal-weight 0–2 dimensions, summed) was found, on the
+first real run, to have almost no resolution: on a curated corpus the seniority
+and location dimensions saturated at maximum for every realistic JD, so four of
+five dimensions did no discriminating work and nearly everything became
+`strong_fit`. Two corrections:
+
+**Gates vs signal (Stage 1).** Dimensions are split by role:
+- **Signal** sets the 0–10 scale — `role` (×2), `domain` (×2), `technical_depth`
+  (×1). These are what actually differentiate fit.
+- **Gates** are table stakes that can only *subtract* — `seniority` (binary,
+  in-band or a penalty; no partial credit) and `location` (pass / unclear / fail
+  penalties). A gate hit contributes nothing; a gate miss pulls the score down.
+  This stops table-stakes dimensions from inflating every score.
+
+**Stage 2 can override Stage 1 (capability blocker).** Structural enum match can
+be high while a role is infeasible because it mandates hands-on specialist skills
+the candidate lacks. When the candidate is not a hands-on specialist, the JD
+demands `hands_on` depth, and a cluster (≥ threshold) of *required* technologies
+are unmet by the candidate's proficient skills, the scorer emits a
+`blocking_constraint` that demotes the label (e.g. `good_fit` → `blocked_fit`).
+This is what makes requirement assessment dominate a misleadingly high structural
+score, not merely annotate it.
+
+#### Design principle — the negative-calibration corpus
+
+A scorer is only as trustworthy as the examples that prove it discriminates. It is
+not enough to confirm that good roles score well — the corpus must include
+**negative examples**: roles that *should* score low, or that are structurally
+attractive but genuinely infeasible (the Databricks case — strong SA/AI-Platform
+enums, but mandatory hands-on Spark/SQL/Databricks/multi-cloud). These negatives
+are added to the corpus **specifically to validate discrimination and to set
+thresholds from evidence rather than assumption.** A threshold or penalty
+magnitude is calibrated against where real positive and negative examples actually
+fall, then frozen with a test that pins the calibration anchor (e.g. "Databricks
+must be `blocked_fit`").
+
+Most rule-based scoring skips this and tunes only against positives, which is how
+"everything is a strong fit" ships. Penalty magnitudes, the unmet-requirements
+threshold, and the `fit_label` thresholds remain **provisional** until the
+negative-calibration corpus is in place. (Implemented: `scoring/CLAUDE.md`.)
+
 ---
 
 ## 7. Phase 3 — Job Tracker

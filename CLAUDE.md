@@ -49,7 +49,7 @@ thing tests actually run against.
 | Phase | Status |
 |---|---|
 | 1 — Corpus Engine | ✅ complete — Steps 0–9, 95 tests. Pipeline end-to-end. |
-| 2 — Scoring Engine | 🔄 scorer built (awaiting review) — `scoring/{profile,scorer}.py` + `score.py`, 162 tests. **Option A** shipped: `ApplicationRecord` (v1.3) → `corpus/scored/`; `SCHEMA_VERSION=1.3` / `JDRECORD_SCHEMA_VERSION=1.2` (JD corpus not migrated). 3-stage rule scorer. Conventions: `scoring/CLAUDE.md`. Plan: `docs/job_radar_PHASE2_PLAN.md`. |
+| 2 — Scoring Engine | 🔄 scorer built — `scoring/{profile,scorer}.py` + `score.py`, 171 tests. **Option A** (`ApplicationRecord` v1.3 → `corpus/scored/`; `SCHEMA_VERSION=1.3` / `JDRECORD_SCHEMA_VERSION=1.2`, JD corpus not migrated) + **Option A+B scoring model** (gates vs signal; capability blocker lets Stage 2 override Stage 1 — Databricks calibration anchor → `blocked_fit`). **`fit_label` thresholds + penalty magnitudes PROVISIONAL** — to be set from a negative-calibration corpus (5–6 negative JDs, §6.9) before finalising. Conventions: `scoring/CLAUDE.md`. Plan: `docs/job_radar_PHASE2_PLAN.md`. |
 | 3 — Job Tracker | Not started |
 | 4 — Discovery Layer | Not started |
 | 5 — UI | Not started |

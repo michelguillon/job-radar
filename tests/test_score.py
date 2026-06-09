@@ -88,9 +88,20 @@ def test_main_does_not_mutate_input(tmp_path, monkeypatch):
     assert src.read_text(encoding="utf-8") == before  # input untouched
 
 
-def test_main_min_fit_changes_shown_count(tmp_path, monkeypatch, capsys):
+def _shown_count(out: str) -> int:
+    for line in out.splitlines():
+        if line.startswith("Shown:"):
+            return int(line.split("Shown:")[1].split("|")[0].strip())
+    raise AssertionError(f"no Shown: line in output:\n{out}")
+
+
+def test_main_min_fit_reduces_shown_count(tmp_path, monkeypatch, capsys):
+    # Robust to heuristic re-tuning: raising --min-fit can only narrow what shows.
     monkeypatch.setattr(cli, "OUT_DIR", str(tmp_path / "scored"))
-    cli.main(["--input", str(MANUAL_JSONL), "--min-fit", "8"])
-    out = capsys.readouterr().out
-    # The two good_fit (score 7) manual records fall below min-fit 8.
-    assert "Filtered: 2" in out
+
+    cli.main(["--input", str(MANUAL_JSONL), "--min-fit", "1"])
+    shown_low = _shown_count(capsys.readouterr().out)
+    cli.main(["--input", str(MANUAL_JSONL), "--min-fit", "9"])
+    shown_high = _shown_count(capsys.readouterr().out)
+
+    assert shown_high < shown_low

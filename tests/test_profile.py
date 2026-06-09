@@ -57,6 +57,9 @@ def test_real_profile_loads_and_validates():
     assert profile.relocation is False
     assert "AdTech" in profile.domains_strong
     assert len(profile.requirement_gap_watchlist) == 8
+    # proficient = strong + developing technologies (familiar excluded).
+    assert "python" in profile.proficient_technologies
+    assert "cloud-native architectures" not in profile.proficient_technologies  # familiar tier
 
 
 # --- Validation ---

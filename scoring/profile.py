@@ -69,6 +69,11 @@ class Profile:
     domains_adjacent: frozenset[str]
     domains_lower: frozenset[str]
 
+    # Technologies the candidate can execute on (skills.technologies strong +
+    # developing, lowercased). "familiar" is deliberately excluded — it does not
+    # clear a hands-on specialist bar. Used by the scorer's capability-blocker rule.
+    proficient_technologies: frozenset[str] = field(default_factory=frozenset)
+
     requirement_gap_watchlist: list[str] = field(default_factory=list)
     positive_signals: list[str] = field(default_factory=list)
     negative_signals: list[str] = field(default_factory=list)
@@ -156,6 +161,13 @@ def from_dict(data: dict) -> Profile:
 
     c = data["candidate"]
     loc = c.get("location", {})
+    techs = (c.get("skills") or {}).get("technologies") or {}
+    proficient = [
+        t.lower()
+        for tier in ("strong", "developing")
+        for t in (techs.get(tier) or [])
+        if isinstance(t, str)
+    ]
     return Profile(
         profile_version=data["profile_version"],
         search_mode=c["search_mode"],
@@ -170,6 +182,7 @@ def from_dict(data: dict) -> Profile:
         domains_strong=_frozen(c, "domains.strong"),
         domains_adjacent=_frozen(c, "domains.adjacent"),
         domains_lower=_frozen(c, "domains.lower_priority"),
+        proficient_technologies=frozenset(proficient),
         requirement_gap_watchlist=_list(c, "requirement_gap_watchlist"),
         positive_signals=_list(c, "positive_signals"),
         negative_signals=_list(c, "negative_signals"),

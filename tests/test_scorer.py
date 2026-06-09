@@ -7,11 +7,13 @@ import pytest
 from models.record import JDRecord, validate_application_record
 from scoring.profile import Profile, load_profile
 from scoring.scorer import (
+    capability_blocker,
     priority_score,
     score,
     stage1_fit,
     stage2_constraints,
     stage3_label,
+    unmet_required_technologies,
 )
 from tests.factories import make_record
 
@@ -55,23 +57,19 @@ def make_profile(**over) -> Profile:
 # --- Stage 1: per-dimension scoring ---
 
 
+# Signal dimensions (role, domain, technical_depth) carry the 0–10 scale.
+
+
 def test_role_match_is_binary():
     p = make_profile()
     assert stage1_fit(jd(role_type=["Product"]), p)[1].role == 2
     assert stage1_fit(jd(role_type=["GTM"]), p)[1].role == 0
 
 
-def test_seniority_exact_near_and_gap():
-    p = make_profile(target_seniority=frozenset({"director"}))
-    assert stage1_fit(jd(seniority="director"), p)[1].seniority == 2  # exact
-    assert stage1_fit(jd(seniority="vp"), p)[1].seniority == 1        # one rank away
-    assert stage1_fit(jd(seniority="ic"), p)[1].seniority == 0        # far
-
-
 def test_technical_depth_target_acceptable_mismatch():
     p = make_profile()
     assert stage1_fit(jd(technical_depth="hybrid"), p)[1].technical_depth == 2
-    assert stage1_fit(jd(technical_depth="hands_on"), p)[1].technical_depth == 1
+    assert stage1_fit(jd(technical_depth="hands_on"), p)[1].technical_depth == 0.5  # acceptable (Option B)
     p2 = make_profile(acceptable_technical_depth=frozenset())
     assert stage1_fit(jd(technical_depth="hands_on"), p2)[1].technical_depth == 0
 
@@ -84,26 +82,68 @@ def test_domain_strong_adjacent_lower_none():
     assert stage1_fit(jd(domain=["Payments"]), p)[1].domain == 0
 
 
-def test_location_dimension():
+def test_signal_weighting_role_and_domain_primary():
+    # role+domain are weighted ×2 (primary), technical_depth ×1 (secondary).
     p = make_profile()
-    assert stage1_fit(jd(remote_policy="remote", location="anywhere"), p)[1].location == 2
-    assert stage1_fit(jd(remote_policy="onsite", location="London"), p)[1].location == 2  # base city
-    assert stage1_fit(jd(remote_policy="onsite", location="Berlin"), p)[1].location == 0
-    assert stage1_fit(jd(remote_policy="hybrid", location="not_stated"), p)[1].location == 1
-    assert stage1_fit(jd(remote_policy="hybrid", location="Paris"), p)[1].location == 0
+    perfect = jd(role_type=["Product"], domain=["AdTech"], technical_depth="hybrid")
+    assert stage1_fit(perfect, p)[1].signal == 10  # 2*2 + 2*2 + 2*1
+    # Losing the domain (4 pts) hurts more than dropping to acceptable depth (1.5 pts).
+    no_domain = jd(role_type=["Product"], domain=["Payments"], technical_depth="hybrid")
+    weak_depth = jd(role_type=["Product"], domain=["AdTech"], technical_depth="hands_on")
+    assert stage1_fit(no_domain, p)[1].signal < stage1_fit(weak_depth, p)[1].signal
 
 
-def test_fit_score_clamped_and_rounded():
+# Gates (seniority, location) only ever subtract — a hit contributes 0.
+
+
+def test_seniority_gate_is_binary():
+    p = make_profile(target_seniority=frozenset({"director", "manager"}))
+    g_pass = stage1_fit(jd(seniority="director"), p)[1]
+    assert g_pass.seniority_gate == "pass" and g_pass.seniority_penalty == 0
+    g_miss = stage1_fit(jd(seniority="vp"), p)[1]  # one rank away is still a miss now
+    assert g_miss.seniority_gate == "miss" and g_miss.seniority_penalty == 3
+
+
+def test_location_gate_pass_unclear_fail():
     p = make_profile()
-    # Perfect across the board → 10.
+    remote = stage1_fit(jd(remote_policy="remote", location="anywhere"), p)[1]
+    base = stage1_fit(jd(remote_policy="onsite", location="London HQ"), p)[1]
+    unclear = stage1_fit(jd(remote_policy="hybrid", location="not_stated"), p)[1]
+    onsite_far = stage1_fit(jd(remote_policy="onsite", location="Berlin"), p)[1]
+    hybrid_far = stage1_fit(jd(remote_policy="hybrid", location="Paris"), p)[1]
+    assert (remote.location_gate, remote.location_penalty) == ("pass", 0)
+    assert (base.location_gate, base.location_penalty) == ("pass", 0)  # base city, any policy
+    assert (unclear.location_gate, unclear.location_penalty) == ("unclear", 1)
+    assert (onsite_far.location_gate, onsite_far.location_penalty) == ("fail", 3)
+    assert (hybrid_far.location_gate, hybrid_far.location_penalty) == ("fail", 3)
+
+
+def test_gate_miss_lowers_an_otherwise_perfect_score():
+    p = make_profile()
     perfect = jd(role_type=["Product"], seniority="director", technical_depth="hybrid",
-                 domain=["AdTech"], remote_policy="remote")
+                 domain=["AdTech"], remote_policy="remote", location="anywhere")
     assert stage1_fit(perfect, p)[0] == 10
-    # Nothing matches → clamped up to the 1 floor, not 0.
+    # Same role/domain/depth, but a seniority miss + location blocker pull it down.
+    gated = jd(role_type=["Product"], seniority="exec", technical_depth="hybrid",
+               domain=["AdTech"], remote_policy="onsite", location="Berlin")
+    assert stage1_fit(gated, p)[0] == 4  # 10 - 3 (seniority) - 3 (location)
+
+
+def test_fit_score_clamped_to_floor():
+    # Nothing matches and both gates miss → clamped up to the 1 floor, not below.
+    p2 = make_profile(acceptable_technical_depth=frozenset(), target_seniority=frozenset({"ic"}))
     nothing = jd(role_type=["GTM"], seniority="exec", technical_depth="hands_on",
                  domain=["Payments"], remote_policy="onsite", location="Berlin")
-    p2 = make_profile(acceptable_technical_depth=frozenset(), target_seniority=frozenset({"ic"}))
     assert stage1_fit(nothing, p2)[0] == 1
+
+
+def test_round_half_up():
+    # A hands_on (acceptable, 0.5) depth produces x.5 raws; halves round up.
+    p = make_profile()
+    rec = jd(role_type=["Product"], domain=["AI/ML"], technical_depth="hands_on",
+             seniority="director", remote_policy="remote")
+    # signal = 4 + 2 + 0.5 = 6.5, no penalties → 7, not 6.
+    assert stage1_fit(rec, p)[0] == 7
 
 
 # --- Stage 2: blocking constraints + requirement gaps ---
@@ -144,6 +184,68 @@ def test_gap_not_emitted_when_not_in_watchlist():
     p = make_profile(requirement_gap_watchlist=[])  # empty watchlist
     gaps, _ = stage2_constraints(jd(required_technologies=["Salesforce administration"]), p)
     assert gaps == []
+
+
+# --- Capability blocker: Stage 2 overrides a misleadingly high Stage 1 ---
+
+PROFICIENT = frozenset({"python", "llm apis", "rag pipelines", "api platforms"})
+
+
+def test_capability_blocker_fires_on_hands_on_specialist_stack():
+    # The Databricks calibration case.
+    p = make_profile(proficient_technologies=PROFICIENT)
+    databricks = jd(
+        technical_depth="hands_on",
+        required_technologies=["Python", "SQL", "Apache Spark", "Databricks platform", "AWS", "Azure", "GCP"],
+    )
+    assert len(unmet_required_technologies(databricks, p)) == 6  # all but Python
+    assert capability_blocker(databricks, p) is not None
+
+
+def test_capability_blocker_needs_hands_on_depth():
+    # Same heavy unmet stack, but a hybrid/leadership role → the candidate leads,
+    # not executes, so it is NOT blocked (the Writer / Fin case).
+    p = make_profile(proficient_technologies=PROFICIENT)
+    hybrid_role = jd(
+        technical_depth="hybrid",
+        required_technologies=["SQL", "Apache Spark", "Databricks platform", "AWS", "Azure"],
+    )
+    assert capability_blocker(hybrid_role, p) is None
+
+
+def test_capability_blocker_respects_threshold():
+    # Below the unmet threshold → no blocker (the JP Morgan / Mistral case).
+    p = make_profile(proficient_technologies=PROFICIENT)
+    light = jd(technical_depth="hands_on", required_technologies=["Python", "SQL", "LLM APIs"])
+    assert len(unmet_required_technologies(light, p)) == 1
+    assert capability_blocker(light, p) is None
+
+
+def test_capability_blocker_skipped_for_hands_on_candidate():
+    # A candidate who targets hands_on is not blocked by a specialist stack.
+    p = make_profile(
+        proficient_technologies=PROFICIENT,
+        target_technical_depth=frozenset({"hands_on", "hybrid"}),
+    )
+    databricks = jd(
+        technical_depth="hands_on",
+        required_technologies=["SQL", "Apache Spark", "Databricks platform", "AWS"],
+    )
+    assert capability_blocker(databricks, p) is None
+
+
+def test_capability_blocker_demotes_label_via_stage2():
+    # End-to-end: high structural fit + capability blocker → blocked_fit, not good_fit.
+    p = make_profile(proficient_technologies=PROFICIENT)
+    databricks = jd(
+        role_type=["Solutions Engineering"], seniority="lead", technical_depth="hands_on",
+        domain=["AI Platform"], remote_policy="hybrid", location="London",
+        required_technologies=["Python", "SQL", "Apache Spark", "Databricks platform", "AWS", "Azure", "GCP"],
+    )
+    rec = score(databricks, p, SCORED_AT)
+    assert rec.blocking_constraints  # the capability blocker is present
+    assert rec.fit_label == "blocked_fit"
+    assert rec.priority_score == rec.fit_score - 2  # blocker priority penalty
 
 
 # --- Stage 3: classification ---
@@ -205,14 +307,33 @@ def test_score_returns_valid_new_application_record():
 
 def test_all_manual_records_score_and_validate():
     profile = load_profile()
-    labels = set()
+    by_company = {}
     lines = [ln for ln in MANUAL_JSONL.read_text(encoding="utf-8").splitlines() if ln.strip()]
     assert len(lines) == 10
+    fit_scores = []
     for line in lines:
         record = JDRecord.from_jsonl(line)
         result = score(record, profile, SCORED_AT)
         assert validate_application_record(result) == [], result
         assert result.job_id == record.id
-        labels.add(result.fit_label)
-    # A curated corpus of relevant roles → at least strong_fit and good_fit present.
-    assert {"strong_fit", "good_fit"} <= labels
+        by_company[record.company] = result
+        fit_scores.append(result.fit_score)
+    # The gates+signal model must actually discriminate on a curated corpus —
+    # not collapse everything into strong_fit (the calibration goal).
+    assert len(set(fit_scores)) >= 4, f"too little spread: {sorted(fit_scores)}"
+
+
+def test_databricks_is_a_blocked_fit_calibration_anchor():
+    # Databricks: strong SA/AI-Platform enums, but mandatory hands-on Spark/SQL/
+    # Databricks/multi-cloud → not feasible. Must NOT surface as strong/good fit.
+    profile = load_profile()
+    for line in MANUAL_JSONL.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        record = JDRecord.from_jsonl(line)
+        if record.company == "Databricks":
+            result = score(record, profile, SCORED_AT)
+            assert result.fit_label == "blocked_fit", result.fit_label_reason
+            assert result.blocking_constraints
+            return
+    raise AssertionError("Databricks record not found in the manual corpus")
