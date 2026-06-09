@@ -44,7 +44,7 @@ bump `SCHEMA_VERSION`.
 
 | Phase | Status |
 |---|---|
-| 1 — Corpus Engine | Steps 0–4 complete (66 tests). Steps 5–9 pending. |
+| 1 — Corpus Engine | Steps 0–5 complete (69 tests). Steps 6–9 pending. |
 | 2 — Scoring Engine | Not started |
 | 3 — Job Tracker | Not started |
 | 4 — Discovery Layer | Not started |
@@ -62,8 +62,8 @@ bump `SCHEMA_VERSION`.
 | 2 — Clean + dedupe | ✅ complete | clean(), record_hash(). SHA-256 backfill run in Step 3. |
 | 3 — Greenhouse | ✅ complete | collectors/base.py + greenhouse.py + collect.py. Backfill done — 10 unique hashes, 0 pending. |
 | 4 — Lever + Ashby | ✅ complete | lever.py + ashby.py registered. Live: Mistral 170, Perplexity 71. |
-| 5 — VC boards | ⏳ next | Inspect 2 boards manually before building |
-| 6 — Tier 2 tooling | ❌ pending | |
+| 5 — VC boards | ✅ complete | All boards JS-rendered (requires_js) — skeleton skips all; scraping deferred to Phase 4 |
+| 6 — Tier 2 tooling | ⏳ next | Interactive review CLI; resumable checkpoint |
 | 7 — Batch API labelling | ❌ pending | |
 | 8 — Validation + stats | ❌ pending | stats.py needs --export-index for Phase 5 |
 | 9 — Export | ❌ pending | |
@@ -111,8 +111,8 @@ They migrate to `ApplicationRecord` in Phase 2.
 - [x] Verify Greenhouse slugs — Anthropic (377 jobs) and Figma (167)
       confirmed live
 - [ ] Verify remaining Lever/Ashby slugs before Step 4 live runs
-- [ ] Inspect 2 VC board pages, populate selectors in vc_boards.yaml
-      before Step 5
+- [x] Inspect VC board pages — done (Step 5 gate). All JS-rendered SPAs;
+      scraping deferred to Phase 4 (see Learning 10)
 
 ---
 

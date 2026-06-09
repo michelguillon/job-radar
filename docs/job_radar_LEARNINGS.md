@@ -390,5 +390,35 @@ layer, the seam was in the wrong place.
 
 ---
 
+### Learning 10 — VC board scraping is not viable with BeautifulSoup
+
+#### Learning
+
+All major VC portfolio job boards (Balderton via Consider, Atomico via Getro,
+Index Ventures via Vue + Elasticsearch) use JavaScript-rendered frontends. The
+HTML source contains zero job listings — only JS framework scaffolding.
+BeautifulSoup gets nothing useful. One board (Index Ventures) exposed
+Elasticsearch credentials in the page source but the account had no search
+permissions.
+
+#### Surprise
+
+The assumption that VC boards would be simpler than ATS platforms was wrong.
+They are more complex — custom-branded React/Vue SPAs built on platforms like
+Consider and Getro, with no public API. The era of static HTML VC job boards is
+over.
+
+#### Reusable Pattern
+
+Before speccing a scraping source, verify the HTML source directly (Ctrl+U) to
+confirm job listings are present without JavaScript. A loading spinner in the
+raw HTML is an immediate disqualifier for BeautifulSoup. For JS-rendered
+sources, the options are: Playwright (adds complexity and maintenance), a paid
+aggregator API (Apify, TheirStack), or deferral. For a Phase 1 build, deferral
+is almost always correct — don't let a hard scraping problem block a working
+pipeline.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

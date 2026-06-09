@@ -25,7 +25,7 @@ from datetime import date
 
 import yaml
 
-from collectors import ashby, greenhouse, lever
+from collectors import ashby, greenhouse, lever, vc_boards
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +39,9 @@ COLLECTORS = {
     "ashby": ashby.fetch_company,
 }
 
-SOURCES = (*sorted({"greenhouse", "lever", "ashby", "vc_board"}), "all")
+# vc_boards is collected by board (vc_boards.yaml), not by company slug, so it
+# routes through vc_boards.collect() rather than the COLLECTORS registry.
+SOURCES = (*sorted(COLLECTORS), "vc_boards", "all")
 
 
 def load_companies(path: str = SEEDS_PATH) -> list[dict]:
@@ -109,6 +111,10 @@ def main(argv: list[str] | None = None) -> int:
 
     companies = select(load_companies(), args.source, args.company)
     records = collect(companies)
+
+    # VC boards are board-based, not company-based, and currently all skipped.
+    if args.source in ("vc_boards", "all"):
+        records.extend(vc_boards.collect())
 
     if args.dry_run:
         print(f"[dry-run] {len(records)} records from {len(companies)} companies (not written)")

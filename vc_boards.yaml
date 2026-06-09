@@ -1,77 +1,69 @@
-# VC portfolio job boards (HTML scrape, scoped — docs/SPEC_JD_REFINERY.md §3.5).
-# BeautifulSoup only. If a board requires JavaScript, set status: requires_js and skip.
-# Selectors are EMPTY by design — inspect each board manually and populate before Step 5.
-# Do not guess selectors.
+# VC portfolio job boards (docs/job_radar_SPEC.md §5.3 Step 5).
+#
+# Step 5 gate outcome (2026-06-09): ALL boards are JavaScript-rendered SPAs
+# with no accessible public API — BeautifulSoup scraping is not viable for any.
+# Three were inspected directly (Balderton, Atomico, Index Ventures); the rest
+# share the same SPA pattern and are treated the same pending inspection.
+# See docs/job_radar_LEARNINGS.md "Learning 10 — VC board scraping is not
+# viable with BeautifulSoup".
+#
+# platform: consider | getro | custom | unknown
+# status:   requires_js  (none are scrapable with BeautifulSoup)
 boards:
-  - name: a16z
-    url: https://jobs.a16z.com
-    status: active
-    selector: ""
-    fields:
-      title: ""
-      company: ""
-      url: ""
-    notes: "US AI, infrastructure"
-  - name: Sequoia
-    url: https://jobs.sequoiacap.com
-    status: active
-    selector: ""
-    fields:
-      title: ""
-      company: ""
-      url: ""
-    notes: "US AI, SaaS, fintech"
-  - name: Index Ventures
-    url: https://jobs.indexventures.com
-    status: active
-    selector: ""
-    fields:
-      title: ""
-      company: ""
-      url: ""
-    notes: "EU/US B2B SaaS, fintech"
   - name: Balderton
     url: https://jobs.balderton.com
-    status: active
-    selector: ""
-    fields:
-      title: ""
-      company: ""
-      url: ""
-    notes: "EU deep tech, B2B"
+    status: requires_js
+    platform: consider
+    notes: >-
+      Inspected. Built on the Consider platform — a JS-rendered SPA. Raw HTML
+      contains only framework scaffolding, zero job listings. No public API.
   - name: Atomico
     url: https://jobs.atomico.com
-    status: active
-    selector: ""
-    fields:
-      title: ""
-      company: ""
-      url: ""
-    notes: "EU AI, infrastructure"
+    status: requires_js
+    platform: getro
+    notes: >-
+      Inspected. Built on the Getro platform — a JS-rendered SPA. Raw HTML
+      contains only framework scaffolding, zero job listings. No public API.
+  - name: Index Ventures
+    url: https://jobs.indexventures.com
+    status: requires_js
+    platform: custom
+    notes: >-
+      Inspected. Custom Vue + Elasticsearch frontend, JS-rendered. Page source
+      exposed Elasticsearch credentials but the account had no search
+      permissions. No usable public API.
+  - name: a16z
+    url: https://jobs.a16z.com
+    status: requires_js
+    platform: unknown
+    notes: >-
+      Not individually inspected. All inspected VC boards are JS-rendered SPAs;
+      treated the same. Verify HTML source before any future scrape attempt.
+  - name: Sequoia
+    url: https://jobs.sequoiacap.com
+    status: requires_js
+    platform: unknown
+    notes: >-
+      Not individually inspected. All inspected VC boards are JS-rendered SPAs;
+      treated the same. Verify HTML source before any future scrape attempt.
   - name: Accel
     url: https://accel.com/jobs
-    status: active
-    selector: ""
-    fields:
-      title: ""
-      company: ""
-      url: ""
-    notes: "US/EU enterprise SaaS"
+    status: requires_js
+    platform: unknown
+    notes: >-
+      Not individually inspected. All inspected VC boards are JS-rendered SPAs;
+      treated the same. Verify HTML source before any future scrape attempt.
   - name: General Catalyst
     url: https://jobs.generalcatalyst.com
-    status: active
-    selector: ""
-    fields:
-      title: ""
-      company: ""
-      url: ""
-    notes: "US AI, healthtech"
+    status: requires_js
+    platform: unknown
+    notes: >-
+      Not individually inspected. All inspected VC boards are JS-rendered SPAs;
+      treated the same. Verify HTML source before any future scrape attempt.
   - name: Lightspeed
     url: https://jobs.lsvp.com
-    status: active
-    selector: ""
-    fields:
-      title: ""
-      company: ""
-      url: ""
-    notes: "US/EU enterprise, AI"
+    status: requires_js
+    platform: unknown
+    notes: >-
+      Not individually inspected. All inspected VC boards are JS-rendered SPAs;
+      treated the same. Verify HTML source before any future scrape attempt.
