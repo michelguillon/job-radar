@@ -1,41 +1,14 @@
 """Tests for collectors.greenhouse and the shared collectors.base plumbing.
 
-HTTP is mocked by monkeypatching ``collectors.base.requests.get`` with a fake
-that returns scripted status codes / JSON, so no network or extra dependency is
-needed. Backoff sleeps are injected as no-ops.
+HTTP is mocked via tests.fake_http (no network, no extra dependency). Backoff
+sleeps are injected as no-ops.
 """
 
 import requests
 
-import collectors.base as base
 from collectors.base import NotFound, fetch_json
 from collectors.greenhouse import fetch_company
-
-
-class FakeResponse:
-    def __init__(self, status_code, payload=None):
-        self.status_code = status_code
-        self._payload = payload or {}
-
-    def json(self):
-        return self._payload
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise requests.HTTPError(f"{self.status_code} error")
-
-
-def patch_get(monkeypatch, responses):
-    """Make ``requests.get`` return successive ``responses`` per call."""
-    calls = {"n": 0}
-
-    def fake_get(url, **kwargs):
-        i = min(calls["n"], len(responses) - 1)
-        calls["n"] += 1
-        return responses[i]
-
-    monkeypatch.setattr(base.requests, "get", fake_get)
-    return calls
+from tests.fake_http import FakeResponse, patch_get
 
 
 # --- fetch_json (shared) ---

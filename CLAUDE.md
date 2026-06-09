@@ -44,7 +44,7 @@ bump `SCHEMA_VERSION`.
 
 | Phase | Status |
 |---|---|
-| 1 — Corpus Engine | Steps 0–3 complete (58 tests). Steps 4–9 pending. |
+| 1 — Corpus Engine | Steps 0–4 complete (66 tests). Steps 5–9 pending. |
 | 2 — Scoring Engine | Not started |
 | 3 — Job Tracker | Not started |
 | 4 — Discovery Layer | Not started |
@@ -61,8 +61,8 @@ bump `SCHEMA_VERSION`.
 | 1 — JDRecord model | ✅ complete | v1.2, validate(), round-trip tests |
 | 2 — Clean + dedupe | ✅ complete | clean(), record_hash(). SHA-256 backfill run in Step 3. |
 | 3 — Greenhouse | ✅ complete | collectors/base.py + greenhouse.py + collect.py. Backfill done — 10 unique hashes, 0 pending. |
-| 4 — Lever + Ashby | ⏳ next | Register in collect.COLLECTORS; reuse collectors/base.py |
-| 5 — VC boards | ❌ pending | Inspect 2 boards manually before building |
+| 4 — Lever + Ashby | ✅ complete | lever.py + ashby.py registered. Live: Mistral 170, Perplexity 71. |
+| 5 — VC boards | ⏳ next | Inspect 2 boards manually before building |
 | 6 — Tier 2 tooling | ❌ pending | |
 | 7 — Batch API labelling | ❌ pending | |
 | 8 — Validation + stats | ❌ pending | stats.py needs --export-index for Phase 5 |

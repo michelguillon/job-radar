@@ -25,7 +25,7 @@ from datetime import date
 
 import yaml
 
-from collectors import greenhouse
+from collectors import ashby, greenhouse, lever
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +35,8 @@ RAW_DIR = "corpus/raw"
 # ATS name -> fetch_company(slug, company_name, *, collected_at=...) callable.
 COLLECTORS = {
     "greenhouse": greenhouse.fetch_company,
+    "lever": lever.fetch_company,
+    "ashby": ashby.fetch_company,
 }
 
 SOURCES = (*sorted({"greenhouse", "lever", "ashby", "vc_board"}), "all")

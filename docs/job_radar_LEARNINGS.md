@@ -363,5 +363,32 @@ is what breaks.
 
 ---
 
+### Learning 9 — The base abstraction paid off: new ATS = response shape only
+
+#### Learning
+
+Adding Lever and Ashby (Step 4) on top of `collectors/base.py` came to a URL
+template, a per-job field mapping, and a one-line registry entry each — no new
+retry, backoff, error-handling, or record-construction code. The three sources
+disagree on envelope shape: Greenhouse and Ashby return `{"jobs": [...]}`, Lever
+returns a bare JSON array; Lever further splits a JD across `description` +
+`lists` + `additional`, so the collector reassembles them into one `raw_html`.
+
+#### Surprise
+
+How *differently* three "public JSON job APIs" model the same thing. The
+abstraction held only because it drew the line in the right place — transport
+and record shape shared, response parsing per-source — rather than trying to
+unify the responses themselves.
+
+#### Reusable Pattern
+
+Validate a base abstraction by adding the second and third implementation, not
+by admiring the first. The right seam is the one where adding source N+1 touches
+only the part that genuinely differs. If a new source forces edits to the shared
+layer, the seam was in the wrong place.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*
