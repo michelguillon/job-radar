@@ -11,7 +11,8 @@ reads THAT structure and exposes only what the scorer consumes as a flat
 ``Profile`` object:
 
   enum-bound (Stage-1 structural matching):
-    target_roles, target_seniority, target_technical_depth,
+    target_roles (primary), conditional_primary (domains enum-bound; signal
+    lists free-text), secondary_roles, target_seniority, target_technical_depth,
     acceptable_technical_depth, acceptable_remote_policy,
     domains_strong / domains_adjacent / domains_lower, search_mode
   free-text (Stage-2 gaps/signals — fuzzy, NOT enum-bound):
@@ -49,13 +50,27 @@ class ProfileError(ValueError):
 
 
 @dataclass
+class ConditionalRole:
+    """A role that is a *primary* target only in the right context (e.g. Product).
+
+    Qualifies as primary when the JD is in one of ``domains``, OR pairs a
+    ``strong_signals`` hit with a ``weak_signals`` hit; otherwise it falls back to
+    secondary. ``domains`` is enum-bound (DOMAIN); the signal lists are free-text.
+    """
+
+    domains: frozenset[str]
+    strong_signals: list[str] = field(default_factory=list)
+    weak_signals: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Profile:
     """The candidate definition the scorer matches every JDRecord against."""
 
     profile_version: str
     search_mode: str
 
-    target_roles: frozenset[str]
+    target_roles: frozenset[str]            # primary roles (universally on-target)
     target_seniority: frozenset[str]
     target_delivery_motion: frozenset[str]
     target_technical_depth: frozenset[str]
@@ -73,6 +88,11 @@ class Profile:
     # developing, lowercased). "familiar" is deliberately excluded — it does not
     # clear a hands-on specialist bar. Used by the scorer's capability-blocker rule.
     proficient_technologies: frozenset[str] = field(default_factory=frozenset)
+
+    # Three-tier role targeting (see ConditionalRole). primary lives in
+    # target_roles above; these two complete it. Optional — a profile may omit them.
+    conditional_primary: dict[str, ConditionalRole] = field(default_factory=dict)
+    secondary_roles: frozenset[str] = field(default_factory=frozenset)
 
     requirement_gap_watchlist: list[str] = field(default_factory=list)
     positive_signals: list[str] = field(default_factory=list)
@@ -134,7 +154,40 @@ def validate_profile(data: dict) -> list[str]:
         if bad:
             errors.append(f"candidate.{dotted}: {bad!r} not in allowed values")
 
+    _validate_role_tiers(candidate, errors)
     return errors
+
+
+def _validate_role_tiers(candidate: dict, errors: list[str]) -> None:
+    """Validate the optional secondary + conditional_primary role tiers."""
+    secondary = _dig(candidate, "target_roles.secondary")
+    if secondary is not None:
+        if not isinstance(secondary, list):
+            errors.append("candidate.target_roles.secondary: must be a list")
+        else:
+            bad = [v for v in secondary if v not in ROLE_TYPE]
+            if bad:
+                errors.append(f"candidate.target_roles.secondary: {bad!r} not in allowed values")
+
+    cond = _dig(candidate, "target_roles.conditional_primary")
+    if cond is None:
+        return
+    if not isinstance(cond, dict):
+        errors.append("candidate.target_roles.conditional_primary: must be a mapping")
+        return
+    for role_name, spec in cond.items():
+        if role_name not in ROLE_TYPE:
+            errors.append(f"candidate.target_roles.conditional_primary: {role_name!r} not in allowed values")
+        domains = spec.get("domains") if isinstance(spec, dict) else None
+        if domains is None:
+            errors.append(f"candidate.target_roles.conditional_primary.{role_name}.domains: required list")
+            continue
+        if not isinstance(domains, list):
+            errors.append(f"candidate.target_roles.conditional_primary.{role_name}.domains: must be a list")
+            continue
+        bad = [d for d in domains if d not in DOMAIN]
+        if bad:
+            errors.append(f"candidate.target_roles.conditional_primary.{role_name}.domains: {bad!r} not in allowed values")
 
 
 # --- Loading ---------------------------------------------------------------
@@ -148,6 +201,21 @@ def _frozen(candidate: dict, dotted: str) -> frozenset[str]:
 def _list(candidate: dict, key: str) -> list[str]:
     value = candidate.get(key)
     return list(value) if isinstance(value, list) else []
+
+
+def _conditional_roles(candidate: dict) -> dict[str, ConditionalRole]:
+    raw = _dig(candidate, "target_roles.conditional_primary")
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, ConditionalRole] = {}
+    for role_name, spec in raw.items():
+        spec = spec or {}
+        out[role_name] = ConditionalRole(
+            domains=frozenset(spec.get("domains") or []),
+            strong_signals=list(spec.get("strong_signals") or []),
+            weak_signals=list(spec.get("weak_signals") or []),
+        )
+    return out
 
 
 def from_dict(data: dict) -> Profile:
@@ -183,6 +251,8 @@ def from_dict(data: dict) -> Profile:
         domains_adjacent=_frozen(c, "domains.adjacent"),
         domains_lower=_frozen(c, "domains.lower_priority"),
         proficient_technologies=frozenset(proficient),
+        conditional_primary=_conditional_roles(c),
+        secondary_roles=_frozen(c, "target_roles.secondary"),
         requirement_gap_watchlist=_list(c, "requirement_gap_watchlist"),
         positive_signals=_list(c, "positive_signals"),
         negative_signals=_list(c, "negative_signals"),

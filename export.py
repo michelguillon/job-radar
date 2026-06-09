@@ -34,6 +34,11 @@ from models.record import _EXTRACTION_FIELDS, JDRecord, SchemaVersionError, vali
 OUT_DIR = "corpus/finetune_export"
 DEFAULT_INPUT = "corpus/validated/validated_*.jsonl"
 
+# corpus/calibration/ holds scorer-regression FIXTURES (deliberately negative /
+# thin / synthetic). They are never training data — excluded from every export
+# set regardless of the input glob (Option 1 corpus-hygiene decision, 2026-06-09).
+EXCLUDE_PATH_MARKER = "calibration"
+
 # eval omits Tier 4 (automated, unreviewed); train = all tiers; full = no filter.
 SET_TIERS = {
     "eval": {1, 2, 3},
@@ -46,6 +51,9 @@ def load_records(input_glob: str) -> list[JDRecord]:
     """Parse records, silently skipping wrong-schema_version / unparseable lines."""
     records: list[JDRecord] = []
     for path in sorted(glob.glob(input_glob, recursive=True)):
+        if EXCLUDE_PATH_MARKER in path.replace(os.sep, "/"):
+            logging.getLogger("export").info("skipping calibration fixtures: %s", path)
+            continue
         with open(path, encoding="utf-8") as fh:
             for line in fh:
                 if not line.strip():

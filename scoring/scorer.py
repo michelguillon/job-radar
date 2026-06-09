@@ -63,6 +63,11 @@ LOCATION_FAIL_PENALTY = 3.0    # cannot work there (non-base onsite, relocation:
 # isolates the genuine blocker. PROVISIONAL — re-tune as negative JDs are added.
 UNMET_REQUIRED_THRESHOLD = 3
 
+# A negative_signal matched as a core requirement caps fit_score here (B). A role
+# whose *nature* is something the candidate is steering away from can't be a strong
+# fit however the enums line up (e.g. a pure quota-carrying sales role).
+NEGATIVE_SIGNAL_CEILING = 5
+
 # company_stage values treated as early-stage for the priority urgency nudge.
 # (PHASE2_PLAN wrote "startup", but that is a company_size_signal value — the
 # COMPANY_STAGE equivalent is "seed".)
@@ -70,6 +75,20 @@ EARLY_STAGE = frozenset({"seed", "series_a", "series_b"})
 
 # Location verbatim values that carry no usable city signal.
 _UNCLEAR_LOCATION = frozenset({"", "not_stated", "unknown"})
+
+# Filler tokens allowed in an *onsite* location alongside the base city. Anything
+# else left over (another city/region name) means the stated location is not a
+# clean base-city onsite, so the gate fails regardless of a base-city substring
+# (E2 — the Appian case: title "London", body "McLean, Virginia, 4-5 days/week").
+_ONSITE_LOCATION_FILLER = frozenset(
+    {
+        "england", "scotland", "wales", "uk", "u", "k", "united", "kingdom", "gb",
+        "great", "britain", "greater", "central", "city", "centre", "center", "area",
+        "metro", "region", "district", "hq", "headquarters", "office", "offices",
+        "based", "location", "site", "onsite", "on", "hybrid", "remote", "days",
+        "day", "week", "per", "the", "at", "our", "in", "and", "or",
+    }
+)
 
 
 def _round_half_up(value: float) -> int:
@@ -107,8 +126,30 @@ class Breakdown:
         return self.signal - self.seniority_penalty - self.location_penalty
 
 
+def _conditional_qualifies(jd: JDRecord, cond) -> bool:
+    """A conditional_primary role (e.g. Product) behaves as primary when the JD is
+    in a relevant domain, or pairs a strong signal with a weak signal."""
+    if set(jd.domain) & cond.domains:
+        return True
+    text = " ".join([jd.raw_text, *jd.required_competencies, *jd.required_technologies]).lower()
+    strong = any(sig.lower() in text for sig in cond.strong_signals)
+    weak = any(sig.lower() in text for sig in cond.weak_signals)
+    return strong and weak
+
+
 def _role_score(jd: JDRecord, profile: Profile) -> float:
-    return 2.0 if set(jd.role_type) & profile.target_roles else 0.0
+    """Three-tier role match (deviates from SPEC §6.5's flat lookup):
+    primary 2.0 → conditional_primary (2.0 if it qualifies, else 1.0) → secondary
+    1.0 → no match 0.0."""
+    jd_roles = set(jd.role_type)
+    if jd_roles & profile.target_roles:  # primary
+        return 2.0
+    for role_name, cond in profile.conditional_primary.items():
+        if role_name in jd_roles:
+            return 2.0 if _conditional_qualifies(jd, cond) else 1.0
+    if jd_roles & profile.secondary_roles:
+        return 1.0
+    return 0.0
 
 
 def _domain_score(jd: JDRecord, profile: Profile) -> float:
@@ -137,19 +178,34 @@ def _seniority_gate(jd: JDRecord, profile: Profile) -> tuple[str, float]:
     return "miss", SENIORITY_MISS_PENALTY
 
 
+def _onsite_is_clean_base(loc: str, base: str) -> bool:
+    """True if an onsite location is the base city with only filler around it.
+
+    A base-city substring is not enough: "London (…McLean, Virginia…)" names a
+    different real work city, so removing the base leaves non-filler tokens → not
+    clean → the onsite gate fails (E2)."""
+    if not base or base not in loc:
+        return False
+    residual = re.findall(r"[a-z]+", loc.replace(base, " "))
+    return all(tok in _ONSITE_LOCATION_FILLER for tok in residual)
+
+
 def _location_gate(jd: JDRecord, profile: Profile) -> tuple[str, float]:
-    """Gate with one graded 'unclear' tier. Base-city onsite still passes —
-    the candidate already lives there; relocation:false is encoded by NOT
-    excusing a named non-base city."""
+    """Gate with one graded 'unclear' tier. Base-city onsite/hybrid passes — the
+    candidate already lives there; relocation:false is encoded by NOT excusing a
+    named non-base city. Onsite is strict (E2): it must be a clean base city, so a
+    deceptive base-city substring can't rescue a different stated work location."""
     loc = jd.location.strip().lower()
     base = profile.location_base.strip().lower()
     if jd.remote_policy == "remote":
         return "pass", 0.0
-    if base and base in loc:  # base city, any policy
+    if jd.remote_policy == "onsite":
+        if _onsite_is_clean_base(loc, base):
+            return "pass", 0.0
+        return "fail", LOCATION_FAIL_PENALTY  # non-base (or ambiguous) onsite
+    # hybrid or not_stated:
+    if base and base in loc:  # base city, hybrid/unspecified policy
         return "pass", 0.0
-    if jd.remote_policy == "onsite":  # non-base onsite, relocation:false
-        return "fail", LOCATION_FAIL_PENALTY
-    # hybrid or not_stated, and not the base city:
     if loc in _UNCLEAR_LOCATION:
         return "unclear", LOCATION_UNCLEAR_PENALTY
     return "fail", LOCATION_FAIL_PENALTY  # a named non-base city, no remote option
@@ -175,21 +231,14 @@ def stage1_fit(jd: JDRecord, profile: Profile) -> tuple[int, Breakdown]:
 # --- Stage 2: blocking constraints + requirement gaps ----------------------
 
 # Generic, scorer-owned hard stops (NOT in the profile). Kept conservative to
-# avoid false positives (e.g. "French market" must not trip the language rule).
-# Each entry: (human-readable constraint, compiled regex over the JD haystack).
+# avoid false positives. Each entry: (constraint, regex over the JD haystack).
+# The language rule is handled separately (_language_blocker) because it needs a
+# "plus / advantage" exclusion the others don't.
 _BLOCKING_RULES = [
     (
         "active security clearance required",
         re.compile(r"security clearance|(?:active|valid|current)\s+clearance"
                    r"|clearance\s+(?:is\s+)?required|\b(?:ts/sci|dv cleared|sc cleared)\b"),
-    ),
-    (
-        "native/fluent non-English language required",
-        re.compile(
-            r"\b(?:native|fluent|mother[- ]tongue|bilingual)\b[^.]{0,40}\b"
-            r"(?:german|french|spanish|italian|dutch|portuguese|mandarin|"
-            r"cantonese|japanese|korean|arabic|hebrew|russian|polish|swedish)\b"
-        ),
     ),
     (
         "work authorisation / no visa sponsorship",
@@ -202,6 +251,43 @@ _BLOCKING_RULES = [
         ),
     ),
 ]
+
+# A — native/fluent non-English language. Conservative on two axes: the qualifier
+# must be adjacent to a named language (so "French market" is ignored), AND the
+# requirement must not be framed as optional ("…is a plus/advantage/desirable"),
+# which is what wrongly blocked the Grey Matter AdTech anchor.
+_LANGUAGE_RE = re.compile(
+    r"\b(?:native|fluent|mother[- ]tongue|bilingual)\b[^.]{0,40}?\b"
+    r"(?:german|french|spanish|italian|dutch|portuguese|mandarin|"
+    r"cantonese|japanese|korean|arabic|hebrew|russian|polish|swedish)\b"
+)
+_OPTIONAL_FRAMING_RE = re.compile(
+    r"\b(?:a |an )?(?:plus|advantage|advantageous|desirable|desired|bonus|"
+    r"preferred|preferable|asset|beneficial|welcome|nice[- ]to[- ]have|"
+    r"would be (?:a |an )?(?:plus|asset|advantage))\b"
+)
+
+# C — M&A / post-merger integration. Promoted from a soft requirement_gap to a
+# blocker when it is a CORE requirement (job title or a required competency, not
+# nice-to-have) — the Director, M&A Integrations calibration case.
+_MA_RE = re.compile(
+    r"\bm&a\b|mergers?\s+(?:and|&)\s+acquisitions?|post[- ]merger|merger integration"
+)
+
+# B — negative_signals. The profile names role NATURES to steer away from; these
+# regexes detect each in a JD's core content. Keyed by the EXACT profile phrase
+# (reword in the profile → trigger stops firing). A hit caps fit at
+# NEGATIVE_SIGNAL_CEILING. Only phrases with a trigger here can fire.
+_NEGATIVE_SIGNAL_TRIGGERS = {
+    "pure quota-carrying sales role": re.compile(
+        r"quota[- ]?(?:carrying|crushing)|own(?:ing)?\s+(?:individual\s+)?quotas?"
+        r"|individual\s+quotas?|carry(?:ing)?\s+a\s+quota"
+    ),
+    "narrow implementation consultant role": re.compile(r"implementation consultant"),
+    "role centred primarily on CRM administration": re.compile(
+        r"crm administ|salesforce administ"
+    ),
+}
 
 # Requirement-gap detection. The profile's requirement_gap_watchlist says WHAT to
 # watch; these regexes say HOW to detect each phrase in a JD. Keyed by the EXACT
@@ -285,27 +371,80 @@ def _haystack(jd: JDRecord) -> str:
     return " ".join(parts).lower()
 
 
+def _job_title(jd: JDRecord) -> str:
+    """The JD's title — first non-empty line of raw_text — lowercased."""
+    for line in jd.raw_text.splitlines():
+        if line.strip():
+            return line.strip().lower()
+    return ""
+
+
+def _core_text(jd: JDRecord) -> str:
+    """Title + required (not nice-to-have) content — for 'core requirement' tests."""
+    return " ".join([_job_title(jd), *jd.required_competencies, *jd.required_technologies]).lower()
+
+
+def _language_blocker(text: str) -> bool:
+    """True if a native/fluent non-English language is required (A). A match framed
+    as optional ('…is a plus/advantage/desirable') within ~50 chars does not count."""
+    for m in _LANGUAGE_RE.finditer(text):
+        window = text[m.start():m.end() + 50]
+        if not _OPTIONAL_FRAMING_RE.search(window):
+            return True
+    return False
+
+
+def ma_blocker(jd: JDRecord) -> str | None:
+    """C — M&A / post-merger integration required as a core requirement (job title
+    or a required competency, not nice-to-have)."""
+    if _MA_RE.search(_job_title(jd)) or any(_MA_RE.search(c.lower()) for c in jd.required_competencies):
+        return "M&A / post-merger integration experience required"
+    return None
+
+
+def negative_signal_hits(jd: JDRecord, profile: Profile) -> list[str]:
+    """B — profile negative_signals detected as a core requirement of the JD."""
+    core = _core_text(jd) + " " + jd.raw_text.lower()
+    return [
+        sig
+        for sig in profile.negative_signals
+        if sig in _NEGATIVE_SIGNAL_TRIGGERS and _NEGATIVE_SIGNAL_TRIGGERS[sig].search(core)
+    ]
+
+
+# M&A gaps that are subsumed once M&A is promoted to a blocker (no double-count).
+_MA_GAPS = ("M&A transaction experience", "post-merger integration leadership")
+
+
 def stage2_constraints(jd: JDRecord, profile: Profile) -> tuple[list[str], list[str]]:
     """Return ``(requirement_gaps, blocking_constraints)``.
 
-    blocking_constraints = generic scorer-owned hard stops + the capability
-    blocker (a mandatory hands-on specialist requirement the candidate lacks).
-    The capability blocker is how Stage 2 overrides a misleadingly high Stage 1.
+    blocking_constraints = generic scorer-owned hard stops (clearance, language,
+    sponsorship) + the hands-on capability blocker + the M&A core-requirement
+    blocker. These are how Stage 2 overrides a misleadingly high Stage 1.
     """
     text = _haystack(jd)
 
     blocking = [label for label, pattern in _BLOCKING_RULES if pattern.search(text)]
+    if _language_blocker(text):
+        blocking.append("native/fluent non-English language required")
     cap = capability_blocker(jd, profile)
     if cap:
         blocking.append(cap)
+    ma = ma_blocker(jd)
+    if ma:
+        blocking.append(ma)
 
     gaps = [
         phrase
         for phrase in profile.requirement_gap_watchlist
         if phrase in _GAP_TRIGGERS and _GAP_TRIGGERS[phrase].search(text)
     ]
-    # No double-count: a gap already surfaced as a blocking constraint is dropped.
+    # No double-count: drop gaps already surfaced as blockers, and the soft M&A
+    # gaps once M&A has been promoted to a blocker.
     gaps = [g for g in gaps if g not in blocking]
+    if ma:
+        gaps = [g for g in gaps if g not in _MA_GAPS]
     return gaps, blocking
 
 
@@ -345,7 +484,7 @@ def priority_score(fit_score: int, jd: JDRecord, blocking: list[str], mode: str)
 
 # --- fit_label_reason ------------------------------------------------------
 
-_ROLE_PHRASE = {2.0: "strong role match", 0.0: "role mismatch"}
+_ROLE_PHRASE = {2.0: "strong role match", 1.0: "secondary role match", 0.0: "role mismatch"}
 _DOMAIN_PHRASE = {2.0: "strong domain", 1.0: "adjacent domain", 0.5: "peripheral domain", 0.0: "domain gap"}
 _DEPTH_PHRASE = {2.0: "ideal technical depth", 0.5: "acceptable technical depth", 0.0: "technical-depth mismatch"}
 _GATE_NOTE = {
@@ -394,9 +533,20 @@ def score(jd: JDRecord, profile: Profile, scored_at: str, mode: str | None = Non
     active_mode = mode or profile.search_mode
 
     fit, bd = stage1_fit(jd, profile)
+
+    # B — a negative_signal matched as a core requirement caps the fit_score:
+    # the role's nature is something the candidate is steering away from.
+    neg = negative_signal_hits(jd, profile)
+    if neg:
+        fit = min(fit, NEGATIVE_SIGNAL_CEILING)
+
     gaps, blocking = stage2_constraints(jd, profile)
     label = stage3_label(fit, blocking)
     priority = priority_score(fit, jd, blocking, active_mode)
+
+    reason = fit_label_reason(label, bd, gaps, blocking)
+    if neg:
+        reason += f" Capped by negative signal: {neg[0]}."
 
     return ApplicationRecord(
         job_id=jd.id,
@@ -404,7 +554,7 @@ def score(jd: JDRecord, profile: Profile, scored_at: str, mode: str | None = Non
         scored_at=scored_at,
         fit_score=fit,
         fit_label=label,
-        fit_label_reason=fit_label_reason(label, bd, gaps, blocking),
+        fit_label_reason=reason,
         requirement_gaps=gaps,
         blocking_constraints=blocking,
         priority_score=priority,

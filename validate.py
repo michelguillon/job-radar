@@ -53,6 +53,7 @@ def _write_jsonl(path: str, items) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate labelled JSONL against schema v1.2.")
     parser.add_argument("--input", required=True, help="Glob for labelled JSONL")
+    parser.add_argument("--out-dir", default=OUT_DIR, help=f"Output directory (default: {OUT_DIR})")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -62,8 +63,8 @@ def main(argv: list[str] | None = None) -> int:
     failed = parse_failures + failed
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    validated_path = os.path.join(OUT_DIR, f"validated_{ts}.jsonl")
-    failures_path = os.path.join(OUT_DIR, f"failures_{ts}.jsonl")
+    validated_path = os.path.join(args.out_dir, f"validated_{ts}.jsonl")
+    failures_path = os.path.join(args.out_dir, f"failures_{ts}.jsonl")
     _write_jsonl(validated_path, passed)
     _write_jsonl(failures_path, failed)
 

@@ -62,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--input", required=True, help="Glob for cleaned JSONL (e.g. 'corpus/raw/clean_*.jsonl')")
     parser.add_argument("--tier", type=int, choices=(3, 4), required=True, help="Tier to assign (3 or 4 — Claude-labelled)")
     parser.add_argument("--poll-interval", type=int, default=30, help="Seconds between batch status polls")
+    parser.add_argument("--out-dir", default=OUT_DIR, help=f"Output directory (default: {OUT_DIR})")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -78,11 +79,11 @@ def main(argv: list[str] | None = None) -> int:
     labelled, failures = label.merge_results(records, results, tier=args.tier)
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    labelled_path = os.path.join(OUT_DIR, f"labelled_{ts}.jsonl")
+    labelled_path = os.path.join(args.out_dir, f"labelled_{ts}.jsonl")
     _write_jsonl(labelled_path, labelled)
     failures_path = None
     if failures:
-        failures_path = os.path.join(OUT_DIR, f"failures_{ts}.jsonl")
+        failures_path = os.path.join(args.out_dir, f"failures_{ts}.jsonl")
         _write_jsonl(failures_path, failures)
 
     cost = label.estimate_cost(results)

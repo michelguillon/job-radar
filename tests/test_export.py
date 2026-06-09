@@ -55,3 +55,16 @@ def test_load_records_skips_wrong_schema_version(tmp_path):
 
     loaded = export.load_records(str(tmp_path / "*.jsonl"))
     assert len(loaded) == 1  # wrong-schema_version line skipped
+
+
+def test_load_records_excludes_calibration_fixtures(tmp_path):
+    # Calibration fixtures must never reach a fine-tune export, even if globbed.
+    train_dir = tmp_path / "validated"
+    cal_dir = tmp_path / "calibration"
+    train_dir.mkdir()
+    cal_dir.mkdir()
+    (train_dir / "validated_x.jsonl").write_text(_labelled(4).to_jsonl() + "\n", encoding="utf-8")
+    (cal_dir / "validated_x.jsonl").write_text(_labelled(4).to_jsonl() + "\n", encoding="utf-8")
+
+    loaded = export.load_records(str(tmp_path / "**" / "*.jsonl"))
+    assert len(loaded) == 1  # only the non-calibration file is loaded

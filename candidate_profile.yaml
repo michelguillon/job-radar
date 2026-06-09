@@ -22,7 +22,7 @@
 #   active    = stretch opportunities surfaced separately
 #   broad     = all opportunities surfaced with contextual fit labels
 
-profile_version: "1.0"
+profile_version: "1.2"
 last_updated: "2026-06-09"
 
 candidate:
@@ -30,14 +30,52 @@ candidate:
 
   search_mode: selective
 
+  # Three-tier role targeting (deviates from SPEC §6.5's flat list):
+  #   primary             — universally on-target roles (role_score 2.0)
+  #   conditional_primary — a role that is only a strong target in the right
+  #                         context. Product is primary ONLY when the JD is in a
+  #                         relevant domain, or pairs a strong + a weak signal;
+  #                         otherwise it falls back to secondary (role_score 1.0).
+  #   secondary           — acceptable but not core (role_score 1.0)
   target_roles:
     primary:
-      - Product
       - Solutions Engineering
       - Solutions Architecture
       - Solutions Consulting
       - AI Delivery
       - Partner SA
+
+    conditional_primary:
+      Product:
+        # Narrowed (D, 2026-06-09): dropped "Enterprise Software" and
+        # "Data & Analytics" — too generic, they gave a maritime PM (OneOcean) the
+        # full Product boost. "Identity" is intentionally NOT here (not a DOMAIN
+        # enum value); identity fit is captured via strong_signals below.
+        domains:
+          - AdTech
+          - AI Platform
+          - AI/ML
+          - FinTech
+          - Developer Tools
+        strong_signals:
+          - identity
+          - identity graph
+          - ad targeting
+          - privacy
+          - consent
+          - commercialisation
+        weak_signals:
+          - platform
+          - GTM
+          - go-to-market
+          - product delivery
+          - cross-functional
+          - engineering
+          - sales
+          - roadmap
+
+    secondary:
+      - Product
 
   target_seniority:
     - director

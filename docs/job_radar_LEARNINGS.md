@@ -717,5 +717,114 @@ fit."
 
 ---
 
+### Learning 17 — A binary role match fails a domain-conditional target
+
+#### Learning
+
+The candidate's targets are mostly universal (Solutions Engineering is on-target
+anywhere) but one — Product — is only a strong target *in the right domain*. A
+Product role in AdTech/AI is a top opportunity; a Product role in maritime
+logistics is not. A flat `target_roles` lookup can't express that: include Product
+and every PM scores 2.0; exclude it and the good ones score 0. The fix was a
+**three-tier** role dimension — primary (2.0) / `conditional_primary` (2.0 if the
+JD is in a relevant domain or pairs a strong+weak signal, else 1.0) / secondary
+(1.0) / none (0) — with the conditional rule driven by the profile (domains +
+signal lists) and the detection by the scorer.
+
+#### Surprise
+
+The first cut of the conditional domain list was too generous: it included
+`Enterprise Software` and `Data & Analytics`. The maritime OneOcean PM was
+(defensibly) extracted as `Enterprise Software` → it qualified as primary and got
+the full boost — the exact false-positive the tier was meant to prevent. The tier
+only works if its qualifying domains are *narrow and differentiating*; a catch-all
+domain in the list silently re-creates the binary "every PM is primary" behaviour.
+
+#### Reusable Pattern
+
+When a target is conditional rather than universal, model the condition explicitly
+(a separate tier with its own qualifying criteria) instead of forcing it into the
+same flat list as the unconditional targets. Keep the qualifying set deliberately
+narrow — and validate it against a *negative* example (a target-role JD in a wrong
+domain) that must NOT qualify, or a broad qualifier will quietly defeat the tier.
+
+---
+
+### Learning 18 — Calibrating against negatives: every miss was a rule, not a threshold
+
+#### Learning
+
+Scoring a 13-JD corpus built deliberately from negatives + conditional cases
+surfaced six mismatches — and **not one was fixed by moving a `fit_label`
+threshold.** Each was a specific rule: (A) the language blocker tripped on "French
+is *a plus*" and wrongly blocked the best positive; (B) a role mismatch (role 0)
+still reached good_fit on domain+depth alone — the profile's `negative_signals`
+weren't wired in; (C) an M&A Director scored good_fit because M&A was a soft gap,
+not a blocker; (D) the conditional Product domain list was too broad (Learning 17);
+(E) the location gate was fooled by a "London" substring when the body said
+"McLean, Virginia, onsite". Fixes: optional-framing exclusion; a `negative_signal`
+fit ceiling; promote M&A to a blocker when it's a *core* requirement (title or
+required competency, not nice-to-have); narrow the domains; strict onsite
+("clean base city only"). Spread went from 8/10-strong-ish to a genuine range.
+
+#### Surprise
+
+A separate, irreducible cause emerged that the scorer *can't* fix (F): the Tier-4
+automated extraction is generous — it maps off-target roles onto target
+`role_type`s and defaults to `Enterprise Software` as a catch-all domain. Because
+`Enterprise Software` is a *strong* domain (+4), a single over-tag inflates a
+clearly-wrong role (the maritime PM stayed strong_fit even after its role correctly
+fell to 1.0). No scoring rule undoes a bad upstream label; that's an
+extraction/corpus task, deferred.
+
+#### Reusable Pattern
+
+When calibrating a rule-based scorer, resist reaching for the thresholds first —
+walk each miss back to the *rule* that produced it; thresholds are the last lever,
+not the first. And separate "the scorer scored it wrong" from "the scorer was fed a
+wrong label": conflating the two leads to over-fitting scorer rules to paper over
+extraction errors. Fix the rule where the rule is wrong; log the extraction ceiling
+as a known limitation and fix it at the source.
+
+---
+
+### Learning 19 — The contribution view turns calibration into a one-line detector
+
+#### Learning
+
+After A–E, re-scoring the full 23-record corpus (10 schema-forming + 13
+calibration) showed the scorer separates genuine positives from negatives cleanly,
+and the **provisional thresholds held without adjustment** — set from where real
+positives/negatives actually fell, not from assumption. Decomposing the 11
+`strong_fit` records by *weighted contribution* (role ×2, domain ×2, depth ×1) told
+the rest of the story: **role is the dominant contributor in 10 of 11** (a primary
+or qualifying-conditional role match), **domain separates the tiers** (strong-domain
+4 → the 10s; adjacent 2 → the 8s), and **depth is only a tiebreaker** (Mistral's
+`hands_on` 0.5 made it 9 not 10). Most importantly, the *residual* errors
+(OneOcean, Fin CSM still `strong_fit`) were **extraction-quality** problems, not
+scorer-rule problems — generous `role_type` mapping and `Enterprise Software` as a
+catch-all domain — which no threshold or rule can undo.
+
+#### Surprise
+
+The contribution view yielded a free diagnostic: **"a `strong_fit` where role is not
+the top contributor" flags an extraction-inflated record.** OneOcean was the only
+strong_fit carried by domain alone (its role had correctly fallen to the secondary
+tier) — i.e. a record propped up by a generous domain tag rather than genuine role
+alignment. A property of *how a score was composed* turned out to be a sharper
+quality signal than the score itself.
+
+#### Reusable Pattern
+
+Don't just rank by the final score — inspect **what composed it**. Per-dimension
+contribution makes "right answer for the wrong reason" visible and often hands you a
+cheap, durable anomaly detector (here: dominant-dimension ≠ expected-dimension).
+And when calibration thresholds set from evidence hold against a fresh, deliberately
+adversarial corpus, that is the signal to **stop tuning the scorer** and fix the
+remaining errors at their true source (extraction) — over-fitting scorer rules to
+paper over upstream label noise is the failure mode to avoid.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

@@ -49,8 +49,8 @@ thing tests actually run against.
 | Phase | Status |
 |---|---|
 | 1 — Corpus Engine | ✅ complete — Steps 0–9, 95 tests. Pipeline end-to-end. |
-| 2 — Scoring Engine | 🔄 scorer built — `scoring/{profile,scorer}.py` + `score.py`, 171 tests. **Option A** (`ApplicationRecord` v1.3 → `corpus/scored/`; `SCHEMA_VERSION=1.3` / `JDRECORD_SCHEMA_VERSION=1.2`, JD corpus not migrated) + **Option A+B scoring model** (gates vs signal; capability blocker lets Stage 2 override Stage 1 — Databricks calibration anchor → `blocked_fit`). **`fit_label` thresholds + penalty magnitudes PROVISIONAL** — to be set from a negative-calibration corpus (5–6 negative JDs, §6.9) before finalising. Conventions: `scoring/CLAUDE.md`. Plan: `docs/job_radar_PHASE2_PLAN.md`. |
-| 3 — Job Tracker | Not started |
+| 2 — Scoring Engine | ✅ **complete (scorer v1)** — `scoring/{profile,scorer}.py` + `score.py`, 179 tests. Option A (`ApplicationRecord` v1.3 → `corpus/scored/`) + gates-vs-signal model + 3-tier role (primary/conditional/secondary) + capability/M&A blockers + negative-signal ceiling. Thresholds **set from evidence** (held against the 23-record corpus: 10 manual + 13 calibration). Calibration regression set: `corpus/calibration/`. Known limit F (extraction generosity) deferred. Conventions: `scoring/CLAUDE.md`. |
+| 3 — Job Tracker | 🔄 in progress — building a **real** corpus (target 500+ validated). First: verify collection end-to-end → `corpus/raw/`. Then weekly extraction-quality review (watch Enterprise Software / Product over-tagging) and a structured score review after 100+ real scored jobs. Option D (career-pattern scoring) **deferred** until prod data shows role+domain+depth+blockers can't explain errors. |
 | 4 — Discovery Layer | Not started |
 | 5 — UI | Not started |
 | 6 — Fine-Tuned Analyser | Deferred (Project 5) |
@@ -98,6 +98,22 @@ thing tests actually run against.
     (ApplicationRecord) + `JDRECORD_SCHEMA_VERSION="1.2"` (frozen). The three
     sites that hard-coded `SCHEMA_VERSION` for a JDRecord envelope (`factories`,
     `test_record`, `stats.export_index`) were repointed at `JDRECORD_SCHEMA_VERSION`.
+15. (Phase 2 scorer) The `role` dimension is **no longer a flat `target_roles`
+    lookup** (deviates from SPEC §6.5). It is three-tier — primary (2.0) /
+    `conditional_primary` (Product: 2.0 if a relevant domain or strong+weak signal,
+    else 1.0) / secondary (1.0) / no match (0). Profile gained
+    `conditional_primary` + `secondary` under `target_roles`.
+16. (Phase 2 scorer, **known limitation — F, deferred**) Tier-4 automated
+    extraction is generous on `role_type` mapping and defaults to `Enterprise
+    Software` as a catch-all `domain`. Because `Enterprise Software` is a *strong*
+    domain, this inflates some off-target roles; scorer gates/blockers partially
+    recover. Full fix = extraction-prompt/corpus maintenance, deferred to a later
+    phase.
+17. **Calibration corpus** lives in `corpus/calibration/` (13 deliberately
+    negative / conditional JDs) and is **excluded from train/eval/fine-tune
+    exports** (`export.py` skips any `calibration` path). It is a **permanent
+    scorer regression set** — re-run `python -m scripts.report_calibration --full`
+    whenever the scorer changes, and re-validate the spread before locking a change.
 
 ---
 

@@ -6,8 +6,11 @@ import pytest
 
 from models.record import JDRecord, validate_application_record
 from scoring.profile import Profile, load_profile
+from scoring.profile import ConditionalRole
 from scoring.scorer import (
     capability_blocker,
+    ma_blocker,
+    negative_signal_hits,
     priority_score,
     score,
     stage1_fit,
@@ -232,6 +235,74 @@ def test_capability_blocker_skipped_for_hands_on_candidate():
         required_technologies=["SQL", "Apache Spark", "Databricks platform", "AWS"],
     )
     assert capability_blocker(databricks, p) is None
+
+
+def test_language_blocker_fires_when_required():
+    p = make_profile()
+    _, blocks = stage2_constraints(jd(raw_text="Must be a native German speaker."), p)
+    assert "native/fluent non-English language required" in blocks
+
+
+def test_language_blocker_excludes_optional_framing():
+    # A — the Grey Matter case: a language framed as "a plus" must NOT block.
+    p = make_profile()
+    _, blocks = stage2_constraints(
+        jd(raw_text="Fluent in English; proficiency in Spanish or French is a plus."), p
+    )
+    assert "native/fluent non-English language required" not in blocks
+
+
+def test_ma_blocker_from_job_title():
+    # C — M&A in the title is a core requirement → blocker.
+    j = jd(raw_text="Director, M&A Integrations\nLead post-merger integration across Europe.")
+    assert ma_blocker(j) is not None
+    p = make_profile()
+    _, blocks = stage2_constraints(j, p)
+    assert any("M&A" in b for b in blocks)
+
+
+def test_ma_only_in_body_is_not_a_core_requirement():
+    # M&A mentioned only in prose (not title / required competency) → no blocker.
+    j = jd(raw_text="Solutions Engineer\nNice if you have seen an M&A process once.")
+    assert ma_blocker(j) is None
+
+
+def test_negative_signal_caps_fit():
+    # B — a pure quota-carrying sales role caps fit at the ceiling.
+    p = make_profile(negative_signals=["pure quota-carrying sales role"])
+    quota = jd(role_type=["Solutions Engineering"], domain=["AdTech"], technical_depth="hybrid",
+               seniority="director", remote_policy="remote",
+               raw_text="Senior Sales role. Own individual quotas; quota-carrying hunter.")
+    assert negative_signal_hits(quota, p) == ["pure quota-carrying sales role"]
+    rec = score(quota, p, SCORED_AT)
+    assert rec.fit_score == 5  # otherwise-perfect signal capped to 5
+    assert "negative signal" in rec.fit_label_reason
+
+
+def test_onsite_gate_fails_on_deceptive_base_substring():
+    # E2 — title says London, body/location names another city → onsite fails.
+    p = make_profile()
+    bd = stage1_fit(
+        jd(remote_policy="onsite", location="London (HQ is McLean, Virginia, 4-5 days/week)"), p
+    )[1]
+    assert (bd.location_gate, bd.location_penalty) == ("fail", 3)
+    # A clean base-city onsite (with only filler) still passes.
+    clean = stage1_fit(jd(remote_policy="onsite", location="London, England"), p)[1]
+    assert clean.location_gate == "pass"
+
+
+def test_conditional_product_falls_back_without_domain_or_signal():
+    # D — Product in a non-conditional domain with no signal → secondary (1.0).
+    p = make_profile(
+        target_roles=frozenset({"Solutions Engineering"}),
+        conditional_primary={"Product": ConditionalRole(
+            domains=frozenset({"AdTech"}), strong_signals=["identity"], weak_signals=["gtm"])},
+        secondary_roles=frozenset({"Product"}),
+    )
+    maritime = jd(role_type=["Product"], domain=["SaaS"], raw_text="Maritime product, nothing relevant")
+    assert stage1_fit(maritime, p)[1].role == 1.0
+    qualifying = jd(role_type=["Product"], domain=["AdTech"], raw_text="ad platform")
+    assert stage1_fit(qualifying, p)[1].role == 2.0
 
 
 def test_capability_blocker_demotes_label_via_stage2():

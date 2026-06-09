@@ -50,8 +50,11 @@ def _valid_data() -> dict:
 def test_real_profile_loads_and_validates():
     profile = load_profile(str(PROFILE_PATH))
     assert isinstance(profile, Profile)
-    assert profile.profile_version == "1.0"
+    assert profile.profile_version == "1.2"  # 1.1 conditional_primary; 1.2 narrowed domains
     assert profile.search_mode == "selective"
+    # D: Enterprise Software / Data & Analytics removed from conditional Product domains.
+    assert "Enterprise Software" not in profile.conditional_primary["Product"].domains
+    assert "AdTech" in profile.conditional_primary["Product"].domains
     assert "Solutions Engineering" in profile.target_roles
     assert profile.location_base == "London"
     assert profile.relocation is False

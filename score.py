@@ -75,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--profile", default="candidate_profile.yaml", help="Path to candidate_profile.yaml")
     parser.add_argument("--min-fit", type=int, default=1, dest="min_fit", help="Presentation filter: only show fit_score >= this")
     parser.add_argument("--mode", choices=("selective", "active", "broad"), help="Override the profile search_mode for this run")
+    parser.add_argument("--out-dir", default=OUT_DIR, help=f"Output directory (default: {OUT_DIR})")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -96,8 +97,8 @@ def main(argv: list[str] | None = None) -> int:
             log.warning("invalid ApplicationRecord for %s: %s", rec.job_id, errors)
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    os.makedirs(OUT_DIR, exist_ok=True)
-    out_path = os.path.join(OUT_DIR, f"scored_{ts}.jsonl")
+    os.makedirs(args.out_dir, exist_ok=True)
+    out_path = os.path.join(args.out_dir, f"scored_{ts}.jsonl")
     with open(out_path, "w", encoding="utf-8") as fh:
         for rec in results:
             fh.write(rec.to_jsonl() + "\n")
