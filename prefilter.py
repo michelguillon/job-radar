@@ -7,14 +7,20 @@ paid Batch labelling, using the structured metadata sidecar (title + location).
     python prefilter.py --date 20260609
     python prefilter.py --dry-run            # report only, write nothing
 
-Pipeline: load raw + meta → clean+dedupe → screen (pipeline.prefilter) → write
-survivors → report. The screen logic is pure and lives in pipeline/prefilter.py;
-this module does the IO and prints the survivor distribution so thresholds can be
-iterated against real numbers before spending on labelling.
+Pipeline: load raw + meta → clean+dedupe → screen (pipeline.prefilter) → divert
+the GTM/partner observation watchlist → write survivors → report. The screen logic
+is pure and lives in pipeline/prefilter.py; this module does the IO and prints the
+survivor distribution so thresholds can be iterated against real numbers before
+spending on labelling.
+
+The **watchlist** (job_radar_SPEC §5.10) diverts location-workable GTM/partner-class
+roles out of the labelling/scoring stream into an observation log — they currently
+score poorly (GTM is not a profile target_role), and we gather real evidence before
+any profile/scorer change. Observation only: never labelled, never scored.
 
 Reads : corpus/raw/raw_{date}.jsonl   + corpus/raw/meta_{date}.jsonl
-Writes: corpus/filtered/filtered_{date}.jsonl  (JDRecords only — the metadata
-        sidecar stays the join source for the later labelling step)
+Writes: corpus/filtered/filtered_{date}.jsonl     (survivors for labelling)
+        corpus/watchlist/watchlist_{date}.jsonl   (GTM/partner observations)
 """
 
 from __future__ import annotations
@@ -28,12 +34,17 @@ from datetime import date
 
 from models.record import JDRecord
 from pipeline.dedupe import dedupe
-from pipeline.prefilter import collapse_near_duplicates, screen
+from pipeline.prefilter import (
+    collapse_near_duplicates,
+    screen,
+    watchlist_signal,
+)
 
 log = logging.getLogger(__name__)
 
 RAW_DIR = "corpus/raw"
 FILTERED_DIR = "corpus/filtered"
+WATCHLIST_DIR = "corpus/watchlist"
 
 
 def load_records(path: str) -> list[JDRecord]:
@@ -67,6 +78,7 @@ def run(
     kept_records, dropped_dupes = dedupe(records, set())
 
     entries: list[dict] = []
+    watchlist: list[dict] = []
     drop_reasons: Counter = Counter()
     role_fail: Counter = Counter()
     loc_fail: Counter = Counter()
@@ -78,7 +90,24 @@ def run(
             no_meta += 1
             drop_reasons["no_meta"] += 1
             continue
+        title = meta.get("title", "")
         result = screen(meta)
+        # GTM/partner observation watchlist: divert a location-workable posting
+        # whose title matches a watchlist signal out of the labelling/scoring
+        # stream (observation only — never scored). Restricted to the gtm_partner
+        # and off_target role buckets so genuine solutions/product/customer targets
+        # (e.g. "Product Manager, Ecosystem Risk") stay in scoring and sales /
+        # recruiting noise (e.g. "Talent Acquisition (…GTM…)") is dropped, not
+        # observed. off_target is included so a watchlist role the role-screen
+        # drops (e.g. a bare "Chief of Staff") is still surfaced for review.
+        if result.loc_keep and watchlist_signal(title) and result.role_bucket in ("gtm_partner", "off_target"):
+            watchlist.append({
+                "company": record.company,
+                "title": title,
+                "location": meta.get("location_str", ""),
+                "source_url": record.source_url,
+            })
+            continue
         if not result.role_keep:
             role_fail[result.role_bucket] += 1
         if not result.loc_keep:
@@ -116,6 +145,7 @@ def run(
         "by_company": by_company,
         "by_role_bucket": by_role_bucket,
         "by_loc_bucket": by_loc_bucket,
+        "watchlist": watchlist,
     }
     return survivors, report
 
@@ -126,6 +156,20 @@ def write_survivors(records: list[JDRecord], path: str) -> str:
     with open(path, "w", encoding="utf-8") as fh:
         for record in records:
             fh.write(record.to_jsonl() + "\n")
+    return path
+
+
+def write_watchlist(watchlist: list[dict], path: str) -> str:
+    """Write the (deduped) watchlist observations to ``path`` as JSONL.
+
+    A durable log so observations accumulate across production runs for the later
+    career-strategy review. Observation only — never labelled or scored.
+    """
+    rows = _dedup_watchlist(watchlist)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        for w in rows:
+            fh.write(json.dumps(w, ensure_ascii=False) + "\n")
     return path
 
 
@@ -163,6 +207,30 @@ def print_report(report: dict) -> None:
     _print_counter("KEPT by company:", report["by_company"])
     _print_counter("KEPT by role bucket:", report["by_role_bucket"])
     _print_counter("KEPT by location bucket:", report["by_loc_bucket"])
+    print_watchlist(report.get("watchlist", []))
+
+
+def _dedup_watchlist(watchlist: list[dict]) -> list[dict]:
+    """Collapse multi-location variants by (company, title), preserving order."""
+    seen: set[tuple[str, str]] = set()
+    out: list[dict] = []
+    for w in watchlist:
+        key = (w["company"], w["title"])
+        if key not in seen:
+            seen.add(key)
+            out.append(w)
+    return out
+
+
+def print_watchlist(watchlist: list[dict]) -> None:
+    """Print the GTM/partner observation watchlist (no scoring; review-only)."""
+    rows = _dedup_watchlist(watchlist)
+    print("\n" + "=" * 60)
+    print("WATCHLIST ROLES  (GTM/partner — observation only, not scored)")
+    print("=" * 60)
+    print(f"count: {len(rows)}")
+    for w in rows:
+        print(f"  {w['company']} | {w['title']} | {w['location'] or '-'}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -179,6 +247,7 @@ def main(argv: list[str] | None = None) -> int:
     raw_path = args.raw or os.path.join(RAW_DIR, f"raw_{args.date}.jsonl")
     meta_path = args.meta or os.path.join(RAW_DIR, f"meta_{args.date}.jsonl")
     out_path = args.out or os.path.join(FILTERED_DIR, f"filtered_{args.date}.jsonl")
+    watchlist_path = os.path.join(WATCHLIST_DIR, f"watchlist_{args.date}.jsonl")
 
     records = load_records(raw_path)
     meta_index = load_meta(meta_path)
@@ -188,10 +257,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.dry_run:
         print(f"\n[dry-run] would write {len(survivors)} survivors to {out_path}")
+        print(f"[dry-run] would log {len(_dedup_watchlist(report['watchlist']))} watchlist roles to {watchlist_path}")
         return 0
 
     write_survivors(survivors, out_path)
+    write_watchlist(report["watchlist"], watchlist_path)
     print(f"\nWrote {len(survivors)} survivors to {out_path}")
+    print(f"Logged {len(_dedup_watchlist(report['watchlist']))} watchlist roles to {watchlist_path}")
     return 0
 
 

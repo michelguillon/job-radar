@@ -152,6 +152,13 @@ thing tests actually run against.
     `strong_fit`; "Enterprise Software" is tagged on almost every record. The fix
     is **extraction-prompt/corpus** work (the next real lever), **not** a scorer
     change — the scorer stays locked until the 100+-job structured review.
+22. (Phase 3) **GTM/partner observation watchlist** (SPEC §5.10) — `prefilter.py`
+    diverts location-workable GTM/partner-class roles (`watchlist_signal` + role
+    bucket `gtm_partner`/`off_target`) out of the labelling/scoring stream into an
+    append-only log `corpus/watchlist/watchlist_{date}.jsonl`. **Observation only:
+    never labelled, scored, or made into an ApplicationRecord; zero Batch cost.**
+    Gathers evidence on whether `GTM` should become a `target_role` *before* any
+    profile/scorer change — `GTM` deliberately stays out of `target_roles` for now.
 
 ---
 

@@ -8,6 +8,7 @@ from pipeline.prefilter import (
     screen,
     screen_location,
     screen_role,
+    watchlist_signal,
 )
 
 
@@ -177,6 +178,61 @@ def test_collapse_keeps_distinct_specialisations():
     ]
     kept, collapsed = collapse_near_duplicates(entries)
     assert len(kept) == 2 and collapsed == 0
+
+
+# --- GTM/partner observation watchlist ---------------------------------------
+
+
+def test_watchlist_signal_matches_gtm_partner_class():
+    for t in ["GTM Leader", "Head of Go-To-Market", "Head of Partner Enablement",
+              "Director, Partner Programs", "Partner Success Lead",
+              "Director Strategic Partnerships", "VP Ecosystem", "Sr. Alliance Director",
+              "Chief of Staff, Global Partnerships", "Director, Customer Success",
+              "Head of Customer Experience"]:
+        assert watchlist_signal(t), t
+
+
+def test_watchlist_signal_excludes_core_targets_and_plain_csm():
+    for t in ["Solutions Architect", "Product Manager, Payments", "Pre-Sales Engineer",
+              "Customer Success Manager", "Partner Manager SI", "Technical Account Manager"]:
+        assert not watchlist_signal(t), t
+
+
+def test_run_diverts_workable_watchlist_from_survivors():
+    records = [
+        _rec("https://x/1", html="<p>a</p>"),  # GTM Leader, London -> watchlist
+        _rec("https://x/2", html="<p>b</p>"),  # Solutions Architect, London -> survivor
+        _rec("https://x/3", html="<p>c</p>"),  # GTM Leader, San Francisco -> location drop (not watchlist)
+    ]
+    meta_index = {
+        "https://x/1": _meta(title="GTM Leader, EMEA", location_str="London", source_url="https://x/1"),
+        "https://x/2": _meta(title="Solutions Architect", location_str="London", source_url="https://x/2"),
+        "https://x/3": _meta(title="GTM Leader", location_str="San Francisco", source_url="https://x/3"),
+    }
+    survivors, report = prefilter.run(records, meta_index)
+
+    assert [r.source_url for r in survivors] == ["https://x/2"]      # watchlist diverted, US dropped
+    wl = report["watchlist"]
+    assert [w["source_url"] for w in wl] == ["https://x/1"]          # only the workable GTM role
+    assert report["drop_reasons"]["location:non_uk_onsite"] == 1     # the US GTM role is a normal location drop
+
+
+def test_run_watchlist_excludes_product_and_recruiting_false_positives():
+    records = [
+        _rec("https://x/1", html="<p>a</p>"),  # Product Manager, Ecosystem Risk -> stays (product)
+        _rec("https://x/2", html="<p>b</p>"),  # Talent Acquisition (GTM) -> dropped (recruiting), not watchlist
+        _rec("https://x/3", html="<p>c</p>"),  # Chief of Staff, Partnerships -> watchlist (gtm_partner)
+    ]
+    meta_index = {
+        "https://x/1": _meta(title="Product Manager, Ecosystem Risk", location_str="London", source_url="https://x/1"),
+        "https://x/2": _meta(title="Talent Acquisition (Engineering/Product/GTM/Science)", location_str="London", source_url="https://x/2"),
+        "https://x/3": _meta(title="Chief of Staff, Global Partnerships", location_str="London", source_url="https://x/3"),
+    }
+    survivors, report = prefilter.run(records, meta_index)
+
+    assert "https://x/1" in {r.source_url for r in survivors}        # product role stays in scoring
+    assert [w["source_url"] for w in report["watchlist"]] == ["https://x/3"]  # only the GTM/partner role
+    assert report["drop_reasons"]["role:recruiting"] == 1            # talent acquisition dropped, not observed
 
 
 # --- CLI run() + IO ----------------------------------------------------------

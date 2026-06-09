@@ -234,3 +234,34 @@ def screen(meta: dict) -> ScreenResult:
     else:
         drop_reason = f"location:{loc_bucket}"
     return ScreenResult(keep, role_keep, role_bucket, loc_keep, loc_bucket, drop_reason)
+
+
+# --- GTM / partner observation watchlist (NO scoring impact) -----------------
+# These adjacent roles currently score poorly because GTM is not a profile
+# target_role. Before any profile/scorer change, gather real evidence: a
+# location-workable posting whose title matches a watchlist signal is DIVERTED
+# from the labelling/scoring stream (no Batch cost, no ApplicationRecord) and
+# logged for a later career-strategy review (job_radar_SPEC §5.10). Observation
+# only — this never affects survivors that go to labelling.
+
+_WATCHLIST_CORE = re.compile(
+    r"\b(?:gtm|go[- ]to[- ]market|partner enablement|partner programs?|"
+    r"partner success|strategic partnerships?|ecosystem|alliances?|"
+    r"chief of staff)\b",
+    re.I,
+)
+_CS_CX = re.compile(r"customer (?:success|experience)", re.I)
+_LEADERSHIP = re.compile(r"\b(?:director|head|vp|chief|lead|leader|leadership)\b", re.I)
+
+
+def watchlist_signal(title: str) -> bool:
+    """True if a title belongs to the GTM/partner observation watchlist.
+
+    Customer Success/Experience matches only at *leadership* level (Director /
+    Head / VP / Lead) — a plain "Customer Success Manager" stays in the scoring
+    stream (it is a different, already-tested question).
+    """
+    t = title or ""
+    if _WATCHLIST_CORE.search(t):
+        return True
+    return bool(_CS_CX.search(t) and _LEADERSHIP.search(t))

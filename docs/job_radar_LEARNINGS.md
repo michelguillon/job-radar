@@ -980,5 +980,43 @@ extraction labels produce better scores without touching scoring logic.
 
 ---
 
+### Learning 21 — Build an observation watchlist before changing the model
+
+#### Learning
+
+Tightening the extraction prompt (Product Marketing → GTM, no Enterprise-Software
+default) deflated the over-tag and exposed a cluster of GTM / partner-enablement /
+strategic-partnerships / Chief-of-Staff roles that had been propped up by the
+Enterprise-Software domain inflation. With the inflation gone they collapsed —
+because `GTM` is not in the profile's `target_roles`, so they score 0 on the role
+dimension. The instinct is to "fix" it by adding GTM to `target_roles`. Instead
+Michel chose a **watchlist**: a deterministic, no-LLM, no-scoring pass that diverts
+this class out of the labelling/scoring stream into an append-only observation log
+(`corpus/watchlist/`), to gather real evidence ("would Michel actually pursue
+these?") before touching the profile or scorer.
+
+#### Surprise
+
+The watchlist's first real run flagged two false positives that title-keyword
+matching alone produced: "Product Manager, **Ecosystem** Risk" (a genuine product
+role caught by the `ecosystem` signal) and "Talent Acquisition (…**GTM**…)" (a
+recruiting role caught by `GTM` in a skills-list parenthetical). The fix wasn't a
+better keyword list — it was **composing the watchlist with the existing role
+screen**: divert only when the role bucket is `gtm_partner` or `off_target`, never
+a genuine `solutions`/`product`/`customer` target, and never `sales`/`recruiting`.
+The classifier already knew what these roles were; the watchlist just had to ask it.
+
+#### Reusable Pattern
+
+When a model change exposes a systematically mis-valued class, **resist re-tuning
+the model on a hunch**. Build a cheap observation mechanism that *sets the class
+aside with evidence* and answer the value question ("would the user actually want
+these?") from real data before changing targets or weights. And a keyword filter is
+almost always sharper when it **defers to an existing classifier** for the "is this
+even the right kind of thing?" question rather than trying to encode that in the
+keywords themselves.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

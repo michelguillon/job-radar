@@ -706,6 +706,32 @@ The capability blocker correctly demoted all 8 hands-on roles; Known Limitation 
 Marketing role scored strong_fit). See LEARNINGS. Structured scorer review still
 gated on 100+ scored jobs — do not change the scorer before then.
 
+### 5.10 — GTM / partner observation watchlist (no scoring impact)
+
+Tightening the extraction prompt (§5.9) deflated the Enterprise-Software over-tag
+and exposed a cluster of adjacent roles — GTM / partner enablement / strategic
+partnerships / alliances / Chief of Staff / customer-success *leadership* — that
+score poorly only because `GTM` is not a profile `target_role`. Rather than change
+the profile or scorer on a hunch, gather evidence first.
+
+The pre-label filter (`prefilter.py`) runs a **deterministic, no-LLM, no-scoring**
+watchlist pass: a location-workable posting whose title matches a watchlist signal
+(`pipeline.prefilter.watchlist_signal`) **and** whose role bucket is `gtm_partner`
+or `off_target` is **diverted** out of the labelling/scoring stream into an
+append-only log `corpus/watchlist/watchlist_{date}.jsonl` and printed under
+`WATCHLIST ROLES`. The bucket restriction keeps genuine solutions/product/customer
+targets in scoring (e.g. "Product Manager, **Ecosystem** Risk" is not diverted) and
+drops sales/recruiting noise ("Talent Acquisition (…**GTM**…)") rather than
+observing it. Watchlist roles are **never labelled, scored, or written to an
+ApplicationRecord** — no Batch cost.
+
+First run (2026-06-09 collection): **8** watchlist roles diverted (Chief of Staff
+Global Partnerships, GTM Leaders, Partner Enablement Lead, Alliance directors, GTM
+Strategy Director), 54 survivors to labelling. After ~50–100 watchlist observations
+or 2–4 weeks of production use, a manual review answers "would Michel realistically
+pursue these?" — only then is `GTM` considered for `target_roles` / scoring. Until
+then it stays outside the scoring model.
+
 ---
 
 ## 6. Phase 2 — Scoring Engine
