@@ -50,3 +50,17 @@ def normalise(text: str) -> str:
 def clean(raw_html: str) -> str:
     """Full cleaning pipeline: strip HTML, strip boilerplate, normalise."""
     return normalise(strip_boilerplate(strip_html(raw_html)))
+
+
+def clean_readable(raw_html: str) -> str:
+    """Human-readable clean: strip HTML + boilerplate, keep line breaks and case.
+
+    Unlike ``clean`` (which lowercases and collapses everything to one line for
+    the dedup hash), this preserves paragraph structure and original casing — the
+    form stored in a labelled record's ``raw_text`` so the labeller reads a normal
+    JD and the scorer's first-line heuristics behave. Collapses intra-line runs of
+    spaces/tabs and drops blank lines.
+    """
+    text = strip_boilerplate(strip_html(raw_html))
+    lines = [re.sub(r"[ \t]+", " ", ln).strip() for ln in text.splitlines()]
+    return "\n".join(ln for ln in lines if ln)

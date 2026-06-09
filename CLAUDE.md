@@ -58,7 +58,7 @@ thing tests actually run against.
 |---|---|
 | 1 — Corpus Engine | ✅ complete — Steps 0–9, 95 tests. Pipeline end-to-end. |
 | 2 — Scoring Engine | ✅ **complete (scorer v1)** — `scoring/{profile,scorer}.py` + `score.py`, 179 tests. Option A (`ApplicationRecord` v1.3 → `corpus/scored/`) + gates-vs-signal model + 3-tier role (primary/conditional/secondary) + capability/M&A blockers + negative-signal ceiling. Thresholds **set from evidence** (held against the 23-record corpus: 10 manual + 13 calibration). Calibration regression set: `corpus/calibration/`. Known limit F (extraction generosity) deferred. Conventions: `scoring/CLAUDE.md`. |
-| 3 — Job Tracker | 🔄 in progress — building a **real** corpus (target 500+ validated). Collection now captures a **metadata sidecar** (`corpus/raw/meta_{date}.jsonl`: title + structured location, keyed by `source_url`) — `raw_text` stays employer JD text only. **Pre-label filter** (`pipeline/prefilter.py` + `prefilter.py`): deterministic location + role screen over the sidecar, cuts raw → survivors *before* paid labelling (`corpus/filtered/`). Next: label survivors (pass meta into the prompt as separate context), then weekly extraction-quality review (watch Enterprise Software / Product over-tagging) and a structured score review after 100+ real scored jobs. Option D (career-pattern scoring) **deferred** until prod data shows role+domain+depth+blockers can't explain errors. |
+| 3 — Job Tracker | 🔄 in progress — building a **real** corpus (target 500+ validated). Collection captures a **metadata sidecar** (`corpus/raw/meta_{date}.jsonl`: title + structured location, keyed by `source_url`) — `raw_text` stays employer JD text only. **Pre-label filter** (`pipeline/prefilter.py` + `prefilter.py`) cuts raw → 62 survivors. **First production scoring run done (2026-06-09):** 44-record representative subset labelled (Batch, $0.7672, 0 fail, sidecar metadata passed as `[ATS METADATA]` prompt block via `clean_readable` raw_text) → validated → scored (strong_fit 18 / stretch 7 / blocked_fit 8 / good_fit 6 / interview_practice 5). Capability blocker validated on real data; **Known Limit F confirmed** (Product/Enterprise-Software over-tagging → a Product-Marketing role scored strong_fit). Next: **extraction-quality review** (the real lever now), widen seeds, structured score review after **100+** scored jobs. Scorer stays **locked**. Option D **deferred**. |
 | 4 — Discovery Layer | Not started |
 | 5 — UI | Not started |
 | 6 — Fine-Tuned Analyser | Deferred (Project 5) |
@@ -139,6 +139,19 @@ thing tests actually run against.
     single best-located representative (UK first); specialisation parentheticals
     are preserved so distinct roles aren't merged. The survivors file is JDRecords
     only; the sidecar remains the join source for the later labelling step.
+20. (Phase 3) **Labelling collected survivors.** Survivors have `raw_text=""`
+    (only `raw_html`). `pipeline.clean.clean_readable` populates `raw_text` for
+    labelling/scoring — HTML/boilerplate stripped but **line breaks + case kept**
+    (the hash-form `clean()` lowercases to one line, which breaks the scorer's
+    first-line title heuristic). Sidecar `title`/`location` go to the prompt as a
+    separate **`[ATS METADATA]`** block (`label.build_user_content`, `label.py
+    --meta`), never merged into `raw_text`. `scripts/build_score_subset.py` builds
+    a representative run subset; `scripts/score_report.py` reports a scoring run.
+21. (Phase 3) **Known Limitation F is now an observed production fact**, not just a
+    risk: a Product-Marketing JD was extracted as `role_type=Product` and scored
+    `strong_fit`; "Enterprise Software" is tagged on almost every record. The fix
+    is **extraction-prompt/corpus** work (the next real lever), **not** a scorer
+    change — the scorer stays locked until the 100+-job structured review.
 
 ---
 

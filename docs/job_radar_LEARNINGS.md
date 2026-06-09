@@ -323,6 +323,56 @@ Strategist") rarely tells you whether it's on-target.
 
 ---
 
+### First production scoring run — the capability blocker earns its keep; Known Limit F bites
+
+**Context:** First real labelling + scoring run (Phase 3, 2026-06-09). To avoid a
+Databricks-skewed first review (23 of 62 survivors, mostly deep-technical), Michel
+specified a representative subset: all non-Databricks survivors + 5 Databricks
+across role buckets + max 2 Customer Success Managers. 44 records, labelled via
+Batch API at **$0.7672** (0 failures), then validated and scored.
+
+Two pipeline gaps had to be closed first: collected survivors have `raw_text=""`
+(only `raw_html`), and the scorer derives the job title from the first line of
+`raw_text` — but `clean()` lowercases everything to one line. So a **`clean_readable`**
+(HTML/boilerplate stripped, line breaks + case kept) populates `raw_text` for
+labelling/scoring, and the sidecar title/location ride in as a separate
+**`[ATS METADATA]`** block in the prompt — never merged into `raw_text`.
+
+**Outcome — fit_label dist: strong_fit 18 · stretch 7 · blocked_fit 8 · good_fit 6
+· interview_practice 5.** What the real data showed:
+- **The capability blocker is the scorer's highest-value rule.** All 8 blocked_fit
+  were genuinely hands-on roles Michel can't execute (Applied AI Architect, three
+  Forward-Deployed Engineers, deep Databricks SA/AI-Eng, a technical CS *Engineer*).
+  It cleanly split same-named roles by depth: Databricks "Deployment Strategist"
+  (hybrid, "PM for the field") → strong_fit 10, while Mistral "AI Deployment
+  Strategist – UK" (hands-on) → blocked_fit. This is the rule that turns a
+  pre-filter survivor list into a *feasibility-aware* ranking.
+- **CSM distinction works** (the reason for keeping CSMs): pure Stripe CSM →
+  interview_practice (4), strategic Anthropic CSM / CS leadership → good_fit (6),
+  technical Perplexity CS *Engineer* → blocked_fit. A real spread on role nature.
+- **Known Limitation F (extraction over-tagging) confirmed in production.** Mistral
+  "Senior Product Marketing Manager – Studio" — a *marketing* role — was extracted
+  as `role_type=['Product','GTM']` and, because Product conditional-qualifies on an
+  AI Platform domain and "Enterprise Software" was (over-)tagged as a strong domain,
+  scored **strong_fit 10**. Nearly every record carried "Enterprise Software". This
+  is an *extraction* defect, not a scorer bug — the scorer is locked; the fix is the
+  deferred extraction-prompt/corpus work.
+- **The "strong_fit where role isn't top contributor" probe came back empty — but
+  it has a blind spot.** It flags `domain_contrib > role_contrib`; the Product
+  Marketing case had role==domain (4==4, a tie), so it slipped through. A mis-tagged
+  *role* (Marketing→Product) defeats a metric that assumes the role tag is honest.
+
+**Reusability:** (1) A locked scorer is only as good as the extraction beneath it —
+validate the *extraction* on real data before trusting score distributions; an
+over-generous role/domain tag silently inflates downstream. (2) Feasibility gates
+(can the candidate actually do the hands-on work?) discriminate far more on real
+postings than fit signals do — the survivors all "look" like fits; the blocker is
+what separates them. (3) A diagnostic that assumes its input labels are correct
+can't catch a mislabel; pair "is the score justified?" checks with "is the *tag*
+right?" spot-reads.
+
+---
+
 ## Learning Entries
 
 ### Learning Entry Template

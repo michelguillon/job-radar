@@ -682,6 +682,30 @@ correct — three recall bugs were found by inspection and fixed before locking 
 cut (Applied AI Architect family; `architectu**re**` / `field engineer**ing**`
 word-boundary; US-state remote). Re-run after seed-list expansion to widen coverage.
 
+### 5.9 — Labelling collected survivors (sidecar metadata as prompt context)
+
+Survivors from §5.8 carry only `raw_html` (`raw_text=""`). Before labelling:
+
+- **`clean_readable(raw_html)`** (pipeline.clean) populates `raw_text` — HTML +
+  boilerplate stripped, but line breaks and case **preserved** (unlike the
+  hash-form `clean()`, which lowercases to one line). This gives the labeller a
+  normal JD and keeps the scorer's first-line title heuristic working.
+- The sidecar `title`/`location` ride into the extraction prompt as a separate
+  **`[ATS METADATA]`** block (`label.build_user_content`, `label.py --meta`) —
+  authoritative context for title/location, **never** merged into `raw_text`.
+
+`scripts/build_score_subset.py` builds a representative subset for a run (selection
+rules documented in the script). Flow: subset → `label.py --input … --meta …`
+(Batch, Tier 4) → `validate.py` → `score.py` → `scripts/score_report.py`.
+
+**First production scoring run (2026-06-09):** 44-record subset (all non-Databricks
++ 5 representative Databricks + ≤2 CSM), labelled **$0.7672** (0 failures), scored
+→ strong_fit 18 · stretch 7 · blocked_fit 8 · good_fit 6 · interview_practice 5.
+The capability blocker correctly demoted all 8 hands-on roles; Known Limitation F
+(Product / Enterprise-Software over-tagging) was confirmed in production (a Product
+Marketing role scored strong_fit). See LEARNINGS. Structured scorer review still
+gated on 100+ scored jobs — do not change the scorer before then.
+
 ---
 
 ## 6. Phase 2 — Scoring Engine

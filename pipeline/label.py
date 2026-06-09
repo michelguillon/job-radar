@@ -127,6 +127,12 @@ def build_system_prompt() -> str:
         "    location, not the title's. The real work location wins.",
         "  - A list field with nothing to extract -> [].",
         "",
+        "ATS metadata block:",
+        "  - The user message may begin with an [ATS METADATA] block — the structured",
+        "    title and location the job board reported. Use it as authoritative context",
+        "    for the role title and work location (it is cleaner than the body), but",
+        "    still extract every field from the JOB DESCRIPTION that follows.",
+        "",
         "Worked examples (JD excerpt -> JSON):",
         "",
     ]
@@ -255,16 +261,45 @@ def _index_of(custom_id: str) -> int:
     return int(custom_id.split("-", 1)[1])
 
 
-def run_batch(records: list[JDRecord], *, client=None, model: str = MODEL) -> str:
+# Sidecar fields surfaced to the labeller as authoritative context (the structured
+# title/location the JD body doesn't reliably state). Passed as a separate block —
+# never injected into raw_text (which stays employer JD text only).
+_META_CONTEXT_FIELDS = ("title", "location_str", "workplace_type", "country")
+
+
+def build_user_content(record: JDRecord, meta: dict | None = None) -> str:
+    """User message: an optional [ATS METADATA] context block, then the JD.
+
+    The metadata block is the sidecar (pipeline.prefilter / collectors), passed as
+    separate context per the Phase-3 decision — not merged into raw_text.
+    """
+    jd = record.raw_text or ""
+    if not meta:
+        return jd
+    lines = [f"{f}: {meta[f]}" for f in _META_CONTEXT_FIELDS if meta.get(f)]
+    if not lines:
+        return jd
+    return "[ATS METADATA]\n" + "\n".join(lines) + "\n\n[JOB DESCRIPTION]\n" + jd
+
+
+def run_batch(
+    records: list[JDRecord],
+    *,
+    client=None,
+    model: str = MODEL,
+    meta_index: dict[str, dict] | None = None,
+) -> str:
     """Submit a batch of extraction requests; return the batch id.
 
     Each request is keyed ``rec-{i}`` by the record's position. The shared system
     prompt is marked for prompt caching so it is billed once across the batch.
+    ``meta_index`` (by ``source_url``) supplies the per-record ATS metadata block.
     """
     from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
     from anthropic.types.messages.batch_create_params import Request
 
     client = client or _client()
+    meta_index = meta_index or {}
     system = [{"type": "text", "text": build_system_prompt(), "cache_control": {"type": "ephemeral"}}]
     requests = [
         Request(
@@ -274,7 +309,7 @@ def run_batch(records: list[JDRecord], *, client=None, model: str = MODEL) -> st
                 max_tokens=MAX_TOKENS,
                 system=system,
                 thinking={"type": "disabled"},
-                messages=[{"role": "user", "content": (r.raw_text or "")}],
+                messages=[{"role": "user", "content": build_user_content(r, meta_index.get(r.source_url))}],
             ),
         )
         for i, r in enumerate(records)

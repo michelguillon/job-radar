@@ -35,6 +35,20 @@ def load_records(input_glob: str) -> list[JDRecord]:
     return records
 
 
+def load_meta(meta_glob: str | None) -> dict[str, dict]:
+    """Load metadata sidecar(s) into a dict keyed by source_url (empty if none)."""
+    index: dict[str, dict] = {}
+    if not meta_glob:
+        return index
+    for path in sorted(glob.glob(meta_glob)):
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                if line.strip():
+                    m = json.loads(line)
+                    index[m.get("source_url", "")] = m
+    return index
+
+
 def _write_jsonl(path: str, records) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
@@ -60,6 +74,7 @@ def append_stats(entry: dict, path: str = STATS_PATH) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Label cleaned JDs via the Claude Batch API.")
     parser.add_argument("--input", required=True, help="Glob for cleaned JSONL (e.g. 'corpus/raw/clean_*.jsonl')")
+    parser.add_argument("--meta", help="Glob for metadata sidecar JSONL (e.g. 'corpus/raw/meta_*.jsonl') — passed to the prompt as separate context")
     parser.add_argument("--tier", type=int, choices=(3, 4), required=True, help="Tier to assign (3 or 4 — Claude-labelled)")
     parser.add_argument("--poll-interval", type=int, default=30, help="Seconds between batch status polls")
     parser.add_argument("--out-dir", default=OUT_DIR, help=f"Output directory (default: {OUT_DIR})")
@@ -71,9 +86,13 @@ def main(argv: list[str] | None = None) -> int:
     if not records:
         print("No records to label.")
         return 0
+    meta_index = load_meta(args.meta)
+    matched = sum(1 for r in records if r.source_url in meta_index)
     print(f"Labelling {len(records)} record(s) at tier {args.tier} via Claude Batch API…")
+    if args.meta:
+        print(f"  metadata sidecar: {matched}/{len(records)} records matched")
 
-    batch_id = label.run_batch(records)
+    batch_id = label.run_batch(records, meta_index=meta_index)
     label.poll_batch(batch_id, interval=args.poll_interval)
     results = label.download_results(batch_id)
     labelled, failures = label.merge_results(records, results, tier=args.tier)

@@ -123,6 +123,38 @@ def test_system_prompt_includes_enums_and_keys():
     assert "JSON" in p
 
 
+def test_system_prompt_mentions_ats_metadata_block():
+    assert "ATS METADATA" in label.build_system_prompt()
+
+
+# --- build_user_content (metadata injection) ---
+
+
+def test_build_user_content_without_meta_is_just_jd():
+    assert label.build_user_content(_rec(0)) == "Job description 0"
+
+
+def test_build_user_content_prepends_metadata_block():
+    meta = {"title": "Solutions Engineer", "location_str": "London", "workplace_type": "hybrid", "country": "GB"}
+    out = label.build_user_content(_rec(0), meta)
+    assert out.startswith("[ATS METADATA]")
+    assert "title: Solutions Engineer" in out
+    assert "location_str: London" in out
+    assert "[JOB DESCRIPTION]\nJob description 0" in out
+    # raw_text itself is never mutated
+    assert "[ATS METADATA]" not in _rec(0).raw_text
+
+
+def test_run_batch_injects_metadata_by_source_url():
+    batches = FakeBatches()
+    client = FakeClient(batches)
+    rec = _rec(0)  # source_url == "https://x/0"
+    meta_index = {"https://x/0": {"title": "Forward Deployed Engineer"}}
+    label.run_batch([rec], client=client, meta_index=meta_index)
+    content = batches.created_requests[0]["params"]["messages"][0]["content"]
+    assert "title: Forward Deployed Engineer" in content
+
+
 # --- run_batch ---
 
 
