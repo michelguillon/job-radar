@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 import requests
 
@@ -47,6 +48,41 @@ META_FIELDS = (
     "country",
     "raw_location_payload",
 )
+
+
+def _parse_iso(value) -> datetime | None:
+    """Parse an ISO-8601 timestamp to an aware datetime, or None if unparseable.
+
+    Handles a trailing ``Z`` and fractional seconds; naive timestamps are
+    assumed UTC so all comparisons are timezone-safe.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def passes_cursor(job_ts, cutoff: str | None) -> bool:
+    """True if a job with timestamp ``job_ts`` should be collected this run.
+
+    Incremental collection is **client-side**: the public board APIs expose no
+    server-side date filter, but each Greenhouse/Ashby job carries its own
+    timestamp, so a collector keeps a job only when it is at/after the cursor.
+
+    - ``cutoff is None`` (no cursor / ``--full``) → collect everything.
+    - an unparseable or missing ``job_ts`` → **collect it** (never silently drop
+      a job because its timestamp was malformed; dedupe handles the re-collect).
+    """
+    if cutoff is None:
+        return True
+    job_dt = _parse_iso(job_ts)
+    cut_dt = _parse_iso(cutoff)
+    if job_dt is None or cut_dt is None:
+        return True
+    return job_dt >= cut_dt
 
 
 class NotFound(Exception):

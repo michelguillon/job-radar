@@ -5,9 +5,10 @@ from models.record import JDRecord
 from tests.fake_http import FakeResponse, patch_get
 
 
-def _job(html="<p>Role</p>", plain=None):
+def _job(html="<p>Role</p>", plain=None, url="https://jobs.ashbyhq.com/acme/uuid-1",
+         published_at="2026-06-10T12:00:00.000+00:00"):
     job = {
-        "jobUrl": "https://jobs.ashbyhq.com/acme/uuid-1",
+        "jobUrl": url,
         "title": "Solutions Architect",
         "location": "London",
         "secondaryLocations": [{"location": "Dublin"}],
@@ -15,6 +16,7 @@ def _job(html="<p>Role</p>", plain=None):
         "isRemote": True,
         "address": {"postalAddress": {"addressCountry": "United Kingdom", "addressLocality": "London"}},
         "descriptionPlain": plain if plain is not None else "Role",
+        "publishedAt": published_at,
     }
     if html is not None:
         job["descriptionHtml"] = html
@@ -64,3 +66,23 @@ def test_fetch_company_records_round_trip(monkeypatch):
     patch_get(monkeypatch, [FakeResponse(200, {"jobs": [_job()]})])
     record = fetch_company("acme", "Acme")[0].record
     assert JDRecord.from_jsonl(record.to_jsonl()) == record
+
+
+# --- incremental (client-side publishedAt filter) ---
+
+
+def test_updated_after_keeps_only_recently_published(monkeypatch):
+    payload = {"jobs": [
+        _job(url="https://x/old", published_at="2026-06-01T00:00:00.000+00:00"),
+        _job(url="https://x/new", published_at="2026-06-10T00:00:00.000+00:00"),
+    ]}
+    patch_get(monkeypatch, [FakeResponse(200, payload)])
+    jobs = fetch_company("acme", "Acme", updated_after="2026-06-05T00:00:00+00:00")
+    assert [j.record.source_url for j in jobs] == ["https://x/new"]
+
+
+def test_missing_published_at_is_kept_under_cursor(monkeypatch):
+    job = _job(url="https://x/1")
+    del job["publishedAt"]  # absent field degrades to full collection, never drops
+    patch_get(monkeypatch, [FakeResponse(200, {"jobs": [job]})])
+    assert len(fetch_company("acme", "Acme", updated_after="2026-06-05T00:00:00+00:00")) == 1

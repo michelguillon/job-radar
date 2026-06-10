@@ -52,7 +52,7 @@ def test_fetch_json_raises_after_exhausting_retries(monkeypatch):
 
 
 def _job(content="<p>Hello</p>", url="https://boards.greenhouse.io/acme/jobs/1",
-         title="Solutions Engineer", location="London, UK"):
+         title="Solutions Engineer", location="London, UK", updated_at="2026-06-10T12:00:00-04:00"):
     # Greenhouse returns the content HTML-entity-escaped.
     import html
 
@@ -61,6 +61,7 @@ def _job(content="<p>Hello</p>", url="https://boards.greenhouse.io/acme/jobs/1",
         "content": html.escape(content),
         "title": title,
         "location": {"name": location},
+        "updated_at": updated_at,
     }
 
 
@@ -121,3 +122,29 @@ def test_fetch_company_records_round_trip(monkeypatch):
     record = fetch_company("acme", "Acme", collected_at="2026-06-09")[0].record
     # to_jsonl -> from_jsonl preserves the record (valid JSONL envelope).
     assert JDRecord.from_jsonl(record.to_jsonl()) == record
+
+
+# --- incremental (client-side updated_at filter) ---
+
+
+def test_updated_after_keeps_only_new_or_updated(monkeypatch):
+    payload = {"jobs": [
+        _job(url="https://x/old", updated_at="2026-06-01T00:00:00Z"),   # before cursor
+        _job(url="https://x/new", updated_at="2026-06-10T00:00:00Z"),   # after cursor
+    ]}
+    patch_get(monkeypatch, [FakeResponse(200, payload)])
+    jobs = fetch_company("acme", "Acme", updated_after="2026-06-05T00:00:00+00:00")
+    assert [j.record.source_url for j in jobs] == ["https://x/new"]
+
+
+def test_no_cursor_collects_all(monkeypatch):
+    payload = {"jobs": [_job(url="https://x/1", updated_at="2026-01-01T00:00:00Z"), _job(url="https://x/2")]}
+    patch_get(monkeypatch, [FakeResponse(200, payload)])
+    assert len(fetch_company("acme", "Acme", updated_after=None)) == 2
+
+
+def test_missing_updated_at_is_kept_under_cursor(monkeypatch):
+    job = _job(url="https://x/1")
+    del job["updated_at"]  # malformed/missing timestamp must never be silently dropped
+    patch_get(monkeypatch, [FakeResponse(200, {"jobs": [job]})])
+    assert len(fetch_company("acme", "Acme", updated_after="2026-06-05T00:00:00+00:00")) == 1

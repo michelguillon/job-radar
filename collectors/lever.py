@@ -32,6 +32,15 @@ log = logging.getLogger(__name__)
 API_TEMPLATE = "https://api.lever.co/v0/postings/{slug}?mode=json"
 SOURCE_ATS = "lever"
 
+# Lever's v0 public postings endpoint exposes NO date filter param and NO
+# per-posting timestamp (no createdAt/updatedAt in the documented response), so
+# incremental collection is impossible — lever always does a full collection and
+# relies on downstream dedupe. collect.py never passes a cursor for lever; the
+# ``updated_after`` kwarg below exists only for a uniform collector signature.
+# See collectors/CLAUDE.md.
+SUPPORTS_INCREMENTAL = False
+TIMESTAMP_FIELD = None
+
 
 def _assemble_html(posting: dict) -> str:
     """Join a Lever posting's description, list sections and closing into HTML."""
@@ -74,12 +83,15 @@ def fetch_company(
     company_name: str,
     *,
     collected_at: str | None = None,
+    updated_after: str | None = None,
     sleep=time.sleep,
 ) -> list[CollectedJob]:
     """Fetch all live postings for ``slug`` from the Lever public API.
 
     Returns ``CollectedJob`` objects (Tier-4 ``JDRecord`` + metadata sidecar).
-    A 404 or persistent 429 is logged and yields ``[]``.
+    A 404 or persistent 429 is logged and yields ``[]``. ``updated_after`` is
+    accepted but ignored — Lever's v0 feed has no timestamp to filter on, so this
+    is always a full collection (see SUPPORTS_INCREMENTAL above).
     """
     collected_at = collected_at or date.today().isoformat()
     url = API_TEMPLATE.format(slug=slug)

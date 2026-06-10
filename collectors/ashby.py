@@ -24,12 +24,22 @@ from collectors.base import (
     build_meta,
     build_raw_record,
     fetch_json,
+    passes_cursor,
 )
 
 log = logging.getLogger(__name__)
 
 API_TEMPLATE = "https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true"
 SOURCE_ATS = "ashby"
+
+# The Ashby job-board API has no server-side date filter, but each job carries a
+# ``publishedAt`` timestamp, so incremental collection works client-side — caveat:
+# ``publishedAt`` is first-publish only (no ``updatedAt`` on the public feed), so
+# this catches NEW postings but not edits to existing ones; a periodic ``--full``
+# run reconciles edits. If the field is ever absent, passes_cursor keeps the job
+# (degrades to full collection — never drops). See collectors/CLAUDE.md.
+SUPPORTS_INCREMENTAL = True
+TIMESTAMP_FIELD = "publishedAt"
 
 
 def _country_of(job: dict) -> str | None:
@@ -75,12 +85,15 @@ def fetch_company(
     company_name: str,
     *,
     collected_at: str | None = None,
+    updated_after: str | None = None,
     sleep=time.sleep,
 ) -> list[CollectedJob]:
-    """Fetch all live jobs for ``slug`` from the Ashby job-board API.
+    """Fetch live jobs for ``slug`` from the Ashby job-board API.
 
     Returns ``CollectedJob`` objects (Tier-4 ``JDRecord`` + metadata sidecar).
-    A 404 or persistent 429 is logged and yields ``[]``.
+    A 404 or persistent 429 is logged and yields ``[]``. When ``updated_after``
+    is set, jobs published before the cursor are skipped client-side (see the
+    module note on the ``publishedAt`` caveat).
     """
     collected_at = collected_at or date.today().isoformat()
     url = API_TEMPLATE.format(slug=slug)
@@ -94,7 +107,11 @@ def fetch_company(
         return []
 
     jobs = []
+    skipped = 0
     for job in data.get("jobs", []):
+        if not passes_cursor(job.get(TIMESTAMP_FIELD), updated_after):
+            skipped += 1
+            continue
         raw_html = job.get("descriptionHtml")
         record = build_raw_record(
             source_url=job.get("jobUrl", ""),
@@ -105,5 +122,8 @@ def fetch_company(
             raw_text="" if raw_html else job.get("descriptionPlain", ""),
         )
         jobs.append(CollectedJob(record=record, meta=_meta_for(job, company_name)))
-    log.info("ashby: %s (%s) → %d jobs", company_name, slug, len(jobs))
+    if updated_after:
+        log.info("ashby: %s (%s) → %d new (skipped %d < cursor)", company_name, slug, len(jobs), skipped)
+    else:
+        log.info("ashby: %s (%s) → %d jobs", company_name, slug, len(jobs))
     return jobs

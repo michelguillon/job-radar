@@ -25,6 +25,7 @@ from collectors.base import (
     build_meta,
     build_raw_record,
     fetch_json,
+    passes_cursor,
 )
 
 log = logging.getLogger(__name__)
@@ -32,23 +33,33 @@ log = logging.getLogger(__name__)
 API_TEMPLATE = "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true"
 SOURCE_ATS = "greenhouse"
 
+# The public Job Board API has no server-side date filter (only ``content``), but
+# every job carries an ``updated_at`` timestamp, so incremental collection works
+# client-side: we fetch the (single, cheap) full list and keep only jobs at/after
+# the cursor — catching both new AND edited postings. See collectors/CLAUDE.md.
+SUPPORTS_INCREMENTAL = True
+TIMESTAMP_FIELD = "updated_at"
+
 
 def fetch_company(
     slug: str,
     company_name: str,
     *,
     collected_at: str | None = None,
+    updated_after: str | None = None,
     sleep=time.sleep,
 ) -> list[CollectedJob]:
-    """Fetch all live jobs for ``slug`` from the Greenhouse public API.
+    """Fetch live jobs for ``slug`` from the Greenhouse public API.
 
     Returns a list of ``CollectedJob`` (Tier-4 ``JDRecord`` + metadata sidecar).
     A 404 (unknown slug) or persistent 429 is logged and yields ``[]`` so a
     batch run continues past one bad company.
 
-    Greenhouse exposes ``title`` and a free-form ``location.name`` but no
-    workplace-policy or country flag, so those are inferred from the location
-    string (``remote`` substring) and otherwise left unset for the screen.
+    When ``updated_after`` is set, jobs whose ``updated_at`` is before the cursor
+    are skipped client-side (incremental collection). Greenhouse exposes
+    ``title`` and a free-form ``location.name`` but no workplace-policy or country
+    flag, so those are inferred from the location string (``remote`` substring)
+    and otherwise left unset for the screen.
     """
     collected_at = collected_at or date.today().isoformat()
     url = API_TEMPLATE.format(slug=slug)
@@ -62,7 +73,11 @@ def fetch_company(
         return []
 
     jobs: list[CollectedJob] = []
+    skipped = 0
     for job in data.get("jobs", []):
+        if not passes_cursor(job.get(TIMESTAMP_FIELD), updated_after):
+            skipped += 1
+            continue
         source_url = job.get("absolute_url", "")
         location = job.get("location") or {}
         location_str = (location.get("name") or "").strip()
@@ -86,5 +101,8 @@ def fetch_company(
             raw_location_payload=location,
         )
         jobs.append(CollectedJob(record=record, meta=meta))
-    log.info("greenhouse: %s (%s) → %d jobs", company_name, slug, len(jobs))
+    if updated_after:
+        log.info("greenhouse: %s (%s) → %d new/updated (skipped %d ≤ cursor)", company_name, slug, len(jobs), skipped)
+    else:
+        log.info("greenhouse: %s (%s) → %d jobs", company_name, slug, len(jobs))
     return jobs

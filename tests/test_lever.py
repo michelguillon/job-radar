@@ -21,6 +21,17 @@ def _posting():
     }
 
 
+def test_updated_after_is_ignored_lever_has_no_timestamp(monkeypatch):
+    # Lever's v0 feed has no per-posting timestamp → cursor cannot filter; a
+    # passed updated_after is ignored and collection stays full.
+    from collectors.lever import SUPPORTS_INCREMENTAL
+
+    assert SUPPORTS_INCREMENTAL is False
+    patch_get(monkeypatch, [FakeResponse(200, [_posting(), _posting()])])
+    jobs = fetch_company("acme", "Acme", updated_after="2099-01-01T00:00:00+00:00")
+    assert len(jobs) == 2  # full collection despite a far-future cursor
+
+
 def test_fetch_company_maps_array_to_records(monkeypatch):
     # Lever returns a JSON array, not an object.
     patch_get(monkeypatch, [FakeResponse(200, [_posting(), _posting()])])
