@@ -1,19 +1,30 @@
 import type { Job } from "@/lib/api";
+import { cn } from "@/lib/utils";
+import { fitBadgeClass, statusPillClass } from "@/lib/ui";
 import { daysSince, effectiveStatus, fmtDate, isStaleApplied, LABEL_TEXT, sortRows, type Sort } from "@/lib/jobs";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-// Ported from ui/app.js renderGrid(): sortable columns, fit badge, blocked_fit muting,
-// row click → detail. Link cell click is swallowed so it doesn't open the drawer.
-const COLUMNS: Array<{ key: keyof Job | null; label: string; num?: boolean; sort?: keyof Job }> = [
-  { key: "company", label: "Company", sort: "company" },
-  { key: "title", label: "Role", sort: "title" },
-  { key: "fit_label", label: "Fit", sort: "fit_label" },
-  { key: "fit_score", label: "Score", num: true, sort: "fit_score" },
-  { key: "priority_score", label: "Pri", num: true, sort: "priority_score" },
-  { key: "location", label: "Location", sort: "location" },
-  { key: "application_status", label: "Status", sort: "application_status" },
-  { key: "date_first_seen", label: "First seen", sort: "date_first_seen" },
-  { key: null, label: "Link" },
+// Sortable, filterable table. Column widths are pinned (table-fixed + <colgroup>) so headers
+// always sit over their column. blocked_fit rows recede (muted + struck-through role).
+const COLUMNS: Array<{ label: string; num?: boolean; sort?: keyof Job; width: string }> = [
+  { label: "Company", sort: "company", width: "11%" },
+  { label: "Role", sort: "title", width: "26%" },
+  { label: "Fit", sort: "fit_label", width: "8%" },
+  { label: "Score", num: true, sort: "fit_score", width: "6%" },
+  { label: "Pri", num: true, sort: "priority_score", width: "5%" },
+  { label: "Location", sort: "location", width: "16%" },
+  { label: "Status", sort: "application_status", width: "10%" },
+  { label: "First seen", sort: "date_first_seen", width: "9%" },
+  { label: "Link", width: "9%" },
 ];
+
+function Badge({ label }: { label: string }) {
+  return (
+    <span className={cn("inline-block whitespace-nowrap rounded-full px-2 py-[2px] text-[11px] font-bold", fitBadgeClass(label))}>
+      {LABEL_TEXT[label] || label}
+    </span>
+  );
+}
 
 export function BrowseView({
   rows, sort, onSort, onOpen,
@@ -26,50 +37,62 @@ export function BrowseView({
   const sorted = sortRows(rows, sort);
   return (
     <div>
-      <table className="grid">
-        <thead>
-          <tr>
+      <Table>
+        <colgroup>{COLUMNS.map((c) => <col key={c.label} style={{ width: c.width }} />)}</colgroup>
+        <TableHeader>
+          <TableRow className="border-b-line">
             {COLUMNS.map((c) => {
               const on = !!c.sort && c.sort === sort.key;
-              const cls = [c.num ? "num" : "", on ? "sorted" : "", on && sort.dir === "asc" ? "asc" : ""]
-                .filter(Boolean).join(" ");
               return (
-                <th key={c.label} className={cls || undefined}
+                <TableHead
+                  key={c.label}
                   onClick={c.sort ? () => onSort(c.sort!) : undefined}
-                  style={c.sort ? undefined : { cursor: "default" }}>
+                  className={cn(c.num && "text-right", c.sort ? "cursor-pointer hover:text-ink" : "cursor-default")}
+                >
                   {c.label}
-                </th>
+                  {on && <span className="text-brand">{sort.dir === "asc" ? " ▴" : " ▾"}</span>}
+                </TableHead>
               );
             })}
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((r) => (
-            <tr key={r.job_id} className={r.fit_label === "blocked_fit" ? "is-blocked" : undefined}
-              onClick={(e) => { if ((e.target as HTMLElement).tagName !== "A") onOpen(r); }}>
-              <td className="company">{r.company}</td>
-              <td className="role"><span className="role-text">{r.title}</span></td>
-              <td><span className={`badge ${r.fit_label}`}>{LABEL_TEXT[r.fit_label] || r.fit_label}</span></td>
-              <td className="num score-cell">{r.fit_score}</td>
-              <td className="num pri-cell">{r.priority_score}</td>
-              <td className="loc">{r.location || "—"}</td>
-              <td>
-                <span className={`pill ${effectiveStatus(r)}`}>{effectiveStatus(r)}</span>
-                {isStaleApplied(r) && (
-                  <span className="stale-dot" title={`Applied ${daysSince(r.application_date)}d ago — no movement`}>●</span>
-                )}
-              </td>
-              <td className="seen">{fmtDate(r.date_first_seen)}</td>
-              <td>
-                {r.source_url && (
-                  <a className="link-out" href={r.source_url} target="_blank" rel="noopener">open ↗</a>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {!sorted.length && <p className="empty">No roles match the current filters.</p>}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {sorted.map((r) => {
+            const blocked = r.fit_label === "blocked_fit";
+            return (
+              <TableRow
+                key={r.job_id}
+                onClick={(e) => { if ((e.target as HTMLElement).tagName !== "A") onOpen(r); }}
+                className={cn("cursor-pointer hover:bg-rowhover", blocked && "text-ink-faint")}
+              >
+                <TableCell className={cn("font-semibold", blocked && "font-medium")}>{r.company}</TableCell>
+                <TableCell className="whitespace-normal break-words">
+                  <span className={cn(blocked && "line-through decoration-ink-faint")}>{r.title}</span>
+                </TableCell>
+                <TableCell><Badge label={r.fit_label} /></TableCell>
+                <TableCell className="text-right text-[15px] font-bold tabular-nums">{r.fit_score}</TableCell>
+                <TableCell className="text-right tabular-nums text-ink-soft">{r.priority_score}</TableCell>
+                <TableCell className="whitespace-normal break-words text-ink-soft">{r.location || "—"}</TableCell>
+                <TableCell>
+                  <span className={cn("inline-block rounded-[5px] px-2 py-[2px] text-[11px] font-semibold", statusPillClass(effectiveStatus(r)))}>
+                    {effectiveStatus(r)}
+                  </span>
+                  {isStaleApplied(r) && (
+                    <span className="ml-[5px] align-middle text-[11px] text-[#d07a1a]" title={`Applied ${daysSince(r.application_date)}d ago — no movement`}>●</span>
+                  )}
+                </TableCell>
+                <TableCell className="whitespace-nowrap tabular-nums text-ink-faint">{fmtDate(r.date_first_seen)}</TableCell>
+                <TableCell>
+                  {r.source_url && (
+                    <a className="text-[12px] text-brand hover:underline" href={r.source_url} target="_blank" rel="noopener">open ↗</a>
+                  )}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+      {!sorted.length && <p className="p-10 text-center text-ink-faint">No roles match the current filters.</p>}
     </div>
   );
 }

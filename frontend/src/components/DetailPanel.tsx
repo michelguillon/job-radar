@@ -1,18 +1,24 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type Job } from "@/lib/api";
+import { cn } from "@/lib/utils";
+import { CHIP, fitBadgeClass, statusPillClass, TOAST } from "@/lib/ui";
 import {
   daysSince, effectiveStatus, fmtDate, isStaleApplied, LABEL_TEXT, listText,
   OUTCOMES, rejectionStageFor, statusForOutcome,
 } from "@/lib/jobs";
 import { useUnlock } from "@/components/UnlockProvider";
 
-// Detail drawer — read fields ported from ui/app.js openDrawer(), PLUS owner-only write
-// controls (job_radar_SPEC §10.6). Controls are hidden when writes aren't configured; when
-// configured-but-locked, the first write opens the unlock dialog via requestUnlock().
+// Centered modal — read fields plus owner-only write controls (job_radar_SPEC §10.6).
+// Controls are hidden when writes aren't configured; when configured-but-locked, the first
+// write opens the unlock dialog via requestUnlock(). All Tailwind, no global classes.
 
 type Toast = { kind: "ok" | "warn" | "err"; text: string } | null;
 
-// annotation_type → (record field it concerns, the observed value to prefill).
+const ANNOTATION_TYPES = [
+  "role_type_incorrect", "domain_incorrect", "seniority_incorrect", "technical_depth_incorrect",
+  "fit_score_disagree", "should_be_blocked", "false_block", "extraction_other",
+];
+
 function observedFor(type: string, r: Job): { field: string; observed: unknown } {
   switch (type) {
     case "role_type_incorrect": return { field: "role_type", observed: r.role_type };
@@ -26,20 +32,28 @@ function observedFor(type: string, r: Job): { field: string; observed: unknown }
   }
 }
 
-const ANNOTATION_TYPES = [
-  "role_type_incorrect", "domain_incorrect", "seniority_incorrect", "technical_depth_incorrect",
-  "fit_score_disagree", "should_be_blocked", "false_block", "extraction_other",
-];
+const FIELD_INPUT = "w-full rounded-md border border-line px-[9px] py-[6px] text-[13px] focus:border-brand focus:outline-none disabled:opacity-50";
+const BTN = "rounded-md border border-line bg-white px-[14px] py-[6px] text-[12.5px] font-semibold text-ink hover:border-brand hover:text-brand disabled:opacity-50";
+const BTN_PRIMARY = "rounded-md border border-brand bg-brand px-[14px] py-[6px] text-[12.5px] font-semibold text-white hover:bg-[#245fd0] disabled:opacity-50";
+const LABEL = "block text-[11px] text-ink-soft mb-[3px]";
+const SECTION_H = "mb-[7px] text-[11px] font-bold uppercase tracking-wide text-ink-soft";
 
 function KV({ label, value }: { label: string; value: string }) {
   if (!value) return null;
-  return (<><dt>{label}</dt><dd>{value}</dd></>);
+  return (<><dt className="text-ink-soft">{label}</dt><dd className="m-0">{value}</dd></>);
 }
-function Chips({ items, cls = "" }: { items: string[]; cls?: string }) {
-  return <div className="chips">{items.map((it, i) => <span key={i} className={`chip ${cls}`}>{it}</span>)}</div>;
+function Chips({ items, tone = "default" }: { items: string[]; tone?: keyof typeof CHIP }) {
+  return (
+    <div className="flex flex-wrap gap-[5px]">
+      {items.map((it, i) => <span key={i} className={cn("rounded-[5px] px-2 py-[2px] text-[12px]", CHIP[tone])}>{it}</span>)}
+    </div>
+  );
 }
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return <div className="dsection"><h3>{title}</h3>{children}</div>;
+  return <div className="mt-[18px]"><h3 className={SECTION_H}>{title}</h3>{children}</div>;
+}
+function Pill({ status }: { status: string }) {
+  return <span className={cn("inline-block rounded-[5px] px-2 py-[2px] text-[11px] font-semibold", statusPillClass(status))}>{status}</span>;
 }
 
 function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<void> }) {
@@ -55,7 +69,6 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
   const [outcome, setOutcomeSel] = useState(rejectionStageFor(job.application_status));
   const [outcomeNotes, setOutcomeNotes] = useState("");
 
-  // Reset the editable fields when the drawer switches to a different job.
   useEffect(() => {
     setNoteText(job.notes || ""); setTitleText(job.title || "");
     setFlagType(ANNOTATION_TYPES[0]); setExpected(""); setReason("");
@@ -63,17 +76,14 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
     setToast(null); setFlagToast(null);
   }, [job.job_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // setT routes the result toast to the right panel (workflow vs. flag form).
   async function guarded(run: () => Promise<Toast>, setT: (t: Toast) => void = setToast) {
-    if (!(await requestUnlock())) return; // opens dialog if locked; false = cancelled
+    if (!(await requestUnlock())) return;
     setBusy(true);
     try {
-      const t = await run();
-      setT(t);
+      setT(await run());
       await onChanged();
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e);
-      setT({ kind: "err", text: msg });
+      setT({ kind: "err", text: e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e) });
     } finally {
       setBusy(false);
     }
@@ -82,131 +92,121 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
   const setStatus = (status: string) => guarded(async () => {
     if (status === "archived" && !window.confirm("Archive this role?")) return null;
     const res = await api.setStatus(job.job_id, status);
-    return res.warning
-      ? { kind: "warn", text: `Saved · ${res.warning}` }
-      : { kind: "ok", text: `Status → ${status}` };
+    return res.warning ? { kind: "warn", text: `Saved · ${res.warning}` } : { kind: "ok", text: `Status → ${status}` };
   });
-
   const saveNote = () => guarded(async () => {
     if (!noteText.trim()) return { kind: "err", text: "Note is empty" };
     await api.addNote(job.job_id, noteText.trim());
     return { kind: "ok", text: "Note saved" };
   });
-
   const saveTitle = () => guarded(async () => {
     if (!titleText.trim()) return { kind: "err", text: "Title is empty" };
     await api.setTitle(job.job_id, titleText.trim());
     return { kind: "ok", text: "Title override saved" };
   });
-
   const recordOutcome = () => guarded(async () => {
     await api.setOutcome(job.job_id, outcome, outcomeNotes.trim() || undefined);
-    // Move the workflow lane to match the outcome (model C keeps them separate underneath).
     const lane = statusForOutcome(outcome);
     if (lane && lane !== job.application_status) await api.setStatus(job.job_id, lane);
     setOutcomeNotes("");
     return { kind: "ok", text: `Recorded: ${outcome.replace(/_/g, " ")}` };
   });
-
   const submitFlag = () => guarded(async () => {
     if (!reason.trim()) return { kind: "err", text: "Reason is required" };
     const { field, observed } = observedFor(flagType, job);
-    await api.flagAnnotation({
-      job_id: job.job_id, annotation_type: flagType, field,
-      observed, expected: expected.trim(), reason: reason.trim(),
-    });
+    await api.flagAnnotation({ job_id: job.job_id, annotation_type: flagType, field, observed, expected: expected.trim(), reason: reason.trim() });
     setExpected(""); setReason("");
     return { kind: "ok", text: "Flag submitted" };
   }, setFlagToast);
 
   const { observed } = observedFor(flagType, job);
+  const eff = effectiveStatus(job);
   const STATUS_BTNS: Array<{ label: string; value: string; danger?: boolean }> = [
-    { label: "Review", value: "review" },
-    { label: "Shortlist", value: "shortlisted" },
-    { label: "Apply", value: "applied" },
-    { label: "Interview", value: "interviewing" },
-    { label: "Offer", value: "offer" },
-    { label: "Rejected", value: "rejected", danger: true },
+    { label: "Review", value: "review" }, { label: "Shortlist", value: "shortlisted" },
+    { label: "Apply", value: "applied" }, { label: "Interview", value: "interviewing" },
+    { label: "Offer", value: "offer" }, { label: "Rejected", value: "rejected", danger: true },
     { label: "Archive", value: "archived", danger: true },
   ];
   const ageDays = daysSince(job.application_date);
   const stale = isStaleApplied(job);
-  // Outcome controls appear once a role has been applied (or is already terminal).
-  const hasApplied = !!job.application_date
-    || ["applied", "interviewing", "offer", "rejected"].includes(job.application_status);
+  const hasApplied = !!job.application_date || ["applied", "interviewing", "offer", "rejected"].includes(eff);
+  const wcLabel = "w-16 shrink-0 text-[12px] text-ink-soft";
 
   return (
     <>
-      <div className="write-panel">
-        <h3>Workflow</h3>
-        <div className="wc-row">
-          <span className="wc-label">Status</span>
-          <div className="wc-status-btns">
+      <div className="mt-[18px] rounded-lg border border-line bg-[#fbfcfe] p-[14px]">
+        <h3 className="mb-[10px] text-[11px] font-bold uppercase tracking-wide text-brand">Workflow</h3>
+
+        <div className="mb-[10px] flex flex-wrap items-center gap-2">
+          <span className={wcLabel}>Status</span>
+          <div className="flex flex-wrap gap-[6px]">
             {STATUS_BTNS.map((b) => (
-              <button key={b.value} disabled={busy}
-                className={[b.danger ? "danger" : "", effectiveStatus(job) === b.value ? "current" : ""].filter(Boolean).join(" ") || undefined}
-                onClick={() => setStatus(b.value)}>
+              <button key={b.value} disabled={busy} onClick={() => setStatus(b.value)}
+                className={cn(
+                  "rounded-md border px-[11px] py-[5px] text-[12.5px] font-semibold disabled:opacity-50",
+                  eff === b.value ? "border-brand bg-brand text-white"
+                    : b.danger ? "border-line bg-white text-ink hover:border-[#c0392b] hover:text-[#c0392b]"
+                    : "border-line bg-white text-ink hover:border-brand hover:text-brand",
+                )}>
                 {b.label}
               </button>
             ))}
           </div>
         </div>
-        <div className="wc-row">
-          <span className="wc-label">Notes</span>
-          <input className="wc-input" value={noteText} placeholder="Add a note…"
-            onChange={(e) => setNoteText(e.target.value)} disabled={busy} />
-          <button className="wc-btn" onClick={saveNote} disabled={busy}>Save</button>
+
+        <div className="mb-[10px] flex flex-wrap items-center gap-2">
+          <span className={wcLabel}>Notes</span>
+          <input className={cn(FIELD_INPUT, "min-w-[140px] flex-1")} value={noteText} placeholder="Add a note…" disabled={busy} onChange={(e) => setNoteText(e.target.value)} />
+          <button className={BTN} onClick={saveNote} disabled={busy}>Save</button>
         </div>
-        <div className="wc-row">
-          <span className="wc-label">Title</span>
-          <input className="wc-input" value={titleText} placeholder="Display title override…"
-            onChange={(e) => setTitleText(e.target.value)} disabled={busy} />
-          <button className="wc-btn" onClick={saveTitle} disabled={busy}>Override</button>
+
+        <div className="mb-[10px] flex flex-wrap items-center gap-2">
+          <span className={wcLabel}>Title</span>
+          <input className={cn(FIELD_INPUT, "min-w-[140px] flex-1")} value={titleText} placeholder="Display title override…" disabled={busy} onChange={(e) => setTitleText(e.target.value)} />
+          <button className={BTN} onClick={saveTitle} disabled={busy}>Override</button>
         </div>
 
         {hasApplied && (
-          <div className="wc-outcome">
-            <div className="wc-row">
-              <span className="wc-label">Applied</span>
-              <span>
-                {job.application_date || <span className="muted">date not recorded</span>}
-                {ageDays !== null && <span className="muted"> · {ageDays}d ago</span>}
-                {stale && <span className="stale-badge" title={`No movement for ${ageDays} days`}>stale</span>}
-                {job.outcome && <span className="outcome-badge">{job.outcome.replace(/_/g, " ")}</span>}
+          <div className="mt-1 border-t border-dashed border-line pt-[10px]">
+            <div className="mb-[10px] flex flex-wrap items-center gap-2">
+              <span className={wcLabel}>Applied</span>
+              <span className="text-[13px]">
+                {job.application_date || <span className="text-ink-faint">date not recorded</span>}
+                {ageDays !== null && <span className="text-ink-faint"> · {ageDays}d ago</span>}
+                {stale && <span className="ml-2 rounded-full bg-[#f6e3d3] px-[7px] py-px text-[10.5px] font-bold uppercase tracking-wide text-[#b4540f]" title={`No movement for ${ageDays} days`}>stale</span>}
+                {job.outcome && <span className="ml-2 rounded-[5px] bg-[#f3dede] px-2 py-px text-[11px] font-semibold text-[#9a3636]">{job.outcome.replace(/_/g, " ")}</span>}
               </span>
             </div>
-            <div className="wc-row">
-              <span className="wc-label">Outcome</span>
-              <select className="wc-input" style={{ flex: "0 0 auto", minWidth: 168 }}
-                value={outcome} onChange={(e) => setOutcomeSel(e.target.value)} disabled={busy}>
+            <div className="mb-[10px] flex flex-wrap items-center gap-2">
+              <span className={wcLabel}>Outcome</span>
+              <select className={cn(FIELD_INPUT, "w-auto min-w-[168px] shrink-0")} value={outcome} disabled={busy} onChange={(e) => setOutcomeSel(e.target.value)}>
                 {OUTCOMES.map((o) => <option key={o} value={o}>{o.replace(/_/g, " ")}</option>)}
               </select>
-              <input className="wc-input" value={outcomeNotes} placeholder="Reason / notes…"
-                onChange={(e) => setOutcomeNotes(e.target.value)} disabled={busy} />
-              <button className="wc-btn" onClick={recordOutcome} disabled={busy}>Record</button>
+              <input className={cn(FIELD_INPUT, "min-w-[140px] flex-1")} value={outcomeNotes} placeholder="Reason / notes…" disabled={busy} onChange={(e) => setOutcomeNotes(e.target.value)} />
+              <button className={BTN} onClick={recordOutcome} disabled={busy}>Record</button>
             </div>
           </div>
         )}
 
-        {toast && <div className={`wc-toast ${toast.kind}`}>{toast.text}</div>}
+        {toast && <div className={cn("mt-2 rounded-md px-[9px] py-[6px] text-[12px]", TOAST[toast.kind])}>{toast.text}</div>}
       </div>
 
-      <div className="write-panel flag-form">
-        <h3>Flag scoring issue</h3>
-        <label>Type</label>
-        <select value={flagType} onChange={(e) => setFlagType(e.target.value)} disabled={busy}>
+      <div className="mt-[18px] rounded-lg border border-line bg-[#fbfcfe] p-[14px]">
+        <h3 className="mb-[10px] text-[11px] font-bold uppercase tracking-wide text-brand">Flag scoring issue</h3>
+        <label className={LABEL}>Type</label>
+        <select className={cn(FIELD_INPUT, "mb-2")} value={flagType} disabled={busy} onChange={(e) => setFlagType(e.target.value)}>
           {ANNOTATION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
-        <label>Observed (from record)</label>
-        <input value={listText(observed)} readOnly disabled />
-        <label>Expected</label>
-        <input value={expected} placeholder="What it should be…" onChange={(e) => setExpected(e.target.value)} disabled={busy} />
-        <label>Reason</label>
-        <textarea value={reason} rows={2} placeholder="Why is the scoring wrong?" onChange={(e) => setReason(e.target.value)} disabled={busy} />
-        <div className="flag-footer">
-          <button className="wc-btn primary" onClick={submitFlag} disabled={busy}>Submit Flag</button>
+        <label className={LABEL}>Observed (from record)</label>
+        <input className={cn(FIELD_INPUT, "mb-2")} value={listText(observed)} readOnly disabled />
+        <label className={LABEL}>Expected</label>
+        <input className={cn(FIELD_INPUT, "mb-2")} value={expected} placeholder="What it should be…" disabled={busy} onChange={(e) => setExpected(e.target.value)} />
+        <label className={LABEL}>Reason</label>
+        <textarea className={cn(FIELD_INPUT, "mb-2 font-sans")} rows={2} value={reason} placeholder="Why is the scoring wrong?" disabled={busy} onChange={(e) => setReason(e.target.value)} />
+        <div className="flex justify-end">
+          <button className={BTN_PRIMARY} onClick={submitFlag} disabled={busy}>Submit Flag</button>
         </div>
-        {flagToast && <div className={`wc-toast ${flagToast.kind}`}>{flagToast.text}</div>}
+        {flagToast && <div className={cn("mt-2 rounded-md px-[9px] py-[6px] text-[12px]", TOAST[flagToast.kind])}>{flagToast.text}</div>}
       </div>
     </>
   );
@@ -218,36 +218,39 @@ export function DetailPanel({ job, onClose, onChanged }: { job: Job; onClose: ()
 
   return (
     <>
-      <div className="drawer-scrim" onClick={onClose} />
-      <aside className="drawer" aria-label="role detail">
-        <div className="dh">
-          <button className="close" title="Close (Esc)" onClick={onClose}>×</button>
-          <div className="co">{job.company}</div>
-          <h2>{job.title}</h2>
-          <div className="dh-meta">
-            <span className={`badge ${job.fit_label}`}>{LABEL_TEXT[job.fit_label] || job.fit_label}</span>
-            <span className={`pill ${effectiveStatus(job)}`}>{effectiveStatus(job)}</span>
-            {job.outcome && <span className="outcome-badge">{job.outcome.replace(/_/g, " ")}</span>}
-            {isStaleApplied(job) && <span className="stale-badge">stale</span>}
-            {job.location && <span className="muted">{job.location}</span>}
+      <div className="fixed inset-0 z-40 bg-[#141a26]/50" onClick={onClose} />
+      <aside
+        aria-label="role detail"
+        className="fixed left-1/2 top-1/2 z-50 h-[80vh] max-h-[92vh] w-[80vw] max-w-[1040px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-[14px] border border-line bg-panel shadow-[0_24px_70px_rgba(20,26,38,.32)]"
+      >
+        <div className="sticky top-0 z-10 rounded-t-[14px] border-b border-line bg-panel px-6 py-4">
+          <button onClick={onClose} title="Close (Esc)" className="float-right text-[22px] leading-none text-ink-faint hover:text-ink">×</button>
+          <div className="text-[12px] uppercase tracking-wide text-ink-soft">{job.company}</div>
+          <h2 className="mb-[10px] mt-[2px] text-[19px] font-semibold">{job.title}</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={cn("inline-block rounded-full px-2 py-[2px] text-[11px] font-bold", fitBadgeClass(job.fit_label))}>{LABEL_TEXT[job.fit_label] || job.fit_label}</span>
+            <Pill status={effectiveStatus(job)} />
+            {job.outcome && <span className="rounded-[5px] bg-[#f3dede] px-2 py-px text-[11px] font-semibold text-[#9a3636]">{job.outcome.replace(/_/g, " ")}</span>}
+            {isStaleApplied(job) && <span className="rounded-full bg-[#f6e3d3] px-[7px] py-px text-[10.5px] font-bold uppercase tracking-wide text-[#b4540f]">stale</span>}
+            {job.location && <span className="text-ink-faint">{job.location}</span>}
           </div>
-          <div className="scores">
-            <div className="s"><div className="n">{job.fit_score}</div><div className="l">fit score</div></div>
-            <div className="s"><div className="n">{job.priority_score}</div><div className="l">priority</div></div>
-            {job.location_workable && <div className="s"><div className="n">{job.location_workable}</div><div className="l">location</div></div>}
+          <div className="mt-3 flex gap-[22px]">
+            <div><div className="text-[22px] font-extrabold">{job.fit_score}</div><div className="text-[10px] uppercase tracking-wide text-ink-soft">fit score</div></div>
+            <div><div className="text-[22px] font-extrabold">{job.priority_score}</div><div className="text-[10px] uppercase tracking-wide text-ink-soft">priority</div></div>
+            {job.location_workable && <div><div className="text-[22px] font-extrabold">{job.location_workable}</div><div className="text-[10px] uppercase tracking-wide text-ink-soft">location</div></div>}
           </div>
         </div>
 
-        <div className="dbody">
+        <div className="mx-auto max-w-[760px] px-6 pb-12 pt-2">
           {configured && <WriteControls job={job} onChanged={onChanged} />}
 
-          {job.fit_label_reason && <Section title="Assessment"><p className="reason">{job.fit_label_reason}</p></Section>}
-          {!!(job.blocking_constraints || []).length && <Section title="Blocking constraints"><Chips items={job.blocking_constraints} cls="block" /></Section>}
-          {!!(job.requirement_gaps || []).length && <Section title="Requirement gaps"><Chips items={job.requirement_gaps} cls="warn" /></Section>}
+          {job.fit_label_reason && <Section title="Assessment"><p className="rounded-md bg-line-soft px-[11px] py-[9px] italic text-ink">{job.fit_label_reason}</p></Section>}
+          {!!(job.blocking_constraints || []).length && <Section title="Blocking constraints"><Chips items={job.blocking_constraints} tone="block" /></Section>}
+          {!!(job.requirement_gaps || []).length && <Section title="Requirement gaps"><Chips items={job.requirement_gaps} tone="warn" /></Section>}
           {job.notes && <Section title="Notes"><p>{job.notes}</p></Section>}
 
           <Section title="Extraction">
-            <dl className="kv">
+            <dl className="grid grid-cols-[150px_1fr] gap-x-3 gap-y-1">
               <KV label="Role type" value={listText(job.role_type)} />
               <KV label="Domain" value={listText(job.domain)} />
               <KV label="Seniority" value={job.seniority} />
@@ -267,9 +270,9 @@ export function DetailPanel({ job, onClose, onChanged }: { job: Job; onClose: ()
           {!!(job.required_competencies || []).length && <Section title="Required competencies"><Chips items={job.required_competencies} /></Section>}
           {!!niceToHave.length && <Section title="Nice to have"><Chips items={niceToHave} /></Section>}
           {!!(job.culture_signals || []).length && <Section title="Culture signals"><Chips items={job.culture_signals} /></Section>}
-          {job.raw_observations && <Section title="Raw observations"><p className="muted">{job.raw_observations}</p></Section>}
-          {job.raw_text && <Section title="Full JD text"><div className="jd-text">{job.raw_text}</div></Section>}
-          {job.source_url && <Section title="Source"><a className="link-out" href={job.source_url} target="_blank" rel="noopener">{job.source_url}</a></Section>}
+          {job.raw_observations && <Section title="Raw observations"><p className="text-ink-faint">{job.raw_observations}</p></Section>}
+          {job.raw_text && <Section title="Full JD text"><div className="max-h-[360px] overflow-y-auto whitespace-pre-wrap break-words rounded-[7px] border border-line-soft bg-[#fbfbfd] p-3 text-[12.5px] leading-[1.55] text-ink-soft">{job.raw_text}</div></Section>}
+          {job.source_url && <Section title="Source"><a className="text-[12px] text-brand hover:underline" href={job.source_url} target="_blank" rel="noopener">{job.source_url}</a></Section>}
         </div>
       </aside>
     </>

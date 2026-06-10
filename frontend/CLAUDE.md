@@ -20,10 +20,19 @@ static `ui/`. Stack ported from cv-tailor's `frontend/` (`UnlockProvider`, `lib/
   (hidden entirely otherwise — no dead buttons, SPEC §10.5 table). The first write calls
   `requestUnlock()`, which resolves `true` once unlocked (opening the dialog if locked) or
   `false` on cancel. Archive confirms; the other status moves are one-click (§10.6).
-- **Visual design ported from Phase 5.** The badge/pill/grid/drawer/pipeline classes in
-  `src/index.css` are copied from the old `ui/style.css`; `FIT_LABELS`/`STATUS_ORDER`/
-  `LABEL_TEXT` in `src/lib/jobs.ts` mirror `models/record.py` enums. `blocked_fit` recedes
-  by design (muted + struck-through) — don't restyle it to parity.
+- **Styling = Tailwind utilities + shadcn primitives + JS class maps. NO global semantic
+  CSS classes.** `src/index.css` holds only `@tailwind` + the shadcn HSL tokens + a body
+  reset — nothing else. Layout/spacing/colour live as Tailwind utility classes on the JSX;
+  the brand palette (`ink`/`line`/`brand`/`panel`/`canvas`/`rowhover`) is in
+  `tailwind.config.js`. **Dynamic** styling (a `fit_label`/status value → colours) is a JS
+  lookup map returning a full Tailwind class string — `src/lib/ui.ts`
+  (`fitBadgeClass`/`statusPillClass`/`CHIP`/`TOAST`). **Never add a hand-named global class
+  to a real element** — a class like `.grid`/`.table`/`.card`/`.hidden` collides silently
+  with a Tailwind utility (`.grid` = `display:grid` turned the `<table>` into a grid
+  container and broke header alignment; that's why the global CSS was removed). The Browse
+  table uses the shadcn `components/ui/table.tsx` primitives (`table-fixed` + a `<colgroup>`
+  pin column widths). `FIT_LABELS`/`STATUS_ORDER`/`LABEL_TEXT` in `lib/jobs.ts` mirror
+  `models/record.py` enums. `blocked_fit` recedes by design (muted + struck-through) — keep it.
 - **No JS test toolchain.** Backend is covered by pytest (`tests/test_api*.py`); the
   frontend is verified by headless-browser screenshots (Phase 5 precedent). Keep it that
   way unless a real need for component tests appears.
@@ -31,7 +40,9 @@ static `ui/`. Stack ported from cv-tailor's `frontend/` (`UnlockProvider`, `lib/
 ## Structure
 
 - `src/lib/api.ts` — typed client + `ApiError`; `Job`/`IndexResponse`/`Capabilities` types.
-- `src/lib/jobs.ts` — orderings, filter/sort, date/list helpers (ported from `app.js`).
+- `src/lib/jobs.ts` — orderings, filter/sort, effective-status, staleness, date/list helpers.
+- `src/lib/ui.ts` — value→Tailwind-class maps (fit badge, status pill, chip/toast tones).
+- `src/components/ui/table.tsx` — shadcn Table primitives (used by BrowseView).
 - `src/hooks/useIndex.ts` — fetch + `refetch()` (called after every write).
 - `src/components/UnlockProvider.tsx` — shared unlock state + modal dialog.
 - `src/components/{StatBar,Sidebar,BrowseView,PipelineView,DetailPanel}.tsx` + `ui/`.

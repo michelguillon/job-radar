@@ -335,6 +335,21 @@ thing tests actually run against.
     wasn't moved (e.g. a CLI `--outcome` write) — a read-time derivation, log untouched.
     Routed through Browse/Pipeline/Sidebar/DetailPanel; `isStaleApplied` uses it too. No
     backend change.
+35. (Phase 6, post-M2 — styling rearchitecture) **Frontend styling is Tailwind utilities +
+    shadcn primitives + JS class maps; the ported global semantic CSS was deleted.** Root
+    cause of a recurring class of bugs: M2 ported the Phase 5 hand-written global
+    `ui/style.css` (`.grid`/`.pill`/`.badge`/`.drawer`/…) into a Tailwind app, so global
+    class names collided silently with Tailwind utilities — `.grid` = Tailwind's
+    `display:grid` turned the Browse `<table>` into a grid container and detached the header
+    row from the body columns (headers bunched left). Fixed at the architecture level: every
+    view (`App`/`StatBar`/`Sidebar`/`BrowseView`/`PipelineView`/`DetailPanel`) restyled with
+    Tailwind utility classes; dynamic value→colour styling moved to JS maps in
+    `frontend/src/lib/ui.ts` (`fitBadgeClass`/`statusPillClass`/`CHIP`/`TOAST`); brand palette
+    added to `tailwind.config.js`; new shadcn `components/ui/table.tsx` (`table-fixed` +
+    `<colgroup>` pins columns). `src/index.css` now holds **only** `@tailwind` + tokens + a
+    body reset — no global component classes, so the collision class is gone for good. UI/UX
+    and behaviour unchanged; 354 tests still pass (frontend-only). Convention in
+    `frontend/CLAUDE.md`. Verified: table header/cell positions identical (aligned).
 
 ---
 
