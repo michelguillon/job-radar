@@ -312,6 +312,16 @@ thing tests actually run against.
     shown in the detail panel and as a dot on `applied` rows in Browse. No schema/scorer
     change — still log events folded by `project`; the live `/api/index` overlay already
     carried `outcome`/`application_date`. +3 tests (354 total).
+33. (Phase 6, post-M2 — UX from use) **Detail/pipeline/button refinements** (SPEC §10.10
+    items 1–3, no backend change): (a) the detail view is a **centred modal** (80vw × 80vh,
+    max 1040px) over a dimmed backdrop, not the original 560px right rail — same ×/Esc/
+    backdrop-click close, body capped at a ~760px reading column; (b) Pipeline lanes use
+    **`PIPELINE_ORDER`** (`offer→interviewing→applied→shortlisted→review→new→rejected→
+    archived`) so active stages sit above the big `new` backlog — the funnel `STATUS_ORDER`
+    (stats bar + filters) is unchanged; (c) Save/Override/**Submit Flag** were mis-classed
+    (flex-container class, not button styling) and rendered faint — now a proper `.wc-btn`
+    style (Submit Flag = primary), and the flag form gets its **own in-panel toast** separate
+    from the workflow toast.
 
 ---
 

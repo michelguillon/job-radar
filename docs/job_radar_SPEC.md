@@ -1682,23 +1682,28 @@ Visible to owner only (hidden when not configured, unlock dialog when
 configured but not unlocked):
 
 ```
-─── Assessment ──────────────────────────────────────
-fit_label: strong_fit  fit_score: 9  priority: 10
-
+─── Workflow ────────────────────────────────────────
 Status:   [Review] [Shortlist] [Apply] [Archive]
 Notes:    [                              ] [Save]
 Title:    [                              ] [Override]
+                                                        ← Outcome row appears once applied
+Applied:  2026-06-10 · 12d ago  [stale >21d]  [outcome badge]
+Outcome:  [rejected_post_screen ▾] [reason…] [Record]   ← stage auto-derived from status
 
 ─── Flag scoring issue ──────────────────────────────
 Type:     [dropdown ▾]
 Observed: [pre-filled from record]
 Expected: [                              ]
 Reason:   [                              ]
-          [Submit Flag]
+                                          [Submit Flag] ← primary button, own toast
 ```
 
 Status buttons are quick-action — one click, no confirmation for common
 transitions (review, shortlist, apply). Archive requires confirmation.
+The **Outcome** row appears once a role has been applied; its rejection stage
+auto-derives from the current status and is editable, and recording it also moves
+the workflow lane (§10.10 item 4). The container is a centred modal, not a side
+rail (§10.10 item 1).
 
 ---
 
@@ -1768,6 +1773,46 @@ Build in this order. Each step tested before the next starts.
 Same pattern as cv-tailor and RFI app. Not specced here — add as a named
 next step after Phase 6 is verified locally. Michel has an established
 flow for this.
+
+---
+
+### 10.10 — Product-feedback enhancements (post-build)
+
+Refinements made **after** Phase 6 shipped, driven by using the tool day-to-day.
+All are read-model / UI / thin-endpoint changes — no scorer, schema, or pipeline
+change. Captured here so §10 reflects the actual end state; cross-referenced as
+CLAUDE.md deviations 32–33.
+
+1. **Detail view is a centred modal, not a right rail.** The original 560px
+   right-side drawer wasted most of a wide screen. The detail view is now a
+   centred card (80vw × 80vh, max 1040px) over a dimmed backdrop, same
+   ×/Esc/backdrop-click close; the body keeps a ~760px reading column so it
+   doesn't stretch. (§10.6 mockup below is the content; the container changed.)
+
+2. **Pipeline lanes order active stages above the `new` backlog.** The kanban
+   funnel put `new` (the large untriaged bucket) on top, burying live
+   opportunities. Pipeline now renders `offer → interviewing → applied →
+   shortlisted → review → new → rejected → archived` (`PIPELINE_ORDER`); the
+   funnel `STATUS_ORDER` used by the stats bar + filters is unchanged.
+
+3. **Write-action buttons are real buttons; the flag form has its own feedback.**
+   Save / Override / Submit Flag had been mis-classed and rendered as faint,
+   easy-to-miss controls (reported as "no way to save my flag"). They now use a
+   proper button style — Submit Flag is a prominent primary button in a footer —
+   and the flag form shows its own success/error toast in-panel, separate from
+   the workflow toast.
+
+4. **Outcome recording + application staleness** (see §10.4 `POST /api/outcome`).
+   A role couldn't be marked rejected from the browser even though the `OUTCOME`
+   model, the activity-log projection, and the CLI `--outcome` all already
+   supported it. The detail panel now shows an **Outcome** control once a role is
+   applied: the rejection stage **auto-derives from the current workflow status**
+   (`applied→post_screen`, `interviewing→interview`, `offer→final`) and is
+   editable, recording appends an `outcome` event (+ reason notes) and moves the
+   workflow lane to match. The **application date** (derived from the earliest
+   `applied` event) is surfaced with **age-since-applied and a "stale" flag past
+   21 days** — in the detail panel and as a dot on `applied` rows in Browse — so
+   dead applications are visible at a glance.
 
 ---
 
