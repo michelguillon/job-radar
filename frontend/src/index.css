@@ -152,10 +152,11 @@ tr.is-blocked .role-text { text-decoration: line-through; text-decoration-color:
 .pipe-card.is-blocked { opacity: .6; }
 .pipe-card.is-blocked .pc-role { text-decoration: line-through; }
 
-/* ───────────── Detail drawer ───────────── */
-.drawer-scrim { position: fixed; inset: 0; background: rgba(20,26,38,.42); z-index: 10; }
-.drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 560px; max-width: 94vw; z-index: 11; background: var(--panel); border-left: 1px solid var(--line); box-shadow: -8px 0 30px rgba(20,26,38,.18); overflow-y: auto; }
-.dh { position: sticky; top: 0; background: var(--panel); border-bottom: 1px solid var(--line); padding: 16px 20px; z-index: 1; }
+/* ───────────── Detail modal (centered card) ───────────── */
+.drawer-scrim { position: fixed; inset: 0; background: rgba(20,26,38,.5); z-index: 10; }
+.drawer { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 80vw; max-width: 1040px; height: 80vh; max-height: 92vh; z-index: 11; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 24px 70px rgba(20,26,38,.32); overflow-y: auto; }
+.drawer .dbody { max-width: 760px; margin: 0 auto; }
+.dh { position: sticky; top: 0; background: var(--panel); border-bottom: 1px solid var(--line); border-radius: 14px 14px 0 0; padding: 16px 24px; z-index: 1; }
 .dh .close { float: right; cursor: pointer; border: 0; background: none; font-size: 22px; line-height: 1; color: var(--ink-faint); }
 .dh .close:hover { color: var(--ink); }
 .dh .co { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--ink-soft); }
