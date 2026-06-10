@@ -484,11 +484,15 @@ writes:
 
 **`stats.py`:** Prints corpus summary to terminal. Also supports:
 ```bash
-python -m cli.stats --export-index    # writes corpus/index.json for Phase 5 UI
+# writes corpus/index.json for the Phase 5 UI
+python -m cli.stats --input "corpus/validated/validated_*.jsonl" --export-index
 ```
 
-`corpus/index.json` format — flat array of denormalised records for
-the read-only UI. Pre-built by CLI, never written by the UI.
+`corpus/index.json` is pre-built by the CLI and never written by the UI.
+Its format evolved in Phase 5 from the flat JDRecord array sketched here
+to a **join** (score ⨝ JD ⨝ sidecar ⨝ activity-log projection) wrapped
+with embedded corpus stats — see §9.4 for the authoritative contract and
+deviation 27.
 
 **Claude Code prompt:**
 > Build pipeline/validate.py and stats.py as defined in Step 8.

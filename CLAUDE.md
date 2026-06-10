@@ -303,4 +303,4 @@ Keep this file lean. Add area-specific conventions to nested files:
   capability matrix** (exists)
 - `pipeline/CLAUDE.md` — batch API patterns, cost tracking, label-merge defaults
 - `scoring/CLAUDE.md` — scoring logic, profile schema (Phase 2+)
-- `ui/CLAUDE.md` — UI conventions, index.json contract (Phase 5+)
+- `ui/CLAUDE.md` — UI conventions, index.json join contract, read-only invariant (exists)

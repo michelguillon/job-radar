@@ -89,24 +89,31 @@ UI (read-only, nginx)
 
 | Phase | Name | Status |
 |---|---|---|
-| 1 | Corpus Engine | In progress |
-| 2 | Scoring Engine | Planned |
-| 3 | Job Tracker | Planned |
-| 4 | Discovery Layer | Planned |
-| 5 | UI | Planned |
+| 1 | Corpus Engine | ✅ Complete |
+| 2 | Scoring Engine | ✅ Complete |
+| 3 | Job Tracker | ✅ Complete |
+| 4 | Discovery Layer | ✅ Complete |
+| 5 | UI | ✅ Complete |
 | 6 | Fine-Tuned Analyser | Future / Project 5 |
+
+Phases 1–5 are complete: Job Radar is feature-complete for v1 — collect →
+clean/dedupe → label → validate → score → track → discover → browse. Phase 6
+(fine-tuning) is deferred until the corpus is large enough to justify it. See
+`docs/job_radar_SPEC.md` §2 for the detailed per-phase status.
 
 ---
 
 ## Key Findings
 
-*To be completed after Phase 1 — see `PROJECT_ARCHITECTURE.md`.*
+See `docs/CORPUS_FINDINGS.md` (schema v1.2, labelling rules) and
+`docs/job_radar_ARCHITECTURE.md`.
 
 ---
 
 ## Lessons Learned
 
-*To be completed after Phase 1 — see `PROJECT_LEARNINGS.md`.*
+Maintained append-only in `docs/job_radar_LEARNINGS.md` — one entry per decision,
+finding, or reversal across all phases (28 entries as of Phase 5).
 
 ---
 
@@ -120,27 +127,37 @@ cp .env.example .env
 
 docker compose build
 docker compose run --rm job-radar python -m cli.collect --dry-run --source greenhouse
-docker compose run --rm job-radar python -m cli.stats
+docker compose run --rm job-radar python -m cli.stats --input "corpus/validated/validated_*.jsonl"
 ```
 
-**Phase 1 status check:**
+**Test suite:**
 ```bash
 docker compose run --rm job-radar python -m pytest -q
-# Expected: 42 passing
+# Expected: 318 passing
+```
+
+**Browse the corpus (read-only UI):**
+```bash
+# (re)build the index the UI reads, then serve it
+docker compose run --rm job-radar python -m cli.stats \
+  --input "corpus/validated/validated_*.jsonl" --export-index
+docker compose --profile ui up        # → http://localhost:8080
 ```
 
 ---
 
 ## Live Demo
 
-Not yet available. Phase 5 UI planned post-Phase 4.
+Run locally — see **Browse the corpus** under *Running Locally* above
+(`docker compose --profile ui up` → http://localhost:8080). The UI is a static,
+read-only browse/filter interface over the pre-built `corpus/index.json`.
 
 ---
 
 ## Documentation
 
-- [Architecture](job_radar_ARCHITECTURE.html)
-- [Retrospective](job_radar_RETROSPECTIVE.md)
-- [Learnings](job_radar_LEARNINGS.md)
-- [Specification](SPEC_JOB_RADAR.md)
-- [Corpus Findings](CORPUS_FINDINGS.md)
+- [Specification](docs/job_radar_SPEC.md) — architecture, phases, UI contract (§9)
+- [Architecture](docs/job_radar_ARCHITECTURE.md)
+- [Learnings](docs/job_radar_LEARNINGS.md)
+- [Retrospective](docs/job_radar_RETROSPECTIVE.md)
+- [Corpus Findings](docs/CORPUS_FINDINGS.md) — schema v1.2, labelling rules
