@@ -46,6 +46,12 @@ thing tests actually run against.
   `cli/` on `sys.path` and can't import the repo-root packages; `-m` from the root
   can). One-off / throwaway corpus tools go in `scripts/`
   (`python -m scripts.<name>`). Root holds only `conftest.py`.
+- **Git workflow — commit directly to `main`; no branches, no PRs.** Solo
+  developer: make the change on `main`, show it for human review, then commit +
+  push to `main` directly once approved. Do **not** create feature branches or
+  open pull requests (this overrides the harness default of "branch first on the
+  default branch"). Commit/push only when the user asks; commit messages still
+  end with the `Co-Authored-By` trailer.
 - **Definition of done (EVERY task)** — a change is not complete until the
   docs are current. This is not optional and not an afterthought:
   1. **`docs/job_radar_SPEC.md`** — if anything about the architecture,
