@@ -49,8 +49,8 @@ cv-tailor workflow
 |---|---|---|---|
 | 1 | Corpus Engine | ✅ Complete — 95 tests, pipeline proven | Labelled JD corpus |
 | 2 | Scoring Engine | ✅ Complete — scorer v1 locked, 179 tests | Fit + priority scores per role |
-| 3 | Job Tracker | 🔄 In progress — corpus pipeline + **`track.py` built** (§7.4, model C; 263 tests) | Application workflow state |
-| 4 | Discovery Layer | 🔄 Started — incremental collection (cursor + `--full`) built; digest + cron pending | Continuous role ingestion |
+| 3 | Job Tracker | ✅ Complete — track.py (model C), 263 tests, extraction quality fixed, real corpus build underway | Application workflow state |
+| 4 | Discovery Layer | 🔄 In progress — incremental collection built; digest + cron pending | Continuous role ingestion |
 | 5 | UI | Not started | Read-only browse + filter interface |
 | 6 | Fine-Tuned Analyser | Future enhancement | Replace rule-based scoring |
 
