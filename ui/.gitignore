@@ -1,1 +1,3 @@
-ui/data/
+# Docker bind-mount target for corpus/index.json (created at container start).
+# Pattern is relative to this file (inside ui/), so `data/`, not `ui/data/`.
+data/
