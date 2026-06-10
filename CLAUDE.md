@@ -58,7 +58,7 @@ thing tests actually run against.
 |---|---|
 | 1 — Corpus Engine | ✅ complete — Steps 0–9, 95 tests. Pipeline end-to-end. |
 | 2 — Scoring Engine | ✅ **complete (scorer v1)** — `scoring/{profile,scorer}.py` + `score.py`, 179 tests. Option A (`ApplicationRecord` v1.3 → `corpus/scored/`) + gates-vs-signal model + 3-tier role (primary/conditional/secondary) + capability/M&A blockers + negative-signal ceiling. Thresholds **set from evidence** (held against the 23-record corpus: 10 manual + 13 calibration). Calibration regression set: `corpus/calibration/`. Known limit F (extraction generosity) deferred. Conventions: `scoring/CLAUDE.md`. |
-| 3 — Job Tracker | 🔄 in progress — building a **real** corpus (target 500+ validated). Collection captures a **metadata sidecar** (`corpus/raw/meta_{date}.jsonl`: title + structured location, keyed by `source_url`) — `raw_text` stays employer JD text only. **Pre-label filter** (`pipeline/prefilter.py` + `prefilter.py`) cuts raw → 62 survivors. **First production scoring run done (2026-06-09):** 44-record representative subset labelled (Batch, $0.7672, 0 fail, sidecar metadata passed as `[ATS METADATA]` prompt block via `clean_readable` raw_text) → validated → scored (strong_fit 18 / stretch 7 / blocked_fit 8 / good_fit 6 / interview_practice 5). Capability blocker validated on real data; **Known Limit F confirmed** (Product/Enterprise-Software over-tagging → a Product-Marketing role scored strong_fit). Next core deliverable: **`track.py`** (the Job Tracker proper — application lifecycle + `activity_log.jsonl`) — see `docs/job_radar_TRACKER_PLAN.md` (central design problem: workflow state must survive a re-score). Also ongoing: **extraction-quality review**, widen seeds, structured score review after **100+** scored jobs. Scorer stays **locked**. Option D **deferred**. |
+| 3 — Job Tracker | 🔄 in progress — building a **real** corpus (target 500+ validated). Collection captures a **metadata sidecar** (`corpus/raw/meta_{date}.jsonl`: title + structured location, keyed by `source_url`) — `raw_text` stays employer JD text only. **Pre-label filter** (`pipeline/prefilter.py` + `prefilter.py`) cuts raw → 62 survivors. **First production scoring run done (2026-06-09):** 44-record representative subset labelled (Batch, $0.7672, 0 fail, sidecar metadata passed as `[ATS METADATA]` prompt block via `clean_readable` raw_text) → validated → scored (strong_fit 18 / stretch 7 / blocked_fit 8 / good_fit 6 / interview_practice 5). Capability blocker validated on real data; **Known Limit F confirmed** (Product/Enterprise-Software over-tagging → a Product-Marketing role scored strong_fit). **`track.py` built (2026-06-10)** — the Job Tracker proper (SPEC §7.4), model **C**: append-only `corpus/activity_log.jsonl` is the source of truth for workflow state (status/notes/outcome), the pure scorer is untouched, live state = latest score *joined* with a projection folded from the log by `job_id`. **Log-only** fork: outcome/application_date derived at read time, no schema bump (`OUTCOME`/`ACTIVITY_EVENT`/`validate_activity_event` added to `models/record.py` as vocab only). Forgiving transitions (warn, never block); `list` joins + sorts by priority. 263 tests; acceptance-tested on the 44 production records (Figma/Mistral marks → joined `list` verified). See deviation **23**. Also ongoing: **extraction-quality review**, widen seeds, structured score review after **100+** scored jobs. Scorer stays **locked**. Option D **deferred**. |
 | 4 — Discovery Layer | Not started |
 | 5 — UI | Not started |
 | 6 — Fine-Tuned Analyser | Deferred (Project 5) |
@@ -163,6 +163,26 @@ thing tests actually run against.
     never labelled, scored, or made into an ApplicationRecord; zero Batch cost.**
     Gathers evidence on whether `GTM` should become a `target_role` *before* any
     profile/scorer change — `GTM` deliberately stays out of `target_roles` for now.
+23. (Phase 3) **Job Tracker `track.py` — model C + Log-only** (supersedes SPEC
+    §7.4's earlier "updates ApplicationRecord in corpus/scored/" sketch, which was
+    in tension with the pure scorer). Workflow state lives **only** in the
+    append-only event log `corpus/activity_log.jsonl` (`{v, ts, job_id, event,
+    value, notes}`; `event ∈ {status, outcome, note}`). `track.py` **only
+    appends** — it never mutates a scored file and never touches the scorer, so a
+    re-score (which regenerates every `ApplicationRecord` with
+    `application_status="new"`) can't wipe human state. **Live state = latest
+    score joined with a projection folded from the log by `job_id`** (latest
+    status/outcome, earliest-`applied` date, latest non-empty note). `outcome` and
+    `application_date` are **derived at read time — never persisted on
+    `ApplicationRecord`** (no schema bump; `SCHEMA_VERSION` stays 1.3). Vocab only
+    added to `models/record.py`: `OUTCOME`, `ACTIVITY_EVENT`, `ACTIVITY_LOG_VERSION`,
+    `validate_activity_event`. Transitions are **forgiving** (warn, never block);
+    unknown `job_id` is refused unless `--force`. `list` sorts by `priority_score`
+    desc and shows all labels; `--location-workable` is a **coarse, sidecar-derived
+    read-only** signal (no scoring change). `corpus/activity_log.jsonl` is **git-
+    ignored** like other corpus data (mutable personal state). Stable join key
+    caveat: a JD text change → new content hash → new `job_id` → workflow does not
+    carry to the new revision (accepted, not a bug).
 
 ---
 

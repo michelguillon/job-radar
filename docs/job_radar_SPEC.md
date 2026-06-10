@@ -49,7 +49,7 @@ cv-tailor workflow
 |---|---|---|---|
 | 1 | Corpus Engine | ✅ Complete — 95 tests, pipeline proven | Labelled JD corpus |
 | 2 | Scoring Engine | ✅ Complete — scorer v1 locked, 179 tests | Fit + priority scores per role |
-| 3 | Job Tracker | 🔄 In progress — real-corpus build: metadata sidecar + pre-label filter (§5.8) done | Application workflow state |
+| 3 | Job Tracker | 🔄 In progress — corpus pipeline + **`track.py` built** (§7.4, model C; 263 tests) | Application workflow state |
 | 4 | Discovery Layer | Not started | Continuous role ingestion |
 | 5 | UI | Not started | Read-only browse + filter interface |
 | 6 | Fine-Tuned Analyser | Future enhancement | Replace rule-based scoring |
@@ -1102,32 +1102,76 @@ This feedback loop serves multiple purposes:
 - recommendation quality assessment — is structural fit predicting success?
 - future fine-tuning dataset — real outcome labels on scored JDs
 
-Implementation is lightweight initially: `outcome` field added to
-`ApplicationRecord` when status reaches `rejected`, `offer`, or
-`archived`. Full calibration analysis deferred until enough outcomes
-accumulate (target: 20+ completed applications).
+Implementation is lightweight: `outcome` is an **event in the activity log**
+(§7.4), *derived* into live state at read time — **not** a field on
+`ApplicationRecord` (the scorer is pure; see §7.4 and CLAUDE.md deviation 23).
+The closed vocabulary lives in `models/record.py` as the `OUTCOME` frozenset.
+Full calibration analysis deferred until enough outcomes accumulate (target:
+20+ completed applications) — build the capture now, not the analysis.
 
 ```python
-outcome: str | None
-# None until application reaches terminal state
+# OUTCOME (models/record.py) — value of an `outcome` activity-log event:
 # "rejected_pre_screen" | "rejected_post_screen" | "rejected_interview" |
 # "rejected_final" | "offer_declined" | "offer_accepted" | "withdrew"
-outcome_notes: str
+# outcome_notes is carried in the event's `notes`.
 ```
 
-### 7.4 — Implementation
+### 7.4 — Implementation (`track.py`, model C)
 
-New CLI:
+**The design problem.** `score.py` regenerates every `ApplicationRecord` from
+scratch on each run — the scorer is pure and always emits
+`application_status="new"`, `notes=""`. So workflow state written *into* a scored
+record would be wiped by the next collection→label→score cycle.
+
+**Resolution — model C (append-only event log as source of truth)**
+(forks resolved in `job_radar_TRACKER_PLAN.md`; superseded the earlier "updates
+ApplicationRecord in corpus/scored/" sketch — see CLAUDE.md deviation 23):
+
+- `corpus/activity_log.jsonl` is the **single source of truth** for workflow
+  state. `track.py` only ever **appends** events; it never edits a scored file,
+  never touches the scorer. Re-scoring is therefore always safe.
+- A job's **live state** = its latest score (regenerable) **joined** with a
+  **projection** folded from the log by `job_id`.
+- `outcome` / `application_date` are **derived** at read time (Log-only fork) —
+  `ApplicationRecord` and `SCHEMA_VERSION` (1.3) are untouched.
+
+**Event format** (`corpus/activity_log.jsonl`, append-only, never edited):
+```json
+{"v": 1, "ts": "2026-06-10T14:30:00Z", "job_id": "sha256:abc",
+ "event": "status", "value": "applied", "notes": "referral"}
+```
+`event ∈ {status, outcome, note}` (`models.record.ACTIVITY_EVENT`); a `status`
+value is an `APPLICATION_STATUS` (minus the implicit `new`), an `outcome` value
+is an `OUTCOME`, a `note` carries text in `notes` with `value: null`.
+`validate_activity_event` guards the closed vocab before any line is written.
+
+**Projection** (fold a job's events in `ts` order): `status` = latest status
+event (default `new`); `outcome` = latest outcome event (default `None`);
+`application_date` = date of the *earliest* `status=applied` event; `notes` =
+most recent non-empty note.
+
+**Stable join key:** `job_id` is the JD content hash. If a JD's text changes it
+gets a *new* hash → a new posting revision → workflow does not carry across. This
+is accepted behaviour, not a bug.
+
+**CLI:**
 ```bash
-python track.py --job-id sha256:abc123 --status applied
-python track.py --job-id sha256:abc123 --status interviewing --notes "First round booked"
-python track.py --job-id sha256:abc123 --outcome rejected_post_screen
+python track.py --job-id sha256:abc --status applied
+python track.py --job-id sha256:abc --status interviewing --notes "First round booked"
+python track.py --job-id sha256:abc --outcome rejected_post_screen
+python track.py --job-id sha256:abc --notes "recruiter emailed"   # pure note
 python track.py list --status shortlisted
 python track.py list --min-fit 7 --location-workable yes
 ```
-
-Updates `ApplicationRecord` in `corpus/scored/`. Appends to
-`corpus/activity_log.jsonl` — append-only audit trail, never edited.
+- Writing an unknown `job_id` (not in any scored file) errors unless `--force`
+  (orphan-event guard).
+- Status transitions are **forgiving** — an out-of-order move warns but never
+  blocks (a job search skips and backtracks stages).
+- `list` joins score + JD + sidecar title + workflow and prints a table sorted by
+  `priority_score` desc, showing **all** labels. `--location-workable` is a
+  **coarse, sidecar-derived** read-only signal (profile London base / remote
+  acceptable / no relocation) — `ApplicationRecord` has no location field and the
+  JDRecord one is a legacy stub, so this is **not** a scoring change.
 
 ---
 

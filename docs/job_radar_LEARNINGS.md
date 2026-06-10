@@ -1061,5 +1061,50 @@ are the intended fix, which are newly-exposed structure, and which are just nois
 
 ---
 
+### Learning 23 — A pure regenerable artifact can't own mutable human state; put the state in an event log beside it
+
+#### Context
+
+The Job Tracker (`track.py`) had to let a human move a scored job through an
+application lifecycle (status, notes, outcome, application date). But `score.py`
+**regenerates every `ApplicationRecord` from scratch** on each run — the scorer is
+pure and always emits `application_status="new"`, `notes=""`. SPEC §7.4 as written
+said the tracker "updates `ApplicationRecord` in `corpus/scored/`" *and* "appends to
+`corpus/activity_log.jsonl`" — a direct contradiction: any state written into a
+scored record dies on the next collection→label→score cycle.
+
+#### What we did
+
+Resolved the fork *before* writing code (three options A/B/C surfaced in the plan;
+chosen with the user). **Model C:** the append-only event log
+`corpus/activity_log.jsonl` is the **single source of truth** for workflow state;
+`track.py` only ever *appends*. A job's live state = its latest score (regenerable)
+**joined** with a **projection** folded from the log by `job_id`. **Log-only**
+fork: `outcome`/`application_date` are *derived* at read time, never persisted on
+`ApplicationRecord` — so `SCHEMA_VERSION` and the locked scorer stay untouched.
+Rejected B (carry state forward in `score.py`) precisely because it couples the
+pure scorer to mutable state.
+
+#### Reusable Pattern
+
+When one artifact is **pure and regenerable** (a deterministic score, a derived
+view, a rebuilt index) it must not also be the **system of record for mutable human
+input** — the regeneration will silently wipe the input. The clean separation is an
+**append-only event log keyed by a stable id**, projected into live state on read.
+You get re-computation safety, a free audit trail (when did it go
+`applied→interviewing`?), and every convention honoured (append-only, CLI-writes-
+UI-reads, no in-place mutation) for the cost of a fold-on-read. Two corollaries that
+proved their worth here: (1) **derive, don't persist** anything the log already
+implies (`application_date` = date of the earliest `applied` event — storing it
+would just be another field to keep in sync); (2) the **join key carries a caveat
+worth stating out loud** — `job_id` is the JD content hash, so a JD text edit yields
+a new id and the workflow legitimately does *not* carry to the new revision. Naming
+that as accepted behaviour up front stops it being filed as a bug later. Acceptance
+test mattered: the join only proved itself when run against the **real 44-record
+corpus** (titles from the sidecar, scores from `corpus/scored/`, state from the
+log) — fixtures alone wouldn't have caught a wrong join path.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*
