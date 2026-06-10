@@ -52,7 +52,7 @@ cv-tailor workflow
 | 3 | Job Tracker | ✅ Complete — track.py (model C), 263 tests, extraction quality fixed, real corpus build underway | Application workflow state |
 | 4 | Discovery Layer | ✅ Complete — incremental collection + `cli/digest.py` + cron wrappers, 313 tests | Continuous role ingestion |
 | 5 | Static UI | ✅ Complete — `ui/` static SPA, joined `index.json`, 318 tests | Read-only browse + filter interface |
-| 6 | Interactive UI | Planned — React + FastAPI, workflow writes from browser | Full job search interface |
+| 6 | Interactive UI | Backend ✅ (M1 — FastAPI, 351 tests); React frontend (M2) in progress | Full job search interface |
 | 7 | Fine-Tuned Analyser | Future enhancement — Project 5 | Replace rule-based scoring |
 
 Phases are sequential. Each phase is a working system before the next
@@ -1396,6 +1396,20 @@ Regenerate the data after a re-score with the `--export-index` command above.
 ---
 
 ## 10. Phase 6 — Interactive UI
+
+> **Build status.** **Milestone 1 (FastAPI backend) is built and verified** —
+> `api/` package (`security.py`, `settings.py`, `main.py`, four routers),
+> `ANNOTATION_TYPE` + `validate_annotation_event` in `models/record.py` (constants
+> only, no `SCHEMA_VERSION` bump), `api` compose service, 351 tests green. Checkpoint
+> confirmed: write-without-cookie → 403; owner unlock → `POST /api/status` →
+> `python -m cli.track list` reflects it; `POST /api/annotations` → `annotations.jsonl`.
+> **Milestone 2 (React frontend) is in progress.** Three build deviations from the
+> steps below, decided in the Phase 6 plan and logged in CLAUDE.md (28–30):
+> (1) **stdlib HMAC, not `itsdangerous`** — copied cv-tailor's proven zero-dep
+> `security.py` (supersedes §10.8 step 8); (2) **`GET /api/index` re-projects the live
+> activity log** over `index.json` so writes show on reload without a re-score
+> (clarifies §13.4); (3) **the `api` service reuses the `job-radar` image** (which
+> already installs fastapi/uvicorn) instead of a separate `Dockerfile.api`.
 
 ### 10.1 — Purpose
 

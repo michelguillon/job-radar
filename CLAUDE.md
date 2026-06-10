@@ -74,8 +74,9 @@ thing tests actually run against.
 | 2 — Scoring Engine | ✅ **complete (scorer v1)** — `scoring/{profile,scorer}.py` + `score.py`, 179 tests. Option A (`ApplicationRecord` v1.3 → `corpus/scored/`) + gates-vs-signal model + 3-tier role (primary/conditional/secondary) + capability/M&A blockers + negative-signal ceiling. Thresholds **set from evidence** (held against the 23-record corpus: 10 manual + 13 calibration). Calibration regression set: `corpus/calibration/`. Known limit F (extraction generosity) deferred. Conventions: `scoring/CLAUDE.md`. |
 | 3 — Job Tracker | ✅ complete — `track.py` (model C, append-only event log), 263 tests. Extraction quality fixed (deviation 21). Real corpus build underway. Scorer locked. |
 | 4 — Discovery Layer | ✅ complete — incremental collection (deviation 24) + `cli/digest.py` (deviation 26) + `cron/{collect_weekly,digest_daily}.sh` + `cron/README.md`. 313 tests. |
-| 5 — UI | ✅ complete — `ui/{index.html,app.js,style.css}` static SPA (no framework/build/CDN), reads the joined `corpus/index.json`, served by nginx behind the `ui` Docker profile (`docker compose --profile ui up` → :8080). Browse + Pipeline + detail drawer + filters + stats bar. `index.json` contract changed to a join (deviation 27). 318 tests. |
-| 6 — Fine-Tuned Analyser | Deferred (Project 5) |
+| 5 — Static UI | ✅ complete — `ui/{index.html,app.js,style.css}` static SPA (no framework/build/CDN), reads the joined `corpus/index.json`, served by nginx behind the `ui` Docker profile (`docker compose --profile ui up` → :8080). Browse + Pipeline + detail drawer + filters + stats bar. `index.json` contract changed to a join (deviation 27). 318 tests. |
+| 6 — Interactive UI | 🔨 **M1 backend complete** — thin FastAPI `api/` (security/settings/main + index/auth/workflow/annotations routers) over `cli.track` + `models.record`; stdlib-HMAC `jr_write` cookie, fail-closed (`JR_WRITE_KEY`/`COOKIE_SECURE`); `GET /api/index` re-projects the live activity log; `ANNOTATION_TYPE` + `validate_annotation_event` (constants only, no schema bump); new `corpus/annotations.jsonl` sink; `api` compose service (reuses the `job-radar` image). **351 tests.** M2 React frontend in progress. Conventions: `api/CLAUDE.md` (deviations 28–30). |
+| 7 — Fine-Tuned Analyser | Deferred (Project 5) |
 
 ---
 
@@ -266,6 +267,25 @@ thing tests actually run against.
     `:ro`). `index.json` stays gitignored corpus data. Title fallbacks inherit the
     tracker's `_title_for` chain, so JDs whose sidecar title is missing show the
     `raw_text` first line (cosmetic, same known limit as the tracker).
+28. (Phase 6, M1) **Capability cookie is stdlib HMAC, not `itsdangerous`** (supersedes
+    SPEC §10.8 step 8). `api/security.py` is copied/adapted from cv-tailor's proven,
+    zero-dep `hmac`+`hashlib` module — cookie `jr_write` (HttpOnly, SameSite=lax, Secure
+    via `COOKIE_SECURE`, path `/api`), owner key env `JR_WRITE_KEY`, `require_unlocked`
+    FastAPI dependency on every write router. **Fail-closed**: no `JR_WRITE_KEY` → all
+    writes 403 (clean public read-only). The backend is the source of truth; UI hiding is
+    convenience only. `itsdangerous` is **not** a dependency.
+29. (Phase 6, M1) **`GET /api/index` re-projects the live activity log over `index.json`**
+    (clarifies SPEC §13.4). Workflow writes land in `activity_log.jsonl` *after* the last
+    `cli.stats --export-index`, so a naive file-serve looks stale right after a write.
+    `api/routers/index.py` serves the heavy pre-built join **and** overlays
+    `project(load_events(LOG_PATH))` (cheap) — status/outcome/application_date/notes/title
+    are always live without a re-score. Annotations don't affect the read model.
+30. (Phase 6, M1) **The `api` compose service reuses the `job-radar` image** (it already
+    `pip install`s `requirements.txt`, now incl. fastapi/uvicorn/httpx) rather than a
+    separate `Dockerfile.api` as SPEC §10.4 sketched — the service just runs `uvicorn
+    api.main:app …`. Profile-gated (`profiles:["ui"]`, port 8000). Only the M2 frontend
+    gets its own Dockerfiles. The **thin-layer rule** (import `cli.track` + `models.record`,
+    never the scorer/labeller/pipeline; gate every write; fail-closed) lives in `api/CLAUDE.md`.
 
 ---
 
@@ -309,4 +329,8 @@ Keep this file lean. Add area-specific conventions to nested files:
   capability matrix** (exists)
 - `pipeline/CLAUDE.md` — batch API patterns, cost tracking, label-merge defaults
 - `scoring/CLAUDE.md` — scoring logic, profile schema (Phase 2+)
-- `ui/CLAUDE.md` — UI conventions, index.json join contract, read-only invariant (exists)
+- `ui/CLAUDE.md` — Phase 5 static-UI conventions, index.json join contract (exists)
+- `api/CLAUDE.md` — Phase 6 thin-backend invariants: import `cli.track`/`models.record`,
+  never the scorer; gate every write with `require_unlocked`; fail-closed; live overlay
+  on `GET /api/index`; env (`JR_WRITE_KEY`/`COOKIE_SECURE`) (exists)
+- `frontend/CLAUDE.md` — Phase 6 M2 React conventions (added with M2)

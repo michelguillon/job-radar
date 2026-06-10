@@ -1337,5 +1337,58 @@ is the thing to fix, per the tie-break rule.
 
 ---
 
+### Learning 29 — A second write path is safe when it reuses the first one's validator-and-append, not just its file
+
+#### Context
+
+Phase 6 adds a FastAPI layer so the browser can do what `python -m cli.track` does:
+append workflow events to `corpus/activity_log.jsonl`. The temptation with an HTTP
+layer is to re-implement the write — parse JSON, build a dict, open the file, append.
+That would make the API a *second* definition of "what a valid event is," free to
+drift from the CLI's. The locked invariant is "CLI writes, UI reads," now bent to
+"CLI **and** API write, both through one validator."
+
+#### What we did
+
+The write routers import `cli.track`'s `build_event` (which runs
+`validate_activity_event`) and `append_event` and call nothing else of their own —
+the API contributes the HTTP shell (Pydantic request model, gating, 404/422 mapping)
+and **zero** write logic. Annotations, a genuinely new sink (`annotations.jsonl`),
+got the same treatment: a new `validate_annotation_event` in `models/record.py`
+(constants + validator only, no `SCHEMA_VERSION` bump — same pattern as `OUTCOME`),
+reused by the router. The scorer/labeller/pipeline are never imported. Result: the
+M1 checkpoint proved a `POST /api/status` is indistinguishable from a CLI write —
+`python -m cli.track list` reflected the API's event with no special-casing.
+
+#### Surprises
+
+1. **The spec contradicted itself on the cookie library** — §10.8 step 8 listed
+   `itsdangerous`, but step 2 said "copy cv-tailor's `api/security.py`," which is
+   zero-dep stdlib `hmac`+`hashlib`. Copying the proven module won; `itsdangerous`
+   never entered `requirements.txt`. When a spec names both "copy the working thing"
+   and "add this dependency," the working thing is the real instruction.
+2. **A file-serve read model goes stale the instant the first write lands.**
+   `index.json` is pre-built by `cli.stats --export-index`; workflow events land in
+   `activity_log.jsonl` *after* that export. Serving the file verbatim would show the
+   pre-write status until the next manual re-export. Fix: `GET /api/index` re-projects
+   the live activity log over the file on every read (`load_events` → `project`,
+   cheap) — the same projection the tracker and the exporter already use. The read
+   model is the file **plus** the log, not the file alone.
+3. **No new Docker image was needed.** The existing `job-radar` image already
+   `pip install`s `requirements.txt`; adding fastapi/uvicorn there meant the `api`
+   service is just `uvicorn api.main:app` over the same image — the spec's separate
+   `Dockerfile.api` was avoidable complexity.
+
+#### Reusable Pattern
+
+When you add a second interface (HTTP) over logic that already has one (CLI), make
+the new interface import the existing validate-and-append seam and own only the
+transport concerns. The test that proves it: a write through the new path must be
+readable, unmodified, through the old path's reader. And any pre-built read cache
+served over HTTP needs its mutable overlay re-applied per request, or it lies right
+after the first write.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

@@ -163,6 +163,28 @@ OUTCOME = frozenset(
     }
 )
 
+# --- Scoring-annotation vocabulary (Phase 6 interactive UI, job_radar_SPEC §10.2) ---
+# The interactive UI lets the owner flag field-level scoring/extraction issues from
+# the detail panel. Flags append to corpus/annotations.jsonl (separate sink from the
+# activity log — different purpose, future Phase-7 fine-tuning consumer). Like the
+# activity-log vocab above these are constants ONLY — they touch no record dataclass
+# and do NOT bump SCHEMA_VERSION (same pattern as OUTCOME).
+ANNOTATION_LOG_VERSION = 1
+
+# What a flag asserts is wrong (job_radar_SPEC §10.2 table).
+ANNOTATION_TYPE = frozenset(
+    {
+        "role_type_incorrect",
+        "domain_incorrect",
+        "seniority_incorrect",
+        "technical_depth_incorrect",
+        "fit_score_disagree",
+        "should_be_blocked",
+        "false_block",
+        "extraction_other",
+    }
+)
+
 
 def validate_activity_event(event: dict) -> list[str]:
     """Return a list of validation error strings for one activity-log event.
@@ -195,6 +217,39 @@ def validate_activity_event(event: dict) -> list[str]:
     elif kind == "note" and value is not None:
         errors.append("value: must be null for a note event")
     return errors
+
+
+def validate_annotation_event(event: dict) -> list[str]:
+    """Return a list of validation error strings for one scoring-annotation event.
+
+    Mirrors ``validate_activity_event``: a vocabulary + required-field guard so a
+    malformed flag never enters the append-only ``corpus/annotations.jsonl``. The
+    annotation never mutates an extraction — it only records that the human disagrees
+    with one, with the scorer's verdict at flag time preserved for later calibration.
+    """
+    errors: list[str] = []
+    for name in ("ts", "job_id", "reason"):
+        value = event.get(name)
+        if not isinstance(value, str) or not value:
+            errors.append(f"{name}: must be a non-empty string")
+    atype = event.get("annotation_type")
+    if atype not in ANNOTATION_TYPE:
+        errors.append(f"annotation_type: {atype!r} not in {sorted(ANNOTATION_TYPE)}")
+    if not isinstance(event.get("field"), str):
+        errors.append("field: must be a string")
+    for name in ("observed", "expected"):
+        if name not in event:
+            errors.append(f"{name}: required")
+    scorer_label = event.get("scorer_label")
+    if scorer_label is not None and not isinstance(scorer_label, str):
+        errors.append("scorer_label: must be a string or null")
+    scorer_fit_score = event.get("scorer_fit_score")
+    if scorer_fit_score is not None and (
+        not isinstance(scorer_fit_score, int) or isinstance(scorer_fit_score, bool)
+    ):
+        errors.append("scorer_fit_score: must be an integer or null")
+    return errors
+
 
 ROLE_TYPE_MAX = 3
 
