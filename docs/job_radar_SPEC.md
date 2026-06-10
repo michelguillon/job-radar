@@ -1252,9 +1252,9 @@ Done:
   in `collectors/base.passes_cursor`; per-collector `SUPPORTS_INCREMENTAL`.
 
 New files (not yet built):
-- `digest.py` — daily digest CLI
-- `cron/collect_weekly.sh` — cron wrapper (calls `collect.py`; incremental by default)
-- `cron/digest_daily.sh` — cron wrapper
+- `cli/digest.py` — daily digest CLI (run as `python -m cli.digest`)
+- `cron/collect_weekly.sh` — cron wrapper (calls `python -m cli.collect`; incremental by default)
+- `cron/digest_daily.sh` — cron wrapper (calls `python -m cli.digest`)
 
 Cron setup (Ubuntu Server):
 ```bash

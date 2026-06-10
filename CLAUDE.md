@@ -38,11 +38,14 @@ thing tests actually run against.
 - **Extraction vs annotation boundary is strict** — Claude never
   populates annotation fields; human never populates extraction fields
 - **CLI writes, UI reads** — all state changes through CLI scripts only
-- **Stage CLIs live in `cli/`** — run as `python -m cli.<stage>` (e.g.
-  `python -m cli.score`, `python -m cli.track list`). NOT `python score.py`
-  (a moved script run by path can't import the repo-root packages). One-off
-  corpus tools live in `scripts/` (`python -m scripts.<name>`). `conftest.py`
-  stays at repo root.
+- **Stage CLIs live in `cli/` — create new ones there, never in the repo root.**
+  A pipeline-stage / operational CLI (e.g. a future `digest.py`) goes in `cli/`
+  as `cli/<stage>.py` with a `main()` + `if __name__ == "__main__"` guard, and is
+  run as **`python -m cli.<stage>`** (e.g. `python -m cli.score`,
+  `python -m cli.track list`) — NOT `python score.py` (a script run by path puts
+  `cli/` on `sys.path` and can't import the repo-root packages; `-m` from the root
+  can). One-off / throwaway corpus tools go in `scripts/`
+  (`python -m scripts.<name>`). Root holds only `conftest.py`.
 - **Definition of done (EVERY task)** — a change is not complete until the
   docs are current. This is not optional and not an afterthought:
   1. **`docs/job_radar_SPEC.md`** — if anything about the architecture,
