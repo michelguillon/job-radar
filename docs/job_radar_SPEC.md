@@ -51,7 +51,7 @@ cv-tailor workflow
 | 2 | Scoring Engine | ✅ Complete — scorer v1 locked, 179 tests | Fit + priority scores per role |
 | 3 | Job Tracker | ✅ Complete — track.py (model C), 263 tests, extraction quality fixed, real corpus build underway | Application workflow state |
 | 4 | Discovery Layer | ✅ Complete — incremental collection + `cli/digest.py` + cron wrappers, 313 tests | Continuous role ingestion |
-| 5 | UI | Not started | Read-only browse + filter interface |
+| 5 | UI | ✅ Complete — `ui/` static SPA, joined `index.json`, 318 tests | Read-only browse + filter interface |
 | 6 | Fine-Tuned Analyser | Future enhancement | Replace rule-based scoring |
 
 Phases are sequential. Each phase is a working system before the next
@@ -1310,12 +1310,37 @@ Serves Michel the job seeker, not Michel the data engineer.
 
 **Static index approach:**
 
-`python -m cli.stats --export-index` generates `corpus/index.json` — a
-flat denormalised array of all validated records. The UI reads this
-one file. No API, no database, no additional backend service.
+`python -m cli.stats --input "corpus/validated/validated_*.jsonl" --export-index`
+generates `corpus/index.json`. The UI reads this one file. No API, no
+database, no additional backend service.
 
-The UI is a single HTML file with vanilla JavaScript. Deployable
-anywhere. No build step, no framework.
+`index.json` is **not** a bare JDRecord array (as an earlier draft of this
+section sketched). The UI needs scoring (`fit_label` / `fit_score` /
+`priority_score` / `fit_label_reason` / `requirement_gaps`) and **live workflow
+status**, none of which a JDRecord carries. So the index is the **same join the
+tracker performs** (CLAUDE.md deviation 23): latest `ApplicationRecord` per
+`job_id` ⨝ `JDRecord` extraction ⨝ metadata sidecar ⨝ activity-log projection,
+denormalised one row per **scored** job. The file is an object:
+
+```json
+{
+  "schema_version": "1.3",
+  "jdrecord_schema_version": "1.2",
+  "generated_at": "…Z",
+  "stats": { "total", "by_fit_label", "by_application_status",
+             "fit_score_distribution", "cost_to_date_usd" },
+  "records": [ { …joined row… } ]
+}
+```
+
+`stats` is embedded (not a second file) so the single mounted `index.json` is
+self-contained — the UI container mounts only that file, never `stats.json` or
+the corpus. `cost_to_date_usd` is summed from `corpus/stats.json` at export time.
+See deviation 27.
+
+The UI is a static HTML page with vanilla JavaScript (`ui/index.html` +
+`ui/app.js` + `ui/style.css`). Deployable anywhere. No build step, no framework,
+no external CDN. Strictly read-only: it never POSTs, writes, or invokes a CLI.
 
 **Filters available:**
 - fit_score (min/max)
@@ -1339,12 +1364,29 @@ ui:
     - "8080:80"
 ```
 
-### 9.5 — Implementation
+### 9.5 — Implementation ✅ built
 
-New files:
-- `ui/index.html` — single-page application
-- `ui/app.js` — filter and render logic
-- `ui/style.css` — minimal table-first design
+Files:
+- `ui/index.html` — markup: stats bar, Browse/Pipeline tabs, filter sidebar, detail drawer
+- `ui/app.js` — fetch `data/index.json`, build filters from data, filter/sort/render,
+  pipeline grouping, detail drawer; `#browse`/`#pipeline` hash routing (bookmarkable)
+- `ui/style.css` — table-first design; `blocked_fit` rows muted + struck through so
+  they don't compete with `strong_fit`; coloured `fit_label` badges, status pills
+
+**Views:** Browse (sortable filterable table — company, role, fit label+score,
+priority, location, status, first seen, source link), Pipeline (cards grouped by
+`application_status` in funnel order, priority-sorted within each lane), and a
+click-through detail drawer (assessment reason, blocking constraints, requirement
+gaps, full extraction, culture signals, full JD text, source URL).
+
+**Filters:** search (company/title), fit-score & priority-score min/max,
+location-workable toggle, and multi-select fit_label / status / domain / role_type
+(each built from the data with live counts).
+
+**Serve:** `docker compose --profile ui up` → http://localhost:8080 (nginx:alpine,
+profile-gated so it never starts with the default `docker compose up`). The UI
+container mounts `ui/` plus the pre-built `corpus/index.json` at `data/index.json`.
+Regenerate the data after a re-score with the `--export-index` command above.
 
 ---
 

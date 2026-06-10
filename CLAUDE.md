@@ -68,7 +68,7 @@ thing tests actually run against.
 | 2 — Scoring Engine | ✅ **complete (scorer v1)** — `scoring/{profile,scorer}.py` + `score.py`, 179 tests. Option A (`ApplicationRecord` v1.3 → `corpus/scored/`) + gates-vs-signal model + 3-tier role (primary/conditional/secondary) + capability/M&A blockers + negative-signal ceiling. Thresholds **set from evidence** (held against the 23-record corpus: 10 manual + 13 calibration). Calibration regression set: `corpus/calibration/`. Known limit F (extraction generosity) deferred. Conventions: `scoring/CLAUDE.md`. |
 | 3 — Job Tracker | ✅ complete — `track.py` (model C, append-only event log), 263 tests. Extraction quality fixed (deviation 21). Real corpus build underway. Scorer locked. |
 | 4 — Discovery Layer | ✅ complete — incremental collection (deviation 24) + `cli/digest.py` (deviation 26) + `cron/{collect_weekly,digest_daily}.sh` + `cron/README.md`. 313 tests. |
-| 5 — UI | Not started |
+| 5 — UI | ✅ complete — `ui/{index.html,app.js,style.css}` static SPA (no framework/build/CDN), reads the joined `corpus/index.json`, served by nginx behind the `ui` Docker profile (`docker compose --profile ui up` → :8080). Browse + Pipeline + detail drawer + filters + stats bar. `index.json` contract changed to a join (deviation 27). 318 tests. |
 | 6 — Fine-Tuned Analyser | Deferred (Project 5) |
 
 ---
@@ -239,6 +239,27 @@ thing tests actually run against.
     the normal (cron) digest bounded to genuinely-new postings. `cron/` holds the
     two bash wrappers (`collect_weekly.sh`, `digest_daily.sh`) + `README.md`; both
     run each stage in Docker and timestamp-log to `/var/log/job-radar/`.
+27. (Phase 5) **`corpus/index.json` is a join, not a JDRecord array** (revises the
+    SPEC §9.4 "flat denormalised array of validated records" sketch). The UI needs
+    scoring + **live workflow status**, which a JDRecord doesn't carry, so
+    `cli.stats --export-index` now emits the **same join the tracker does**
+    (deviation 23): it imports `cli.track`'s loaders + `project` + `_title_for` +
+    `derive_location_workable`, joins latest `ApplicationRecord` per `job_id` ⨝
+    `JDRecord` extraction ⨝ sidecar ⨝ activity-log projection, one denormalised row
+    per **scored** job. Output is an **object** `{schema_version,
+    jdrecord_schema_version, generated_at, stats, records}` (not a bare array — the
+    old `test_export_index_is_flat_array` was replaced). `stats` (counts +
+    `fit_score_distribution` + `cost_to_date_usd`, summed from `corpus/stats.json`)
+    is **embedded** so the single mounted file is self-contained — the UI container
+    mounts only `index.json`, never `stats.json` or the corpus. The UI
+    (`ui/{index.html,app.js,style.css}`, vanilla JS, no framework/build/CDN) fetches
+    it at `data/index.json` and is **strictly read-only** (no POST/write/CLI). Docker
+    `ui` service is profile-gated (`profiles: ["ui"]`) so it never starts with the
+    default `docker compose up`; the `ui/` mount is **not** `:ro` (Docker must create
+    the nested `data/` mountpoint inside it — only the `index.json` file mount is
+    `:ro`). `index.json` stays gitignored corpus data. Title fallbacks inherit the
+    tracker's `_title_for` chain, so JDs whose sidecar title is missing show the
+    `raw_text` first line (cosmetic, same known limit as the tracker).
 
 ---
 
