@@ -7,6 +7,7 @@ outcomes, *without* the scorer ever owning mutable human state.
     python track.py --job-id sha256:abc --status applied
     python track.py --job-id sha256:abc --status interviewing --notes "First round booked"
     python track.py --job-id sha256:abc --outcome rejected_post_screen
+    python track.py --job-id sha256:abc --title "Solutions Engineer"  # display override
     python track.py --job-id sha256:abc --notes "recruiter emailed"   # pure note
 
     # read (joined review table)
@@ -111,7 +112,13 @@ def transition_warning(current: str, new: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 def _default_state() -> dict:
-    return {"status": "new", "outcome": None, "application_date": None, "notes": ""}
+    return {
+        "status": "new",
+        "outcome": None,
+        "application_date": None,
+        "notes": "",
+        "title_override": None,
+    }
 
 
 def project(events: list[dict]) -> dict[str, dict]:
@@ -121,6 +128,7 @@ def project(events: list[dict]) -> dict[str, dict]:
       status            -> latest status event's value (default "new")
       outcome           -> latest outcome event's value (default None)
       application_date  -> date of the *earliest* status=applied event
+      title_override    -> latest title event's value (default None)
       notes             -> notes of the most recent event carrying non-empty notes
     """
     ordered = sorted(events, key=lambda e: e.get("ts", ""))
@@ -137,6 +145,8 @@ def project(events: list[dict]) -> dict[str, dict]:
                 state["application_date"] = (event.get("ts") or "")[:10]
         elif kind == "outcome":
             state["outcome"] = event.get("value")
+        elif kind == "title":
+            state["title_override"] = event.get("value")
         note = event.get("notes")
         if note:
             state["notes"] = note
@@ -168,7 +178,11 @@ def derive_location_workable(meta: dict | None) -> str:
     return "unknown"
 
 
-def _title_for(jd: JDRecord | None, meta: dict | None) -> str:
+def _title_for(jd: JDRecord | None, meta: dict | None, override: str | None = None) -> str:
+    """Resolve a display title. Priority: human override > sidecar title >
+    raw_text first line > job_id."""
+    if override:
+        return override
     if meta and meta.get("title"):
         return meta["title"]
     if jd and jd.raw_text:
@@ -192,7 +206,7 @@ def build_rows(
         rows.append(
             {
                 "job_id": job_id,
-                "title": _title_for(jd, meta),
+                "title": _title_for(jd, meta, state.get("title_override")),
                 "company": jd.company if jd else "?",
                 "fit_score": score.fit_score,
                 "fit_label": score.fit_label,
@@ -342,14 +356,19 @@ def cmd_update(argv: list[str], *, now=_clock, out=print) -> int:
     parser.add_argument("--job-id", required=True, help="JDRecord content hash (sha256:...)")
     parser.add_argument("--status", choices=LOGGABLE_STATUS, help="Move the job to this lifecycle status")
     parser.add_argument("--outcome", choices=sorted(OUTCOME), help="Record a terminal outcome")
+    parser.add_argument("--title", help="Set a manual display-title override for this job")
     parser.add_argument("--notes", default="", help="Free-text note attached to the event")
     parser.add_argument("--force", action="store_true", help="Log even if job_id is not in the scored corpus")
     parser.add_argument("--log", default=LOG_PATH, help=f"Activity log path (default: {LOG_PATH})")
     parser.add_argument("--scored", default=SCORED_GLOB, help="Glob for scored files (job_id existence check)")
     args = parser.parse_args(argv)
 
-    if not (args.status or args.outcome or args.notes):
-        parser.error("nothing to record: pass at least one of --status / --outcome / --notes")
+    # One CLI call may record several events (e.g. --status + --title). They share
+    # the same ts; the free-text --notes attaches to the first, to avoid dupes.
+    actions = [(kind, val) for kind, val in
+               (("status", args.status), ("outcome", args.outcome), ("title", args.title)) if val]
+    if not actions and not args.notes:
+        parser.error("nothing to record: pass at least one of --status / --outcome / --title / --notes")
 
     scores = load_scores(args.scored)
     if args.job_id not in scores and not args.force:
@@ -357,24 +376,20 @@ def cmd_update(argv: list[str], *, now=_clock, out=print) -> int:
         out("       Check the hash, or pass --force to log an event for an unscored job.")
         return 1
 
-    ts = now()
-    written = 0
-
     if args.status:
         current = project(load_events(args.log)).get(args.job_id, _default_state())["status"]
         warning = transition_warning(current, args.status)
         if warning:
             out(f"  ⚠ {warning}")
-        append_event(args.log, build_event(args.job_id, event="status", value=args.status, notes=args.notes, ts=ts))
-        written += 1
 
-    if args.outcome:
-        # Attach notes to the status event if there was one, to avoid duplication.
-        outcome_notes = "" if args.status else args.notes
-        append_event(args.log, build_event(args.job_id, event="outcome", value=args.outcome, notes=outcome_notes, ts=ts))
-        written += 1
-
-    if args.notes and not (args.status or args.outcome):
+    ts = now()
+    written = 0
+    if actions:
+        for i, (kind, value) in enumerate(actions):
+            notes = args.notes if i == 0 else ""
+            append_event(args.log, build_event(args.job_id, event=kind, value=value, notes=notes, ts=ts))
+            written += 1
+    elif args.notes:
         append_event(args.log, build_event(args.job_id, event="note", value=None, notes=args.notes, ts=ts))
         written += 1
 

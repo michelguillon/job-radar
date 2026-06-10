@@ -1140,15 +1140,23 @@ ApplicationRecord in corpus/scored/" sketch — see CLAUDE.md deviation 23):
 {"v": 1, "ts": "2026-06-10T14:30:00Z", "job_id": "sha256:abc",
  "event": "status", "value": "applied", "notes": "referral"}
 ```
-`event ∈ {status, outcome, note}` (`models.record.ACTIVITY_EVENT`); a `status`
-value is an `APPLICATION_STATUS` (minus the implicit `new`), an `outcome` value
-is an `OUTCOME`, a `note` carries text in `notes` with `value: null`.
-`validate_activity_event` guards the closed vocab before any line is written.
+`event ∈ {status, outcome, note, title}` (`models.record.ACTIVITY_EVENT`); a
+`status` value is an `APPLICATION_STATUS` (minus the implicit `new`), an `outcome`
+value is an `OUTCOME`, a `title` value is a non-empty display-title override, a
+`note` carries text in `notes` with `value: null`. `validate_activity_event`
+guards the closed vocab before any line is written.
 
 **Projection** (fold a job's events in `ts` order): `status` = latest status
 event (default `new`); `outcome` = latest outcome event (default `None`);
-`application_date` = date of the *earliest* `status=applied` event; `notes` =
-most recent non-empty note.
+`application_date` = date of the *earliest* `status=applied` event;
+`title_override` = latest title event (default `None`); `notes` = most recent
+non-empty note.
+
+**Title resolution** (presentation only, never scored): human override (a `title`
+event) → sidecar title (by `source_url`) → `raw_text` first line → `job_id`. The
+override exists because the schema-locked JDRecord has no title field and the
+sidecar collides on legacy `source_url="unknown"` records. Set with
+`track.py --job-id … --title "…"`.
 
 **Stable join key:** `job_id` is the JD content hash. If a JD's text changes it
 gets a *new* hash → a new posting revision → workflow does not carry across. This
@@ -1159,10 +1167,13 @@ is accepted behaviour, not a bug.
 python track.py --job-id sha256:abc --status applied
 python track.py --job-id sha256:abc --status interviewing --notes "First round booked"
 python track.py --job-id sha256:abc --outcome rejected_post_screen
-python track.py --job-id sha256:abc --notes "recruiter emailed"   # pure note
+python track.py --job-id sha256:abc --title "Solutions Engineer"   # display override
+python track.py --job-id sha256:abc --notes "recruiter emailed"    # pure note
 python track.py list --status shortlisted
 python track.py list --min-fit 7 --location-workable yes
 ```
+One CLI call can record several events (e.g. `--status` + `--title`); they share a
+`ts` and `--notes` attaches to the first.
 - Writing an unknown `job_id` (not in any scored file) errors unless `--force`
   (orphan-event guard).
 - Status transitions are **forgiving** — an out-of-order move warns but never

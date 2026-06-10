@@ -143,7 +143,11 @@ ACTIVITY_LOG_VERSION = 1
 #  status  — value is an APPLICATION_STATUS the human moved the job to.
 #  outcome — value is a terminal OUTCOME (job_radar_SPEC §7.3).
 #  note    — value is null; the comment text lives in ``notes``.
-ACTIVITY_EVENT = frozenset({"status", "outcome", "note"})
+#  title   — value is a human-set display title override (the schema-locked
+#            JDRecord has no title field; the sidecar is keyed by source_url and
+#            collides on legacy "unknown" URLs, so this is the per-job_id escape
+#            hatch). Latest title event wins; presentation only, never scored.
+ACTIVITY_EVENT = frozenset({"status", "outcome", "note", "title"})
 
 # Terminal outcomes (job_radar_SPEC §7.3). Derived from the log at read time;
 # never persisted on ApplicationRecord (model C / Log-only — TRACKER_PLAN fork).
@@ -185,6 +189,9 @@ def validate_activity_event(event: dict) -> list[str]:
         _check_enum(errors, "value", value, APPLICATION_STATUS)
     elif kind == "outcome":
         _check_enum(errors, "value", value, OUTCOME)
+    elif kind == "title":
+        if not isinstance(value, str) or not value.strip():
+            errors.append("value: must be a non-empty string for a title event")
     elif kind == "note" and value is not None:
         errors.append("value: must be null for a note event")
     return errors

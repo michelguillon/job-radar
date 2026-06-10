@@ -157,6 +157,23 @@ def test_build_rows_title_falls_back_to_raw_text_first_line_without_meta():
     assert rows[0]["status"] == "new"  # no workflow events → baseline
 
 
+def test_title_override_wins_over_sidecar_and_raw_text():
+    jd = make_record(id="sha256:j1", source_url="http://x/1", raw_text="Ugly first line")
+    scores = {"sha256:j1": ApplicationRecord.from_jsonl(_scored_line("sha256:j1"))}
+    metas = {"http://x/1": {"source_url": "http://x/1", "title": "Sidecar Title"}}
+    # override beats the sidecar
+    workflow = track.project([_ev("sha256:j1", "title", "Human Title", ts="2026-06-10T00:00:00Z")])
+    assert track.build_rows(scores, {"sha256:j1": jd}, metas, workflow)[0]["title"] == "Human Title"
+
+
+def test_project_keeps_latest_title_override():
+    events = [
+        _ev("j1", "title", "First", ts="2026-06-01T00:00:00Z"),
+        _ev("j1", "title", "Second", ts="2026-06-05T00:00:00Z"),
+    ]
+    assert track.project(events)["j1"]["title_override"] == "Second"
+
+
 # --- filter / sort -------------------------------------------------------------
 
 def _rows():
@@ -245,6 +262,30 @@ def test_cmd_update_requires_something_to_record(tmp_path):
     scored = _write(tmp_path / "scored.jsonl", [_scored_line("sha256:j1")])
     with pytest.raises(SystemExit):
         track.cmd_update(["--job-id", "sha256:j1", "--scored", scored], now=lambda: "t", out=lambda *_: None)
+
+
+def test_cmd_update_title_override_event(tmp_path):
+    scored = _write(tmp_path / "scored.jsonl", [_scored_line("sha256:j1")])
+    logp = str(tmp_path / "activity_log.jsonl")
+    track.cmd_update(
+        ["--job-id", "sha256:j1", "--title", "Solutions Engineer", "--log", logp, "--scored", scored],
+        now=lambda: "t", out=lambda *_: None,
+    )
+    events = track.load_events(logp)
+    assert len(events) == 1 and events[0]["event"] == "title" and events[0]["value"] == "Solutions Engineer"
+
+
+def test_cmd_update_status_and_title_in_one_call(tmp_path):
+    scored = _write(tmp_path / "scored.jsonl", [_scored_line("sha256:j1")])
+    logp = str(tmp_path / "activity_log.jsonl")
+    track.cmd_update(
+        ["--job-id", "sha256:j1", "--status", "applied", "--title", "SE", "--notes", "n",
+         "--log", logp, "--scored", scored],
+        now=lambda: "t", out=lambda *_: None,
+    )
+    events = track.load_events(logp)
+    assert [e["event"] for e in events] == ["status", "title"]
+    assert events[0]["notes"] == "n" and events[1]["notes"] == ""  # notes attach to first only
 
 
 def test_cmd_update_outcome_only(tmp_path):

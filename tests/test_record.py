@@ -284,7 +284,7 @@ def _status_event(**over) -> dict:
 
 def test_outcome_and_activity_event_vocab_are_closed():
     assert "rejected_post_screen" in OUTCOME
-    assert ACTIVITY_EVENT == {"status", "outcome", "note"}
+    assert ACTIVITY_EVENT == {"status", "outcome", "note", "title"}
 
 
 @pytest.mark.parametrize(
@@ -294,6 +294,7 @@ def test_outcome_and_activity_event_vocab_are_closed():
         _status_event(value="interviewing", notes="R1 booked"),
         _status_event(event="outcome", value="rejected_interview"),
         _status_event(event="note", value=None, notes="recruiter emailed"),
+        _status_event(event="title", value="Solutions Engineer"),
     ],
 )
 def test_valid_activity_events_pass(event):
@@ -307,6 +308,8 @@ def test_valid_activity_events_pass(event):
         (_status_event(event="outcome", value="rejected"), "value"),  # not an OUTCOME
         (_status_event(event="promote"), "event"),          # unknown event kind
         (_status_event(event="note", value="should be null"), "value"),
+        (_status_event(event="title", value=""), "value"),     # title must be non-empty
+        (_status_event(event="title", value=None), "value"),
         (_status_event(ts=""), "ts"),
         (_status_event(job_id=None), "job_id"),
         (_status_event(notes=5), "notes"),

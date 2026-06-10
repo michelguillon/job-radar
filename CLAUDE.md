@@ -167,7 +167,7 @@ thing tests actually run against.
     §7.4's earlier "updates ApplicationRecord in corpus/scored/" sketch, which was
     in tension with the pure scorer). Workflow state lives **only** in the
     append-only event log `corpus/activity_log.jsonl` (`{v, ts, job_id, event,
-    value, notes}`; `event ∈ {status, outcome, note}`). `track.py` **only
+    value, notes}`; `event ∈ {status, outcome, note, title}`). `track.py` **only
     appends** — it never mutates a scored file and never touches the scorer, so a
     re-score (which regenerates every `ApplicationRecord` with
     `application_status="new"`) can't wipe human state. **Live state = latest
@@ -179,7 +179,11 @@ thing tests actually run against.
     `validate_activity_event`. Transitions are **forgiving** (warn, never block);
     unknown `job_id` is refused unless `--force`. `list` sorts by `priority_score`
     desc and shows all labels; `--location-workable` is a **coarse, sidecar-derived
-    read-only** signal (no scoring change). `corpus/activity_log.jsonl` is **git-
+    read-only** signal (no scoring change). **Title resolution**: human override
+    (`--title` → a `title` event) → sidecar title → `raw_text` first line →
+    `job_id` (the schema-locked JDRecord has no title field and the sidecar
+    collides on legacy `source_url="unknown"`; the override is the per-`job_id`
+    escape hatch — presentation only, never scored). `corpus/activity_log.jsonl` is **git-
     ignored** like other corpus data (mutable personal state). Stable join key
     caveat: a JD text change → new content hash → new `job_id` → workflow does not
     carry to the new revision (accepted, not a bug).
