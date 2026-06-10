@@ -13,3 +13,8 @@ __pycache__/
 corpus/**/*
 !corpus/**/
 !corpus/**/.gitkeep
+
+# Pipeline cursors (mutable local state; covered by corpus/**/* above, listed
+# explicitly for clarity): incremental collection + daily digest.
+corpus/.last_collected_*
+corpus/.digest_last_run

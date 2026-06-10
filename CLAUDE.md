@@ -67,7 +67,7 @@ thing tests actually run against.
 | 1 — Corpus Engine | ✅ complete — Steps 0–9, 95 tests. Pipeline end-to-end. |
 | 2 — Scoring Engine | ✅ **complete (scorer v1)** — `scoring/{profile,scorer}.py` + `score.py`, 179 tests. Option A (`ApplicationRecord` v1.3 → `corpus/scored/`) + gates-vs-signal model + 3-tier role (primary/conditional/secondary) + capability/M&A blockers + negative-signal ceiling. Thresholds **set from evidence** (held against the 23-record corpus: 10 manual + 13 calibration). Calibration regression set: `corpus/calibration/`. Known limit F (extraction generosity) deferred. Conventions: `scoring/CLAUDE.md`. |
 | 3 — Job Tracker | ✅ complete — `track.py` (model C, append-only event log), 263 tests. Extraction quality fixed (deviation 21). Real corpus build underway. Scorer locked. |
-| 4 — Discovery Layer | 🔄 in progress — incremental collection built (deviation 24). `cli/digest.py` + cron wrappers pending. |
+| 4 — Discovery Layer | ✅ complete — incremental collection (deviation 24) + `cli/digest.py` (deviation 26) + `cron/{collect_weekly,digest_daily}.sh` + `cron/README.md`. 313 tests. |
 | 5 — UI | Not started |
 | 6 — Fine-Tuned Analyser | Deferred (Project 5) |
 
@@ -222,6 +222,23 @@ thing tests actually run against.
     `scripts/` package). No code logic changed; test imports became
     `import cli.<stage>`; `conftest.py` stays at root. Root now holds only
     `conftest.py`.
+26. (Phase 4) **Daily digest `cli/digest.py` is a view over tracker state, not a
+    pipeline stage.** It reuses `cli.track`'s loaders + `project` + `_title_for` +
+    `sort_rows` to join the latest score per `job_id` with the JD/sidecar and the
+    activity-log projection, then shows roles whose `scored_at` ≥ a window start
+    (columns: company | role | fit_label | fit_score | location | source_url, sorted
+    by `priority_score` desc). **Since-cursor** `corpus/.digest_last_run` (gitignored)
+    holds the **start** timestamp of the last *default* run (start-not-finish, same
+    reasoning as the collect cursor); no cursor → last 24h. `--since` (ISO
+    date/datetime / `yesterday` / `today`) overrides the window and is a one-off
+    lookback that does **not** advance the cursor (mirrors collect's "`--company`
+    subset doesn't advance"). `--min-fit` default 6; roles already tracked (workflow
+    status ≠ `new`) are excluded unless `--all`; `--export` writes
+    `corpus/digest_{date}.md`. Caveat: a full manual re-score restamps every
+    `scored_at` and would resurface the whole corpus — incremental collection keeps
+    the normal (cron) digest bounded to genuinely-new postings. `cron/` holds the
+    two bash wrappers (`collect_weekly.sh`, `digest_daily.sh`) + `README.md`; both
+    run each stage in Docker and timestamp-log to `/var/log/job-radar/`.
 
 ---
 

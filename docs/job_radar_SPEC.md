@@ -50,7 +50,7 @@ cv-tailor workflow
 | 1 | Corpus Engine | ✅ Complete — 95 tests, pipeline proven | Labelled JD corpus |
 | 2 | Scoring Engine | ✅ Complete — scorer v1 locked, 179 tests | Fit + priority scores per role |
 | 3 | Job Tracker | ✅ Complete — track.py (model C), 263 tests, extraction quality fixed, real corpus build underway | Application workflow state |
-| 4 | Discovery Layer | 🔄 In progress — incremental collection built; digest + cron pending | Continuous role ingestion |
+| 4 | Discovery Layer | ✅ Complete — incremental collection + `cli/digest.py` + cron wrappers, 313 tests | Continuous role ingestion |
 | 5 | UI | Not started | Read-only browse + filter interface |
 | 6 | Fine-Tuned Analyser | Future enhancement | Replace rule-based scoring |
 
@@ -1250,11 +1250,26 @@ Output: terminal summary + optional export to `corpus/digest_{date}.md`
 Done:
 - Incremental collection in `collect.py` (cursor + `--full`); client-side filter
   in `collectors/base.passes_cursor`; per-collector `SUPPORTS_INCREMENTAL`.
+- `cli/digest.py` — daily digest CLI (run as `python -m cli.digest`). Joins the
+  latest scored records (`ApplicationRecord`) with JD + sidecar + the activity-log
+  projection (reuses `cli.track`'s loaders/`project`/`_title_for`). Shows roles
+  whose `scored_at` ≥ the window start; columns company | role | fit_label |
+  fit_score | location | source_url, sorted by `priority_score` desc.
+  - **Since-cursor** `corpus/.digest_last_run` (gitignored) holds the **start**
+    timestamp of the last default run (start-not-finish, same reasoning as the
+    collect cursor); no cursor → fall back to the last 24h. `--since` (ISO
+    date/datetime, `yesterday`, or `today`) overrides the window and is a one-off
+    lookback that does **not** advance the cursor.
+  - `--min-fit` (default 6); already-tracked roles (workflow status ≠ `new`) are
+    excluded unless `--all`; `--export` also writes `corpus/digest_{date}.md`.
+- `cron/collect_weekly.sh` — cron wrapper (calls `python -m cli.collect`; incremental
+  by default) → dedupe → prefilter → label → validate → score → stats --export-index.
+- `cron/digest_daily.sh` — cron wrapper (calls `python -m cli.digest --min-fit 6 --export`).
+- `cron/README.md` — install / verify / logs / manual-run docs for Ubuntu Server.
 
-New files (not yet built):
-- `cli/digest.py` — daily digest CLI (run as `python -m cli.digest`)
-- `cron/collect_weekly.sh` — cron wrapper (calls `python -m cli.collect`; incremental by default)
-- `cron/digest_daily.sh` — cron wrapper (calls `python -m cli.digest`)
+Both cron scripts run each stage in the Docker service, timestamp every line, and
+append to `/var/log/job-radar/{collect_weekly,digest_daily}.log`. Tests:
+`tests/test_digest.py` (21).
 
 Cron setup (Ubuntu Server):
 ```bash

@@ -1238,5 +1238,48 @@ the same form rather than inventing a `sys.path` hack.
 
 ---
 
+### Learning 27 — The digest is a *view*, not a new pipeline stage; reuse the tracker's join and let the cursor solve the "what's new" question
+
+#### Context
+
+Phase 4's digest had to answer "what should I look at this morning?" The obvious
+instinct is a new pipeline stage that recomputes something. But everything the
+digest needs already exists: the latest score per `job_id` (`load_scores`), the JD
++ sidecar join, and the workflow projection from the activity log — all built for
+`track.py list`. The digest is the same join with a different lens (a time window,
+a fit floor, and a "skip what I've already engaged with" filter).
+
+#### What we did
+
+`cli/digest.py` imports `cli.track`'s loaders, `project`, `_title_for`, `_truncate`
+and `sort_rows` rather than re-deriving them, then adds only what's genuinely new:
+a `since` window, `--min-fit`, the already-tracked exclusion, and a Markdown export.
+"What's new" is a **cursor** (`corpus/.digest_last_run`) holding the *start* of the
+last default run — the exact same start-not-finish trick the collect cursor uses,
+for the exact same reason (a record scored mid-run is re-shown next time, never
+skipped). An explicit `--since` is a one-off lookback and deliberately does **not**
+advance the cursor — mirroring collect's "a `--company` subset doesn't advance."
+
+#### Surprise
+
+"New since last run" keys on `scored_at`, and the scorer restamps **every** record
+on a full re-score — so a manual `python -m cli.score` over the whole validated set
+would legitimately resurface the entire corpus in the next digest. This isn't a bug
+to fix in the digest; it's why incremental collection matters end-to-end: the weekly
+cron only labels+scores the *incremental* set, so in normal operation only genuinely
+new postings get a fresh `scored_at` and the digest stays bounded. The `--min-fit`
+floor and already-tracked filter are the backstops for the manual-re-score case.
+
+#### Reusable Pattern
+
+When a "new" feature is really a new *presentation* of existing state, resist adding
+a stage. Find the read path that already assembles the state (here, the tracker's
+join), import its pure pieces, and add only the projection-specific bits. And when a
+tool needs "what changed since last time," a single start-timestamp cursor file —
+advanced only on the unfiltered default run — is usually the whole answer; you don't
+need per-record "seen" bookkeeping.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*
