@@ -1,5 +1,5 @@
 import type { Job } from "@/lib/api";
-import { FIT_LABELS, LABEL_TEXT, STATUS_ORDER, type Filters } from "@/lib/jobs";
+import { effectiveStatus, FIT_LABELS, LABEL_TEXT, STATUS_ORDER, type Filters } from "@/lib/jobs";
 
 // Ported from ui/app.js buildFilterControls(): search, fit/priority ranges, location
 // toggle, and frequency-counted checkbox groups for fit label / status / domain / role.
@@ -68,6 +68,12 @@ export function Sidebar({
 
   const present = (key: keyof Job) => new Set(records.map((r) => r[key] as unknown as string).filter(Boolean));
 
+  // Status filter reads the *effective* status (outcome-aware), so a rejection shows up
+  // as "rejected" in the list/counts even if the logged lane wasn't moved.
+  const statusPresent = new Set(records.map(effectiveStatus));
+  const statusCounts: Record<string, number> = {};
+  for (const r of records) { const s = effectiveStatus(r); statusCounts[s] = (statusCounts[s] || 0) + 1; }
+
   return (
     <aside className="sidebar">
       <div className="filter-block">
@@ -124,12 +130,13 @@ export function Sidebar({
         <label className="filter-title">Status</label>
         <div className="checks">
           <Checks
-            values={STATUS_ORDER.filter((s) => present("application_status").has(s))}
-            selected={filters.statuses} counts={countBy(records, "application_status")}
+            values={STATUS_ORDER.filter((s) => statusPresent.has(s))}
+            selected={filters.statuses} counts={statusCounts}
             onToggle={(v) => toggleIn(filters.statuses, v)}
             renderLabel={(v) => v}
           />
         </div>
+        <p className="filter-hint">rejected &amp; archived are hidden by default — tick to show</p>
       </div>
 
       <div className="filter-block">

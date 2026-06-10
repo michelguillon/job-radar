@@ -39,13 +39,37 @@ export function emptyFilters(): Filters {
   };
 }
 
+// Terminal/dead lanes hidden from the default dashboard — they're done, not actionable.
+// Tick them in the Status filter to review them (rejected is a state in itself, SPEC §10.10).
+export const TERMINAL_STATUSES = new Set(["rejected", "archived"]);
+
+// A recorded outcome is the stronger signal of where a role actually is than the status
+// lane (which a CLI --outcome write, or a missed UI step, may not have moved). Derive an
+// effective status so a rejection never shows as "applied" anywhere (SPEC §10.10 item 5).
+export function effectiveStatus(job: Job): string {
+  const o = job.outcome;
+  if (o) {
+    if (o.startsWith("rejected")) return "rejected";
+    if (o === "withdrew" || o === "offer_declined") return "archived";
+    if (o === "offer_accepted") return "offer";
+  }
+  return job.application_status;
+}
+
 export function applyFilters(records: Job[], f: Filters): Job[] {
   return records.filter((r) => {
     if (r.fit_score < f.fitMin || r.fit_score > f.fitMax) return false;
     if (r.priority_score < f.priMin || r.priority_score > f.priMax) return false;
     if (f.locWorkable && r.location_workable !== "yes") return false;
     if (f.fitLabels.size && !f.fitLabels.has(r.fit_label)) return false;
-    if (f.statuses.size && !f.statuses.has(r.application_status)) return false;
+    // Status filter (on the effective status): an explicit selection shows exactly those
+    // (so ticking "rejected" reveals rejected); with no selection, terminal lanes hide.
+    const status = effectiveStatus(r);
+    if (f.statuses.size) {
+      if (!f.statuses.has(status)) return false;
+    } else if (TERMINAL_STATUSES.has(status)) {
+      return false;
+    }
     if (f.domains.size && !(r.domain || []).some((d) => f.domains.has(d))) return false;
     if (f.roles.size && !(r.role_type || []).some((d) => f.roles.has(d))) return false;
     if (f.search) {
@@ -92,9 +116,10 @@ export function daysSince(dateStr: string | null | undefined): number | null {
   return Math.floor((Date.now() - d.getTime()) / 86_400_000);
 }
 
-/** An applied role with no further movement for STALE_DAYS — worth chasing or archiving. */
+/** An applied role with no further movement for STALE_DAYS — worth chasing or archiving.
+ * Uses the effective status, so a role with a rejection outcome is never flagged stale. */
 export function isStaleApplied(job: Job): boolean {
-  if (job.application_status !== "applied") return false;
+  if (effectiveStatus(job) !== "applied") return false;
   const n = daysSince(job.application_date);
   return n !== null && n >= STALE_DAYS;
 }

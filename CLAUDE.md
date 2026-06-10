@@ -322,6 +322,19 @@ thing tests actually run against.
     (flex-container class, not button styling) and rendered faint — now a proper `.wc-btn`
     style (Submit Flag = primary), and the flag form gets its **own in-panel toast** separate
     from the workflow toast.
+34. (Phase 6, post-M2 — UX from use) **`rejected` as a first-class, default-hidden state**
+    (SPEC §10.10 item 5, frontend-only — `rejected` was already a valid `APPLICATION_STATUS`):
+    (a) detail status buttons are the full ladder (`review·shortlist·apply·interviewing·
+    offer·rejected·archived`), not only 4; (b) terminal lanes (`rejected`,`archived`) are
+    **hidden from the default Browse + Pipeline** (`TERMINAL_STATUSES`) and shown by ticking
+    them in the Status filter — `applyFilters` treats an empty status set as "all except
+    terminal", a non-empty set as exactly-those; (c) **`effectiveStatus(job)`** derives the
+    displayed/filtered/grouped status from the **outcome** when present
+    (`rejected_*→rejected`, `withdrew`/`offer_declined→archived`, `offer_accepted→offer`),
+    so a role with a rejection outcome never shows as `applied` even if its logged lane
+    wasn't moved (e.g. a CLI `--outcome` write) — a read-time derivation, log untouched.
+    Routed through Browse/Pipeline/Sidebar/DetailPanel; `isStaleApplied` uses it too. No
+    backend change.
 
 ---
 

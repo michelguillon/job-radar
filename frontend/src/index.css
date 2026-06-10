@@ -203,6 +203,7 @@ tr.is-blocked .role-text { text-decoration: line-through; text-decoration-color:
 .stale-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; background: #f6e3d3; color: #b4540f; }
 .outcome-badge { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 5px; font-size: 11px; font-weight: 600; background: #f3dede; color: #9a3636; }
 .stale-dot { margin-left: 5px; color: #d07a1a; font-size: 11px; vertical-align: middle; }
+.filter-hint { margin: 6px 0 0; font-size: 10.5px; line-height: 1.35; color: var(--ink-faint); }
 .wc-toast { margin-top: 8px; font-size: 12px; padding: 6px 9px; border-radius: 6px; }
 .wc-toast.ok { background: #e6f3ec; color: #1f7a45; }
 .wc-toast.warn { background: #f6e9d8; color: #8a5a14; }

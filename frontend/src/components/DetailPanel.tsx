@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type Job } from "@/lib/api";
 import {
-  daysSince, fmtDate, isStaleApplied, LABEL_TEXT, listText,
+  daysSince, effectiveStatus, fmtDate, isStaleApplied, LABEL_TEXT, listText,
   OUTCOMES, rejectionStageFor, statusForOutcome,
 } from "@/lib/jobs";
 import { useUnlock } from "@/components/UnlockProvider";
@@ -124,6 +124,9 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
     { label: "Review", value: "review" },
     { label: "Shortlist", value: "shortlisted" },
     { label: "Apply", value: "applied" },
+    { label: "Interview", value: "interviewing" },
+    { label: "Offer", value: "offer" },
+    { label: "Rejected", value: "rejected", danger: true },
     { label: "Archive", value: "archived", danger: true },
   ];
   const ageDays = daysSince(job.application_date);
@@ -141,7 +144,7 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
           <div className="wc-status-btns">
             {STATUS_BTNS.map((b) => (
               <button key={b.value} disabled={busy}
-                className={[b.danger ? "danger" : "", job.application_status === b.value ? "current" : ""].filter(Boolean).join(" ") || undefined}
+                className={[b.danger ? "danger" : "", effectiveStatus(job) === b.value ? "current" : ""].filter(Boolean).join(" ") || undefined}
                 onClick={() => setStatus(b.value)}>
                 {b.label}
               </button>
@@ -223,7 +226,7 @@ export function DetailPanel({ job, onClose, onChanged }: { job: Job; onClose: ()
           <h2>{job.title}</h2>
           <div className="dh-meta">
             <span className={`badge ${job.fit_label}`}>{LABEL_TEXT[job.fit_label] || job.fit_label}</span>
-            <span className={`pill ${job.application_status}`}>{job.application_status}</span>
+            <span className={`pill ${effectiveStatus(job)}`}>{effectiveStatus(job)}</span>
             {job.outcome && <span className="outcome-badge">{job.outcome.replace(/_/g, " ")}</span>}
             {isStaleApplied(job) && <span className="stale-badge">stale</span>}
             {job.location && <span className="muted">{job.location}</span>}

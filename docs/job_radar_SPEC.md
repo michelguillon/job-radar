@@ -1683,7 +1683,7 @@ configured but not unlocked):
 
 ```
 ─── Workflow ────────────────────────────────────────
-Status:   [Review] [Shortlist] [Apply] [Archive]
+Status:   [Review] [Shortlist] [Apply] [Interview] [Offer] [Rejected] [Archive]
 Notes:    [                              ] [Save]
 Title:    [                              ] [Override]
                                                         ← Outcome row appears once applied
@@ -1781,7 +1781,7 @@ flow for this.
 Refinements made **after** Phase 6 shipped, driven by using the tool day-to-day.
 All are read-model / UI / thin-endpoint changes — no scorer, schema, or pipeline
 change. Captured here so §10 reflects the actual end state; cross-referenced as
-CLAUDE.md deviations 32–33.
+CLAUDE.md deviations 32–34.
 
 1. **Detail view is a centred modal, not a right rail.** The original 560px
    right-side drawer wasted most of a wide screen. The detail view is now a
@@ -1813,6 +1813,19 @@ CLAUDE.md deviations 32–33.
    `applied` event) is surfaced with **age-since-applied and a "stale" flag past
    21 days** — in the detail panel and as a dot on `applied` rows in Browse — so
    dead applications are visible at a glance.
+
+5. **`rejected` is a first-class state, hidden by default.** (a) The detail panel's
+   status quick-buttons are the full ladder — `Review · Shortlist · Apply ·
+   Interview · Offer · Rejected · Archive` (`Rejected`/`Archive` styled as
+   terminal; `Archive` confirms) — so any lane, including rejected, is one click,
+   not only reachable via the Outcome control. (b) Terminal lanes (`rejected`,
+   `archived`) are **hidden from the default dashboard** (Browse + Pipeline) and
+   revealed by ticking them in the Status filter — dead roles don't clutter the
+   active view. (c) The frontend renders an **outcome-aware effective status**:
+   a role with a rejection outcome shows as `rejected` everywhere (pill, pipeline
+   lane, filter, default-hide) even if its logged status lane was never moved
+   (e.g. a CLI `--outcome` write) — a read-time derivation, the underlying log is
+   untouched. So "rejected" never displays as "applied".
 
 ---
 

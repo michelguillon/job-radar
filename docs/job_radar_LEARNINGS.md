@@ -1490,5 +1490,51 @@ the full enum only as the override.
 
 ---
 
+### Learning 32 — When two fields can disagree, pick the stronger one and derive the rest; don't make the user reconcile them
+
+#### Context
+
+Model C keeps the workflow **status** lane and the granular **outcome** as separate log
+events (Learning 23) — deliberately, so the pure scorer can't wipe either. But that
+separation surfaced a UX bug: a role marked rejected via the CLI's `--outcome` (which logs
+an outcome event but doesn't move the status lane) still showed as **"applied"** in the
+dashboard. The two fields disagreed, and the UI was naively trusting the weaker one.
+
+#### What we did
+
+Added a read-time `effectiveStatus(job)` that derives the displayed status from the outcome
+when one is present (`rejected_* → rejected`, `withdrew`/`offer_declined → archived`,
+`offer_accepted → offer`), falling back to the logged lane otherwise — the outcome is the
+stronger signal of where a role actually is. Routed every status read (Browse pill, Pipeline
+lane, Status filter + counts, default-hide of terminal lanes, the detail header + the
+"current" button highlight, and `isStaleApplied`) through it. The append-only log is
+untouched; this is pure projection, consistent with deriving outcome/application_date at read
+time. Separately, made `rejected` a first-class quick-status button (the ladder was only 4 of
+7 states) and hid terminal lanes from the default view (tick to reveal) so dead roles stop
+cluttering the active dashboard.
+
+#### Surprises
+
+1. **The fix for "rejected shows as applied" wasn't to write more data — it was to read it
+   right.** The instinct is to backfill a status event so the lane matches. But the data
+   isn't wrong, it's *incomplete*, and a derivation makes every present-and-future case
+   correct without a migration — including outcomes logged by the CLI, which never goes
+   through the UI's status-coupling. Backfilling would have fixed one row; deriving fixes the
+   rule.
+2. **"Hidden by default, tick to show" fell out of one filter rule.** Treating an empty
+   status selection as "all except terminal" and a non-empty selection as "exactly these"
+   gives default-hide *and* reveal-on-tick with no extra toggle — the status checkboxes the
+   user already had became the show/hide control.
+
+#### Reusable Pattern
+
+When two stored fields model the same thing at different granularities and can fall out of
+sync, don't force the user (or a migration) to reconcile them — designate the stronger signal
+and derive the presentation from it at read time, applied uniformly everywhere that field is
+shown. And prefer overloading an existing control (here, the status filter's empty-vs-selected
+states) to adding a new toggle when the semantics line up.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*
