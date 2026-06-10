@@ -1,5 +1,5 @@
 import type { Job } from "@/lib/api";
-import { fmtDate, LABEL_TEXT, sortRows, type Sort } from "@/lib/jobs";
+import { daysSince, fmtDate, isStaleApplied, LABEL_TEXT, sortRows, type Sort } from "@/lib/jobs";
 
 // Ported from ui/app.js renderGrid(): sortable columns, fit badge, blocked_fit muting,
 // row click → detail. Link cell click is swallowed so it doesn't open the drawer.
@@ -53,7 +53,12 @@ export function BrowseView({
               <td className="num score-cell">{r.fit_score}</td>
               <td className="num pri-cell">{r.priority_score}</td>
               <td className="loc">{r.location || "—"}</td>
-              <td><span className={`pill ${r.application_status}`}>{r.application_status}</span></td>
+              <td>
+                <span className={`pill ${r.application_status}`}>{r.application_status}</span>
+                {isStaleApplied(r) && (
+                  <span className="stale-dot" title={`Applied ${daysSince(r.application_date)}d ago — no movement`}>●</span>
+                )}
+              </td>
               <td className="seen">{fmtDate(r.date_first_seen)}</td>
               <td>
                 {r.source_url && (

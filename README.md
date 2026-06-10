@@ -116,7 +116,7 @@ See `docs/CORPUS_FINDINGS.md` (schema v1.2, labelling rules) and
 ## Lessons Learned
 
 Maintained append-only in `docs/job_radar_LEARNINGS.md` — one entry per decision,
-finding, or reversal across all phases (30 entries as of Phase 6).
+finding, or reversal across all phases (31 entries as of Phase 6).
 
 ---
 

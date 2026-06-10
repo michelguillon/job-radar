@@ -161,6 +161,29 @@ def test_title_appends_title_event(client, monkeypatch):
     assert events[0]["value"] == "Forward Deployed Engineer"
 
 
+def test_outcome_appends_event(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    r = client.post("/api/outcome", json={"job_id": "sha256:j1", "outcome": "rejected_interview", "notes": "no fit"})
+    assert r.status_code == 200
+    events = track.load_events(client.settings.log_path)
+    assert events[0]["event"] == "outcome"
+    assert events[0]["value"] == "rejected_interview"
+    assert events[0]["notes"] == "no fit"
+
+
+def test_outcome_invalid_value_422(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    r = client.post("/api/outcome", json={"job_id": "sha256:j1", "outcome": "not_an_outcome"})
+    assert r.status_code == 422
+
+
+def test_outcome_403_without_cookie(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    assert client.post("/api/outcome", json={"job_id": "sha256:j1", "outcome": "withdrew"}).status_code == 403
+
+
 def test_status_unknown_job_id_404(client, monkeypatch):
     monkeypatch.setenv("JR_WRITE_KEY", KEY)
     _unlock(client)

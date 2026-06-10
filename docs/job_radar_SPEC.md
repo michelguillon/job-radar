@@ -1544,6 +1544,19 @@ POST /api/title              {job_id, title}
                              appends title event to activity_log.jsonl
                              display override only, never scored
 
+POST /api/outcome            {job_id, outcome, notes?}
+                             appends outcome event to activity_log.jsonl
+                             validated against OUTCOME vocab. The UI also POSTs
+                             /api/status to move the lane (rejected_* → "rejected",
+                             withdrew/offer_declined → "archived"); the rejection
+                             stage is auto-derived from current status (applied→
+                             post_screen, interviewing→interview, offer→final) but
+                             editable. Added post-M2 from use — the OUTCOME model +
+                             CLI `--outcome` existed; only the HTTP/UI surface was
+                             missing (deviation 32). application_date is derived
+                             from the earliest applied event; the UI shows
+                             age-since-applied + a "stale" flag past 21 days.
+
 # Annotation writes — require valid capability cookie
 POST /api/annotations        {job_id, annotation_type, field,
                               observed, expected, reason}

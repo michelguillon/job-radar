@@ -1443,5 +1443,52 @@ compiled and "came up" green; only a real HTTP fetch through the browser exposed
 
 ---
 
+### Learning 31 — A vocab + a CLI flag aren't a feature until something surfaces them; derive the fiddly enum from context
+
+#### Context
+
+Using the new UI, the owner hit a wall: a role applied to could not be marked *rejected*
+from the browser. The data model already had the `OUTCOME` enum (rejected_pre_screen …
+offer_accepted), `project()` already folded `outcome` events, the live `/api/index` overlay
+already carried `outcome` and `application_date`, and the CLI already had `--outcome`. Every
+layer supported it except the one the human actually touches — there was no `POST /api/outcome`
+and no control in the detail panel. The capability existed on paper and on the command line,
+but not as a feature.
+
+#### What we did
+
+Added the missing seam: `POST /api/outcome {job_id, outcome, notes?}` (gated, `build_event`
+validates against `OUTCOME`) and an Outcome control that appears once a role has been applied.
+Two refinements made it usable rather than just present: (1) the **rejection stage is
+auto-derived from the current workflow status** (`applied→post_screen`, `interviewing→interview`,
+`offer→final`) so the user doesn't hunt through a seven-value enum to say the obvious thing —
+the default is editable for the exceptions; (2) recording an outcome also POSTs `/api/status`
+to move the lane, because the granular outcome and the workflow lane are orthogonal under
+model C but a human thinks "I was rejected" as one action. Application age + a "stale past 21
+days" flag were surfaced from the already-derived `application_date` (no new storage).
+
+#### Surprises
+
+1. **The whole stack was ready; only the doorknob was missing.** No schema bump, no scorer
+   touch, no projection change, no overlay change — just one endpoint + one panel + three
+   tests. The earlier model-C design (Learning 23) had already made outcomes first-class in
+   the log; the cost of "add rejection tracking" was therefore tiny, which is the payoff of
+   having put workflow state in an append-only event log rather than on the record.
+2. **Auto-deriving the enum from status is what made it feel finished.** The first instinct is
+   to drop the raw `OUTCOME` dropdown in and call it done. But "the stage of rejection
+   automatically captured" was the actual request — the user shouldn't have to translate
+   "where am I" into "which rejected_* constant." Mapping current status → likely stage,
+   defaulted-but-editable, is the difference between exposing a field and modelling the task.
+
+#### Reusable Pattern
+
+When a capability "already exists" but a user can't reach it, the missing piece is usually the
+human-facing seam, and it's cheap to add precisely because everything beneath it is built.
+And when that seam involves a closed enum the user must choose from, derive the default from
+the context you already have (here, workflow status) so the common case is one click — expose
+the full enum only as the override.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

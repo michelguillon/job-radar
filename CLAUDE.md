@@ -298,6 +298,20 @@ thing tests actually run against.
     (git history preserves it); conventions live in `frontend/CLAUDE.md`. The React write
     controls reuse the M1 endpoints — no new write logic client-side; `credentials:"include"`
     on every fetch carries the capability cookie.
+32. (Phase 6, post-M2 — from use) **Outcome recording + application staleness.** The
+    `OUTCOME` vocab and the CLI's `--outcome` already existed (deviation 23), but the
+    API/UI never exposed terminal outcomes, so a role couldn't be marked rejected from the
+    browser. Added `POST /api/outcome {job_id, outcome, notes?}` (gated; `build_event`
+    validates against `OUTCOME`). The detail panel shows an **Outcome** control once a role
+    has been applied; the **rejection stage is auto-derived from the current workflow
+    status** (`applied→rejected_post_screen`, `interviewing→rejected_interview`,
+    `offer→rejected_final`) but stays editable, and recording also POSTs `/api/status` to
+    move the lane (`rejected_*→rejected`, `withdrew`/`offer_declined→archived`). The
+    applied date (already derived from the earliest `applied` event by `project`) is now
+    surfaced with **age-since-applied + a "stale" flag past 21 days** (`STALE_DAYS`),
+    shown in the detail panel and as a dot on `applied` rows in Browse. No schema/scorer
+    change — still log events folded by `project`; the live `/api/index` overlay already
+    carried `outcome`/`application_date`. +3 tests (354 total).
 
 ---
 

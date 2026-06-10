@@ -81,3 +81,46 @@ export function fmtDate(s: string | null | undefined): string {
 export function listText(v: unknown): string {
   return Array.isArray(v) ? v.join(", ") : String(v ?? "");
 }
+
+// --- Application age + staleness -------------------------------------------------
+export const STALE_DAYS = 21; // ~3 weeks with no movement after applying → likely dead
+
+export function daysSince(dateStr: string | null | undefined): number | null {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return null;
+  return Math.floor((Date.now() - d.getTime()) / 86_400_000);
+}
+
+/** An applied role with no further movement for STALE_DAYS — worth chasing or archiving. */
+export function isStaleApplied(job: Job): boolean {
+  if (job.application_status !== "applied") return false;
+  const n = daysSince(job.application_date);
+  return n !== null && n >= STALE_DAYS;
+}
+
+// --- Outcomes (models/record.py OUTCOME) -----------------------------------------
+export const OUTCOMES = [
+  "rejected_pre_screen", "rejected_post_screen", "rejected_interview", "rejected_final",
+  "offer_accepted", "offer_declined", "withdrew",
+];
+
+// Auto-pick the rejection stage from where the role currently sits in the workflow, so
+// "mark rejected" captures the stage without the user hunting through the enum.
+export function rejectionStageFor(status: string): string {
+  switch (status) {
+    case "offer": return "rejected_final";
+    case "interviewing": return "rejected_interview";
+    case "applied": return "rejected_post_screen";
+    default: return "rejected_pre_screen";
+  }
+}
+
+// When an outcome is recorded, the workflow lane it implies (model C keeps them separate,
+// but the UI moves the lane too so the pipeline reflects reality). null = leave lane as-is.
+export function statusForOutcome(outcome: string): string | null {
+  if (outcome.startsWith("rejected")) return "rejected";
+  if (outcome === "withdrew" || outcome === "offer_declined") return "archived";
+  if (outcome === "offer_accepted") return "offer";
+  return null;
+}

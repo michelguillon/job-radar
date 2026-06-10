@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type Job } from "@/lib/api";
-import { fmtDate, LABEL_TEXT, listText } from "@/lib/jobs";
+import {
+  daysSince, fmtDate, isStaleApplied, LABEL_TEXT, listText,
+  OUTCOMES, rejectionStageFor, statusForOutcome,
+} from "@/lib/jobs";
 import { useUnlock } from "@/components/UnlockProvider";
 
 // Detail drawer — read fields ported from ui/app.js openDrawer(), PLUS owner-only write
@@ -49,11 +52,14 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
   const [flagType, setFlagType] = useState(ANNOTATION_TYPES[0]);
   const [expected, setExpected] = useState("");
   const [reason, setReason] = useState("");
+  const [outcome, setOutcomeSel] = useState(rejectionStageFor(job.application_status));
+  const [outcomeNotes, setOutcomeNotes] = useState("");
 
   // Reset the editable fields when the drawer switches to a different job.
   useEffect(() => {
     setNoteText(job.notes || ""); setTitleText(job.title || "");
     setFlagType(ANNOTATION_TYPES[0]); setExpected(""); setReason("");
+    setOutcomeSel(rejectionStageFor(job.application_status)); setOutcomeNotes("");
     setToast(null); setFlagToast(null);
   }, [job.job_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -93,6 +99,15 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
     return { kind: "ok", text: "Title override saved" };
   });
 
+  const recordOutcome = () => guarded(async () => {
+    await api.setOutcome(job.job_id, outcome, outcomeNotes.trim() || undefined);
+    // Move the workflow lane to match the outcome (model C keeps them separate underneath).
+    const lane = statusForOutcome(outcome);
+    if (lane && lane !== job.application_status) await api.setStatus(job.job_id, lane);
+    setOutcomeNotes("");
+    return { kind: "ok", text: `Recorded: ${outcome.replace(/_/g, " ")}` };
+  });
+
   const submitFlag = () => guarded(async () => {
     if (!reason.trim()) return { kind: "err", text: "Reason is required" };
     const { field, observed } = observedFor(flagType, job);
@@ -111,6 +126,11 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
     { label: "Apply", value: "applied" },
     { label: "Archive", value: "archived", danger: true },
   ];
+  const ageDays = daysSince(job.application_date);
+  const stale = isStaleApplied(job);
+  // Outcome controls appear once a role has been applied (or is already terminal).
+  const hasApplied = !!job.application_date
+    || ["applied", "interviewing", "offer", "rejected"].includes(job.application_status);
 
   return (
     <>
@@ -140,6 +160,31 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
             onChange={(e) => setTitleText(e.target.value)} disabled={busy} />
           <button className="wc-btn" onClick={saveTitle} disabled={busy}>Override</button>
         </div>
+
+        {hasApplied && (
+          <div className="wc-outcome">
+            <div className="wc-row">
+              <span className="wc-label">Applied</span>
+              <span>
+                {job.application_date || <span className="muted">date not recorded</span>}
+                {ageDays !== null && <span className="muted"> · {ageDays}d ago</span>}
+                {stale && <span className="stale-badge" title={`No movement for ${ageDays} days`}>stale</span>}
+                {job.outcome && <span className="outcome-badge">{job.outcome.replace(/_/g, " ")}</span>}
+              </span>
+            </div>
+            <div className="wc-row">
+              <span className="wc-label">Outcome</span>
+              <select className="wc-input" style={{ flex: "0 0 auto", minWidth: 168 }}
+                value={outcome} onChange={(e) => setOutcomeSel(e.target.value)} disabled={busy}>
+                {OUTCOMES.map((o) => <option key={o} value={o}>{o.replace(/_/g, " ")}</option>)}
+              </select>
+              <input className="wc-input" value={outcomeNotes} placeholder="Reason / notes…"
+                onChange={(e) => setOutcomeNotes(e.target.value)} disabled={busy} />
+              <button className="wc-btn" onClick={recordOutcome} disabled={busy}>Record</button>
+            </div>
+          </div>
+        )}
+
         {toast && <div className={`wc-toast ${toast.kind}`}>{toast.text}</div>}
       </div>
 
@@ -179,6 +224,8 @@ export function DetailPanel({ job, onClose, onChanged }: { job: Job; onClose: ()
           <div className="dh-meta">
             <span className={`badge ${job.fit_label}`}>{LABEL_TEXT[job.fit_label] || job.fit_label}</span>
             <span className={`pill ${job.application_status}`}>{job.application_status}</span>
+            {job.outcome && <span className="outcome-badge">{job.outcome.replace(/_/g, " ")}</span>}
+            {isStaleApplied(job) && <span className="stale-badge">stale</span>}
             {job.location && <span className="muted">{job.location}</span>}
           </div>
           <div className="scores">

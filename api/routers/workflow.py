@@ -45,6 +45,12 @@ class TitleRequest(BaseModel):
     title: str
 
 
+class OutcomeRequest(BaseModel):
+    job_id: str
+    outcome: str
+    notes: str | None = None
+
+
 def _require_scored(job_id: str, scored_glob: str) -> None:
     """404 unless the job_id is in the scored corpus (HTTP has no --force)."""
     if job_id not in load_scores(scored_glob):
@@ -86,3 +92,13 @@ def set_title(body: TitleRequest, settings: Settings = Depends(get_settings)) ->
     _require_scored(body.job_id, settings.scored_glob)
     _append(settings.log_path, body.job_id, event="title", value=body.title, notes="")
     return {"ok": True, "job_id": body.job_id, "title": body.title}
+
+
+@router.post("/outcome")
+def set_outcome(body: OutcomeRequest, settings: Settings = Depends(get_settings)) -> dict:
+    """Record a terminal outcome (OUTCOME vocab — e.g. rejected_interview) with an optional
+    reason. The granular outcome and the workflow status are orthogonal (model C): the UI
+    also POSTs /api/status to move the lane. Invalid outcome → 422 (build_event validates)."""
+    _require_scored(body.job_id, settings.scored_glob)
+    _append(settings.log_path, body.job_id, event="outcome", value=body.outcome, notes=body.notes or "")
+    return {"ok": True, "job_id": body.job_id, "outcome": body.outcome}

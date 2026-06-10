@@ -21,6 +21,10 @@ write path over the same JSONL the CLI appends to** — never a second source of
   `COOKIE_SECURE`, path `/api`. Copied/adapted from cv-tailor `api/security.py`.
 - **404, not --force.** Unknown `job_id` → 404 on every write (the CLI's `--force` escape
   hatch is intentionally not exposed over HTTP).
+- **Write endpoints** (all gated): `POST /api/status|note|title|outcome` (workflow.py,
+  append to `activity_log.jsonl`) + `POST /api/annotations` (annotations.py →
+  `annotations.jsonl`). `outcome` validates against `OUTCOME`; the UI pairs it with a
+  `/api/status` call to move the workflow lane (the two are orthogonal under model C).
 
 ## Live overlay (the one non-obvious read)
 

@@ -134,6 +134,8 @@ export const api = {
     post<{ ok: boolean; status: string; warning: string | null }>("/status", { job_id, status, notes }),
   addNote: (job_id: string, text: string) => post<{ ok: boolean }>("/note", { job_id, text }),
   setTitle: (job_id: string, title: string) => post<{ ok: boolean; title: string }>("/title", { job_id, title }),
+  setOutcome: (job_id: string, outcome: string, notes?: string) =>
+    post<{ ok: boolean; outcome: string }>("/outcome", { job_id, outcome, notes }),
   flagAnnotation: (payload: AnnotationPayload) =>
     post<{ ok: boolean; annotation_type: string }>("/annotations", payload),
 };
