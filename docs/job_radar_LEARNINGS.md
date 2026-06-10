@@ -1390,5 +1390,58 @@ after the first write.
 
 ---
 
+### Learning 30 — Porting a sibling's frontend is mostly free; the costs are an image-name collision and a controlled-input quirk
+
+#### Context
+
+Phase 6 M2 replaced the Phase 5 vanilla-JS `ui/` with a React/TS/Vite/Tailwind SPA,
+adapting cv-tailor's proven `frontend/` (UnlockProvider, `lib/api`, vite/nginx/Docker
+config, shadcn-style `ui/` primitives). The browse/pipeline/detail/filter logic already
+existed as `ui/app.js`; the job was to port it to React components and add the owner-only
+write controls (status/notes/title + flag-scoring-issue) that M1's endpoints enable.
+
+#### What we did
+
+Ported the visual design wholesale — the badge/pill/grid/drawer CSS classes moved verbatim
+from `ui/style.css` into `index.css`, and the React components emit the same class names, so
+the look is identical and only the state management changed. `lib/jobs.ts` carries the
+filter/sort/ordering logic from `app.js`. The write path reuses M1: `DetailPanel`'s controls
+call `lib/api` methods that hit the same validated endpoints the CLI's logic backs — no
+write/validation logic on the client. Controls render only when `write_configured`; the
+first click calls `requestUnlock()` (resolves once the cookie lands). `useIndex().refetch()`
+after each write re-pulls the live-overlaid index, so the drawer reflects the new state.
+
+#### Surprises
+
+1. **A manual `docker build -t job-radar-frontend` silently shadowed the compose build.**
+   Compose names a service's built image `<project>-<service>` = `job-radar-frontend` — the
+   exact tag used for a one-off `Dockerfile.prod` compile-check. So `docker compose up` found
+   that image present and **reused the nginx prod image instead of building `Dockerfile.dev`**;
+   the container ran nginx on :80 while compose mapped :3000, and the frontend was simply
+   unreachable (HTTP 000) with no error. Fix: `up --build` to force the dev build. Lesson:
+   don't hand-tag throwaway images with a name compose will compute.
+2. **The unlock flow's queued action completing after unlock is a feature, not a bug.**
+   Clicking a status button while locked opens the dialog *and* the `requestUnlock()` promise
+   stays pending; when the key submits, the promise resolves `true` and the original write
+   runs. The verification saw two events (the queued Review, then a deliberate Apply) — exactly
+   the intended "click → unlock → the thing you clicked happens" UX, but worth knowing when
+   reading the activity log after a test.
+3. **Browser verification needed no new dependency.** Headless Edge `--screenshot` rendered
+   the React SPA (it waits for JS), and a ~60-line CDP driver over Node 22's global `WebSocket`
+   drove a real row-click, unlock-dialog fill, and status write — reusing the Phase 5 pattern
+   (Learning 28). Controlled inputs need the native-setter + `dispatchEvent('input')` trick to
+   register with React, not a bare `.value =`.
+
+#### Reusable Pattern
+
+When a sibling repo already solved the same shell (auth cookie, API client, dev/prod Docker,
+component primitives), copy it verbatim and change only the domain nouns — the port is cheap
+and the proven config avoids a class of config bugs. Keep the *new* surface minimal: the
+write controls added zero client-side validation, deferring entirely to the endpoints that
+already validate. And verify the running app, not just the build — the image-collision bug
+compiled and "came up" green; only a real HTTP fetch through the browser exposed it.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

@@ -75,7 +75,7 @@ thing tests actually run against.
 | 3 — Job Tracker | ✅ complete — `track.py` (model C, append-only event log), 263 tests. Extraction quality fixed (deviation 21). Real corpus build underway. Scorer locked. |
 | 4 — Discovery Layer | ✅ complete — incremental collection (deviation 24) + `cli/digest.py` (deviation 26) + `cron/{collect_weekly,digest_daily}.sh` + `cron/README.md`. 313 tests. |
 | 5 — Static UI | ✅ complete — `ui/{index.html,app.js,style.css}` static SPA (no framework/build/CDN), reads the joined `corpus/index.json`, served by nginx behind the `ui` Docker profile (`docker compose --profile ui up` → :8080). Browse + Pipeline + detail drawer + filters + stats bar. `index.json` contract changed to a join (deviation 27). 318 tests. |
-| 6 — Interactive UI | 🔨 **M1 backend complete** — thin FastAPI `api/` (security/settings/main + index/auth/workflow/annotations routers) over `cli.track` + `models.record`; stdlib-HMAC `jr_write` cookie, fail-closed (`JR_WRITE_KEY`/`COOKIE_SECURE`); `GET /api/index` re-projects the live activity log; `ANNOTATION_TYPE` + `validate_annotation_event` (constants only, no schema bump); new `corpus/annotations.jsonl` sink; `api` compose service (reuses the `job-radar` image). **351 tests.** M2 React frontend in progress. Conventions: `api/CLAUDE.md` (deviations 28–30). |
+| 6 — Interactive UI | ✅ complete — thin FastAPI `api/` (security/settings/main + index/auth/workflow/annotations routers) over `cli.track` + `models.record`; stdlib-HMAC `jr_write` cookie, fail-closed (`JR_WRITE_KEY`/`COOKIE_SECURE`); `GET /api/index` re-projects the live activity log; `ANNOTATION_TYPE` + `validate_annotation_event` (constants only, no schema bump); `corpus/annotations.jsonl` sink. **React/Vite `frontend/`** (cv-tailor stack: `UnlockProvider`, typed `lib/api`, `useIndex`, Browse/Pipeline/Detail + owner write controls + flag form) replaces the retired Phase 5 `ui/`. `api` + `frontend` compose services (`--profile ui` → :8080/:8000). **351 tests + browser-verified.** Conventions: `api/CLAUDE.md`, `frontend/CLAUDE.md` (deviations 28–31). |
 | 7 — Fine-Tuned Analyser | Deferred (Project 5) |
 
 ---
@@ -286,6 +286,18 @@ thing tests actually run against.
     api.main:app …`. Profile-gated (`profiles:["ui"]`, port 8000). Only the M2 frontend
     gets its own Dockerfiles. The **thin-layer rule** (import `cli.track` + `models.record`,
     never the scorer/labeller/pipeline; gate every write; fail-closed) lives in `api/CLAUDE.md`.
+31. (Phase 6, M2) **The `frontend` compose service runs the Vite dev server**
+    (`frontend/Dockerfile.dev`, `npm run dev` on :3000, mapped `8080:3000`), which proxies
+    `/api` → `api:8000` (same-origin, so the `jr_write` cookie rides along). The multi-stage
+    `Dockerfile.prod` (node build → nginx serve) + `frontend/nginx.conf` exist for the
+    **deferred §10.9 deployment**, not the local profile. **Image-tag-collision gotcha:** a
+    manual `docker build -t job-radar-frontend` collides with the compose-assigned image name
+    `<project>-frontend` → `docker compose up` silently **reuses the stale image** instead of
+    building `Dockerfile.dev`. Always `docker compose --profile ui up -d --build frontend`.
+    The Phase 5 static `ui/{index.html,app.js,style.css,.gitignore,CLAUDE.md}` was deleted
+    (git history preserves it); conventions live in `frontend/CLAUDE.md`. The React write
+    controls reuse the M1 endpoints — no new write logic client-side; `credentials:"include"`
+    on every fetch carries the capability cookie.
 
 ---
 

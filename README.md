@@ -35,7 +35,9 @@ Radar replaces both with a pipeline that collects, labels, scores, and tracks
   → interviewing → offer/rejected
 - **Continuous discovery** — weekly automated collection + daily digest of new
   roles above fit threshold
-- **Read-only UI** — browse, filter, inspect — all writes through CLI only
+- **Interactive UI** — React/FastAPI app to browse, filter, inspect, and (owner-only,
+  key-unlocked) manage workflow state + flag scoring issues from the browser; public
+  visitors get read-only. Writes append to the same JSONL the CLI does
 
 ---
 
@@ -93,13 +95,14 @@ UI (read-only, nginx)
 | 2 | Scoring Engine | ✅ Complete |
 | 3 | Job Tracker | ✅ Complete |
 | 4 | Discovery Layer | ✅ Complete |
-| 5 | UI | ✅ Complete |
-| 6 | Fine-Tuned Analyser | Future / Project 5 |
+| 5 | Static UI | ✅ Complete |
+| 6 | Interactive UI | ✅ Complete |
+| 7 | Fine-Tuned Analyser | Future / Project 5 |
 
-Phases 1–5 are complete: Job Radar is feature-complete for v1 — collect →
-clean/dedupe → label → validate → score → track → discover → browse. Phase 6
-(fine-tuning) is deferred until the corpus is large enough to justify it. See
-`docs/job_radar_SPEC.md` §2 for the detailed per-phase status.
+Phases 1–6 are complete: Job Radar is feature-complete for v1 — collect →
+clean/dedupe → label → validate → score → track → discover → browse → manage from
+the browser. Phase 7 (fine-tuning) is deferred until the corpus is large enough to
+justify it. See `docs/job_radar_SPEC.md` §2 for the detailed per-phase status.
 
 ---
 
@@ -113,7 +116,7 @@ See `docs/CORPUS_FINDINGS.md` (schema v1.2, labelling rules) and
 ## Lessons Learned
 
 Maintained append-only in `docs/job_radar_LEARNINGS.md` — one entry per decision,
-finding, or reversal across all phases (28 entries as of Phase 5).
+finding, or reversal across all phases (30 entries as of Phase 6).
 
 ---
 
@@ -133,24 +136,30 @@ docker compose run --rm job-radar python -m cli.stats --input "corpus/validated/
 **Test suite:**
 ```bash
 docker compose run --rm job-radar python -m pytest -q
-# Expected: 318 passing
+# Expected: 351 passing
 ```
 
-**Browse the corpus (read-only UI):**
+**Browse + manage the corpus (interactive UI):**
 ```bash
-# (re)build the index the UI reads, then serve it
+# (re)build the index the UI reads, then serve the React frontend + FastAPI backend
 docker compose run --rm job-radar python -m cli.stats \
   --input "corpus/validated/validated_*.jsonl" --export-index
-docker compose --profile ui up        # → http://localhost:8080
+docker compose --profile ui up        # → frontend http://localhost:8080, API :8000
 ```
+Public visitors get a read-only browse/filter/inspect interface. To manage workflow
+state (status/notes/title) and flag scoring issues from the browser, set `JR_WRITE_KEY`
+in `.env` and click **Unlock** in the top bar (one key → an HttpOnly session cookie).
+No key configured = read-only for everyone (fail-closed).
 
 ---
 
 ## Live Demo
 
-Run locally — see **Browse the corpus** under *Running Locally* above
-(`docker compose --profile ui up` → http://localhost:8080). The UI is a static,
-read-only browse/filter interface over the pre-built `corpus/index.json`.
+Run locally — see **Browse + manage the corpus** under *Running Locally* above
+(`docker compose --profile ui up` → frontend http://localhost:8080, API :8000). The
+React frontend browses/filters/inspects the corpus for everyone; the owner unlocks
+write controls (workflow + scoring flags) with `JR_WRITE_KEY`. All writes append to
+the same JSONL the CLI uses — the FastAPI backend never calls the scorer or pipeline.
 
 ---
 
