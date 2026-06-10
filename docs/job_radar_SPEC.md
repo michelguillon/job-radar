@@ -6,10 +6,10 @@
 
 **Project:** 4 — Job Radar
 **Repository:** job-radar (renamed from jd-refinery)
-**Status:** Phase 1 complete — Steps 0–9, 95 tests, pipeline end-to-end ✅
-**Last updated:** 2026-06-09
-**Deployment target:** M720q home server, Ubuntu Server 24.04, Docker
-**Schema version:** 1.2 (locked for Phase 1)
+**Status:** Phases 1–6 complete — 351 tests, deployed at job-radar.michel-portfolio.co.uk ✅
+**Last updated:** 2026-06-10
+**Deployment target:** M720q home server, Ubuntu Server 24.04, Docker + Caddy + Cloudflare
+**Schema version:** 1.3 (ApplicationRecord added Phase 2; annotation constants added Phase 6)
 **Predecessor:** jd-refinery (renamed; Phase 1 complete, 95 tests, commit efb8d41)
 
 ---
@@ -1897,6 +1897,202 @@ rule-based scorer's failure modes are well-understood.
 
 ---
 
+## 11.1 — Backlog: Company Universe, Metadata & Post-Deployment Items
+
+**Trigger for all items:** Deployed + used daily for 2–4 weeks minimum.
+Full spec: `docs/BACKLOG_COMPANY_UNIVERSE.md`
+
+### Production Company Universe v1
+
+The initial production seed list. **Merged into `company_seeds.yaml` on 2026-06-10**
+as Tier 2 (UNVERIFIED), alongside the original 17 verified seeds → 102 companies total
+(greenhouse 95 / lever 4 / ashby 3). ATS slugs are best-guess defaults — verify each with
+`python -m cli.collect --dry-run --source greenhouse --company <slug>`
+before a full run. A 404 means the slug is wrong or the company isn't on that ATS
+(hyperscalers/large incumbents mostly use Workday/internal, not public boards) — fix or
+delete the entry. Collection silently skips a 404, so unverified entries cost nothing
+until their slug resolves.
+
+```yaml
+# Production Company Universe v1 — 2026-06-10
+# ATS slugs are best-guess — verify before running
+
+foundation_models:
+  - {name: OpenAI,           ats: greenhouse, slug: openai}
+  - {name: Anthropic,        ats: greenhouse, slug: anthropic}
+  - {name: Mistral AI,       ats: lever,      slug: mistral}
+  - {name: Cohere,           ats: lever,      slug: cohere}
+  - {name: Google DeepMind,  ats: greenhouse, slug: google}
+  - {name: Aleph Alpha,      ats: greenhouse, slug: aleph-alpha}
+  - {name: xAI,              ats: greenhouse, slug: xai}
+
+ai_application_platforms:
+  - {name: Writer,       ats: greenhouse, slug: writer}
+  - {name: Intercom,     ats: greenhouse, slug: intercom}
+  - {name: Glean,        ats: greenhouse, slug: glean}
+  - {name: Harvey,       ats: greenhouse, slug: harvey}
+  - {name: Sierra,       ats: greenhouse, slug: sierra}
+  - {name: Decagon,      ats: greenhouse, slug: decagon}
+  - {name: Hebbia,       ats: greenhouse, slug: hebbia}
+  - {name: Cresta,       ats: greenhouse, slug: cresta}
+  - {name: PolyAI,       ats: greenhouse, slug: polyai}
+  - {name: Cognigy,      ats: greenhouse, slug: cognigy}
+  - {name: Forethought,  ats: greenhouse, slug: forethought}
+  - {name: Rasa,         ats: greenhouse, slug: rasa}
+
+ai_data_infrastructure:
+  - {name: Databricks,   ats: greenhouse, slug: databricks}
+  - {name: Snowflake,    ats: greenhouse, slug: snowflake}
+  - {name: Scale AI,     ats: greenhouse, slug: scaleai}
+  - {name: CoreWeave,    ats: greenhouse, slug: coreweave}
+  - {name: Together AI,  ats: greenhouse, slug: together}
+  - {name: Modal,        ats: ashby,      slug: modal}
+  - {name: Pinecone,     ats: greenhouse, slug: pinecone}
+  - {name: Weaviate,     ats: greenhouse, slug: weaviate}
+  - {name: Hugging Face, ats: lever,      slug: huggingface}
+  - {name: LangChain,    ats: greenhouse, slug: langchain}
+  - {name: Anyscale,     ats: ashby,      slug: anyscale}
+  - {name: Baseten,      ats: greenhouse, slug: baseten}
+
+platform_and_infrastructure:
+  - {name: Cloudflare,   ats: greenhouse, slug: cloudflare}
+  - {name: Confluent,    ats: greenhouse, slug: confluent}
+  - {name: MongoDB,      ats: greenhouse, slug: mongodb}
+  - {name: Elastic,      ats: greenhouse, slug: elastic}
+  - {name: Grafana Labs, ats: greenhouse, slug: grafana}
+  - {name: Datadog,      ats: greenhouse, slug: datadog}
+  - {name: HashiCorp,    ats: greenhouse, slug: hashicorp}
+  - {name: NVIDIA,       ats: greenhouse, slug: nvidia}
+
+cloud_platforms:
+  - {name: Microsoft,           ats: greenhouse, slug: microsoft}
+  - {name: Amazon Web Services, ats: greenhouse, slug: amazon}
+  - {name: Google Cloud,        ats: greenhouse, slug: google-cloud}
+  - {name: Oracle Cloud,        ats: greenhouse, slug: oracle}
+
+fintech_infrastructure:
+  - {name: Stripe,       ats: greenhouse, slug: stripe}
+  - {name: Adyen,        ats: greenhouse, slug: adyen}
+  - {name: Airwallex,    ats: greenhouse, slug: airwallex}
+  - {name: Plaid,        ats: greenhouse, slug: plaid}
+  - {name: Checkout.com, ats: greenhouse, slug: checkout}
+  - {name: Rapyd,        ats: greenhouse, slug: rapyd}
+  - {name: Marqeta,      ats: greenhouse, slug: marqeta}
+
+fintech_platforms:
+  - {name: Wise,         ats: greenhouse, slug: wise}
+  - {name: Revolut,      ats: greenhouse, slug: revolut}
+  - {name: Klarna,       ats: greenhouse, slug: klarna}
+  - {name: Monzo,        ats: greenhouse, slug: monzo}
+  - {name: Starling Bank,ats: greenhouse, slug: starlingbank}
+
+financial_data_and_market_infrastructure:
+  - {name: Bloomberg,  ats: greenhouse, slug: bloomberg}
+  - {name: LSEG,       ats: greenhouse, slug: lseg}
+  - {name: FactSet,    ats: greenhouse, slug: factset}
+  - {name: S&P Global, ats: greenhouse, slug: spglobal}
+
+identity_platforms:
+  - {name: Okta,          ats: greenhouse, slug: okta}
+  - {name: Auth0,         ats: greenhouse, slug: auth0}
+  - {name: Ping Identity, ats: greenhouse, slug: ping}
+  - {name: SailPoint,     ats: greenhouse, slug: sailpoint}
+
+enterprise_platforms:
+  - {name: Figma,      ats: greenhouse, slug: figma}
+  - {name: Atlassian,  ats: greenhouse, slug: atlassian}
+  - {name: Notion,     ats: greenhouse, slug: notion}
+  - {name: Miro,       ats: greenhouse, slug: miro}
+  - {name: HubSpot,    ats: greenhouse, slug: hubspot}
+  - {name: ServiceNow, ats: greenhouse, slug: servicenow}
+  - {name: Monday.com, ats: greenhouse, slug: mondaydotcom}
+
+semiconductor_and_ai_compute:
+  - {name: Arm,         ats: greenhouse, slug: arm}
+  - {name: Baya Systems,ats: greenhouse, slug: baya-systems}
+  - {name: Fractile,    ats: greenhouse, slug: fractile}
+  - {name: Groq,        ats: greenhouse, slug: groq}
+  - {name: Cerebras,    ats: greenhouse, slug: cerebras}
+  - {name: Tenstorrent, ats: greenhouse, slug: tenstorrent}
+  - {name: SambaNova,   ats: greenhouse, slug: sambanova}
+  - {name: Graphcore,   ats: greenhouse, slug: graphcore}
+  - {name: SiFive,      ats: greenhouse, slug: sifive}
+  - {name: AMD,         ats: greenhouse, slug: amd}
+  - {name: Qualcomm,    ats: greenhouse, slug: qualcomm}
+  - {name: Intel,       ats: greenhouse, slug: intel}
+  - {name: Broadcom,    ats: greenhouse, slug: broadcom}
+
+uk_european_scaleups:
+  - {name: Faculty,      ats: greenhouse, slug: faculty}
+  - {name: Quantexa,     ats: greenhouse, slug: quantexa}
+  - {name: PhysicsX,     ats: greenhouse, slug: physicsx}
+  - {name: Synthesia,    ats: greenhouse, slug: synthesia}
+  - {name: ElevenLabs,   ats: greenhouse, slug: elevenlabs}
+  - {name: Stability AI, ats: greenhouse, slug: stability-ai}
+  - {name: Wayve,        ats: greenhouse, slug: wayve}
+  - {name: Darktrace,    ats: greenhouse, slug: darktrace}
+  - {name: Tessl,        ats: greenhouse, slug: tessl}
+  - {name: Multiverse,   ats: greenhouse, slug: multiverse}
+
+strategic_ai_delivery:
+  - {name: Palantir,          ats: greenhouse, slug: palantir}
+  - {name: Accenture,         ats: greenhouse, slug: accenture}
+  - {name: Slalom,            ats: greenhouse, slug: slalom}
+  - {name: Thoughtworks,      ats: greenhouse, slug: thoughtworks}
+  - {name: EPAM,              ats: greenhouse, slug: epam}
+  - {name: Publicis Sapient,  ats: greenhouse, slug: publicis-sapient}
+```
+
+### Company metadata (post-deployment — after 2–4 weeks usage)
+
+Add three editorial fields per company to `company_seeds.yaml`:
+
+```yaml
+domain: ai_application_platform   # primary company domain — editorial
+fit_hypothesis: high               # high | medium | low | watch_only
+notes: "..."                       # free text
+```
+
+`domain` vocabulary (company-level): `frontier_ai` · `ai_application_platform`
+· `ai_data_platform` · `ai_infrastructure` · `developer_tooling` ·
+`fintech_infrastructure` · `identity_security` · `enterprise_software` ·
+`adtech_martech` · `semiconductor_ai_compute` · `strategic_ai_delivery`
+
+### Rejection reasons (post-deployment)
+
+Add `rejection_reason` to `ANNOTATION_TYPE` in `models/record.py` (constants
+only, no schema bump). Vocabulary: `wrong_level` · `wrong_function` ·
+`too_salesy` · `too_research_heavy` · `too_delivery_consulting` ·
+`domain_not_interesting` · `company_not_fit` · `seniority_mismatch` ·
+`location_mismatch` · `other`.
+
+### cv-tailor integration signal (post-deployment design decision)
+
+First observed: Fin Senior AI Deployment Consultant — Partners
+(sha256:61d63ff…, https://job-boards.greenhouse.io/intercom/jobs/7921414).
+Job Radar fit_score 8 (strong_fit) vs cv-tailor 32% grounded coverage.
+Both correct — different questions. Integration design deferred until
+Phase 6 stable and 5+ roles through both systems. See
+`docs/BACKLOG_COMPANY_UNIVERSE.md §6`.
+
+### Corpus migration and git pull safety (before first deployment)
+
+See `docs/BACKLOG_COMPANY_UNIVERSE.md §7` for full scp commands.
+
+Files to migrate: `corpus/validated/`, `corpus/scored/`,
+`corpus/calibration/`, `corpus/raw/`, `corpus/manual/`,
+`corpus/stats.json`, `corpus/index.json`, `corpus/activity_log.jsonl`,
+`candidate_profile.yaml`, `.env`.
+
+**Git pull safety on M720q:** `corpus/` is gitignored — safe from `git pull`.
+`candidate_profile.yaml` should be gitignored (confirm before going public).
+Pattern: `git fetch` → `git diff HEAD origin/main` → pull only when no
+tracked file will clobber production state. `activity_log.jsonl` and
+`annotations.jsonl` are written by the deployed FastAPI — never overwrite
+them during a dev→server sync.
+
+---
+
 ## 12. Relationship to cv-tailor
 
 cv-tailor is live in production. It is not modified as part of this
@@ -2026,10 +2222,11 @@ Follows `PROJECT_DOCUMENTATION_STANDARD.md`.
 | `docs/job_radar_SPEC.md` | This file | ✅ |
 | `docs/CORPUS_FINDINGS.md` | Schema, records, labelling rules | ✅ |
 | `docs/job_radar_README.md` | Landing page | Stub |
-| `docs/job_radar_ARCHITECTURE.html` | Implemented system | Stub |
-| `docs/job_radar_RETROSPECTIVE.md` | Journey | Stub |
-| `docs/job_radar_LEARNINGS.md` | Reusable lessons | Stub |
-| `JD_SOURCE_TEXTS.md` | Raw JD texts | ✅ |
+| `docs/job_radar_ARCHITECTURE.html` | Implemented system | ✅ Updated post-Phase 6 |
+| `docs/job_radar_RETROSPECTIVE.md` | Journey | ✅ Complete through Phase 5 |
+| `docs/job_radar_LEARNINGS.md` | Reusable lessons | ✅ 29+ entries |
+| `docs/BACKLOG_COMPANY_UNIVERSE.md` | Post-deployment backlog | ✅ |
+| `corpus/manual/JD_SOURCE_TEXTS.md` | Raw JD texts | ✅ |
 | `CLAUDE.md` | Build conventions | ✅ |
 
 **Post-build documentation prompt** (run after Phase 1 complete):
