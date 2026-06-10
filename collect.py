@@ -22,7 +22,8 @@ import argparse
 import json
 import logging
 import os
-from datetime import date
+from collections import Counter
+from datetime import date, datetime, timezone
 
 import yaml
 
@@ -32,17 +33,53 @@ log = logging.getLogger(__name__)
 
 SEEDS_PATH = "company_seeds.yaml"
 RAW_DIR = "corpus/raw"
+CURSOR_DIR = "corpus"
 
-# ATS name -> fetch_company(slug, company_name, *, collected_at=...) callable.
-COLLECTORS = {
-    "greenhouse": greenhouse.fetch_company,
-    "lever": lever.fetch_company,
-    "ashby": ashby.fetch_company,
+# ATS name -> collector module. The module exposes fetch_company(...) plus the
+# SUPPORTS_INCREMENTAL flag, so the incremental-source set is derived, not
+# hand-maintained.
+COLLECTOR_MODULES = {
+    "greenhouse": greenhouse,
+    "lever": lever,
+    "ashby": ashby,
 }
+COLLECTORS = {name: m.fetch_company for name, m in COLLECTOR_MODULES.items()}
+
+# Sources whose public API exposes a per-job timestamp we can filter on
+# client-side (greenhouse: updated_at, ashby: publishedAt). Lever has none, so it
+# is excluded and always does a full collection. See collectors/CLAUDE.md.
+INCREMENTAL_SOURCES = frozenset(
+    name for name, m in COLLECTOR_MODULES.items() if getattr(m, "SUPPORTS_INCREMENTAL", False)
+)
 
 # vc_boards is collected by board (vc_boards.yaml), not by company slug, so it
 # routes through vc_boards.collect() rather than the COLLECTORS registry.
 SOURCES = (*sorted(COLLECTORS), "vc_boards", "all")
+
+
+# --- incremental cursor (per source; gitignored under corpus/) ---------------
+# The cursor records the START timestamp of the last successful collection for a
+# source. Using the start (not finish) means a job updated *during* a run is
+# re-collected next time rather than skipped. Falls back to full collection when
+# no cursor exists. See collectors/CLAUDE.md + job_radar_SPEC §8.
+
+def cursor_path(source: str, cursor_dir: str | None = None) -> str:
+    return os.path.join(cursor_dir if cursor_dir is not None else CURSOR_DIR, f".last_collected_{source}")
+
+
+def read_cursor(source: str, cursor_dir: str | None = None) -> str | None:
+    path = cursor_path(source, cursor_dir)
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as fh:
+        return fh.read().strip() or None
+
+
+def write_cursor(source: str, ts: str, cursor_dir: str | None = None) -> None:
+    target = cursor_dir if cursor_dir is not None else CURSOR_DIR
+    os.makedirs(target, exist_ok=True)
+    with open(cursor_path(source, target), "w", encoding="utf-8") as fh:
+        fh.write(ts)
 
 
 def load_companies(path: str = SEEDS_PATH) -> list[dict]:
@@ -74,16 +111,25 @@ def collect(
     *,
     registry: dict | None = None,
     collected_at: str | None = None,
+    updated_after_by_source: dict | None = None,
 ) -> list:
-    """Run the matching collector for each company and return all CollectedJobs."""
+    """Run the matching collector for each company and return all CollectedJobs.
+
+    ``updated_after_by_source`` maps an ATS name to its incremental cursor (or
+    None for full collection); each company's collector is passed the cursor for
+    its source. Non-incremental sources are simply absent from the map.
+    """
     registry = COLLECTORS if registry is None else registry
+    cursors = updated_after_by_source or {}
     jobs = []
     for c in companies:
         fetch = registry.get(c["ats"])
         if fetch is None:
             log.warning("no collector for ats %r (%s) — skipping", c["ats"], c["name"])
             continue
-        jobs.extend(fetch(c["slug"], c["name"], collected_at=collected_at))
+        jobs.extend(
+            fetch(c["slug"], c["name"], collected_at=collected_at, updated_after=cursors.get(c["ats"]))
+        )
     return jobs
 
 
@@ -122,12 +168,31 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", default="all", choices=SOURCES, help="ATS to collect from (default: all)")
     parser.add_argument("--company", help="Restrict to one company (slug or name)")
     parser.add_argument("--dry-run", action="store_true", help="Print count without writing")
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Ignore incremental cursors and re-fetch everything (after a schema change or for debugging)",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
+    # Cursor is the run START (so a job updated mid-run is re-caught next time).
+    run_start = datetime.now(timezone.utc).isoformat()
     companies = select(load_companies(), args.source, args.company)
-    jobs = collect(companies)
+    selected_sources = {c["ats"] for c in companies}
+
+    # Per-source incremental cursor: only for sources that support it, only when
+    # not --full. A missing cursor → None → full collection for that source.
+    updated_after_by_source = {
+        src: (None if args.full else read_cursor(src))
+        for src in selected_sources & INCREMENTAL_SOURCES
+    }
+    incremental = {s: c for s, c in updated_after_by_source.items() if c}
+    if incremental:
+        log.info("incremental collection from cursors: %s", incremental)
+
+    jobs = collect(companies, updated_after_by_source=updated_after_by_source)
 
     # VC boards are board-based, not company-based, and currently all skipped.
     if args.source in ("vc_boards", "all"):
@@ -139,7 +204,24 @@ def main(argv: list[str] | None = None) -> int:
 
     raw_path = write_records(jobs)
     meta_path = write_meta(jobs)
+
+    # Advance each incremental source's cursor to this run's start — but only on a
+    # full-source run (no --company) and only for a source that actually returned
+    # jobs, so a --company subset or a transient total-fetch failure never skips
+    # postings on the next run.
+    counts = Counter(job.record.source_ats for job in jobs)
+    advanced = []
+    if args.company is None:
+        for src in sorted(selected_sources & INCREMENTAL_SOURCES):
+            if counts.get(src, 0) > 0:
+                write_cursor(src, run_start)
+                advanced.append(src)
+
     print(f"Wrote {len(jobs)} records to {raw_path} and metadata to {meta_path}")
+    if advanced:
+        print(f"Cursor advanced to {run_start} for: {', '.join(advanced)}")
+    elif args.company is not None:
+        print("(--company run — cursors not advanced)")
     return 0
 
 
