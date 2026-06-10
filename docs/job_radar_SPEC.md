@@ -43,7 +43,7 @@ cv-tailor workflow
 
 ---
 
-## 2. Project Structure — Six Phases
+## 2. Project Structure — Seven Phases
 
 | Phase | Name | Status | Primary output |
 |---|---|---|---|
@@ -51,11 +51,12 @@ cv-tailor workflow
 | 2 | Scoring Engine | ✅ Complete — scorer v1 locked, 179 tests | Fit + priority scores per role |
 | 3 | Job Tracker | ✅ Complete — track.py (model C), 263 tests, extraction quality fixed, real corpus build underway | Application workflow state |
 | 4 | Discovery Layer | ✅ Complete — incremental collection + `cli/digest.py` + cron wrappers, 313 tests | Continuous role ingestion |
-| 5 | UI | ✅ Complete — `ui/` static SPA, joined `index.json`, 318 tests | Read-only browse + filter interface |
-| 6 | Fine-Tuned Analyser | Future enhancement | Replace rule-based scoring |
+| 5 | Static UI | ✅ Complete — `ui/` static SPA, joined `index.json`, 318 tests | Read-only browse + filter interface |
+| 6 | Interactive UI | Planned — React + FastAPI, workflow writes from browser | Full job search interface |
+| 7 | Fine-Tuned Analyser | Future enhancement — Project 5 | Replace rule-based scoring |
 
 Phases are sequential. Each phase is a working system before the next
-begins. Phase 6 is explicitly deferred — it becomes Project 5 when
+begins. Phase 7 is explicitly deferred — it becomes Project 5 when
 the corpus is large enough to justify fine-tuning.
 
 ---
@@ -1286,7 +1287,7 @@ Cron setup (Ubuntu Server):
 
 ---
 
-## 9. Phase 5 — UI
+## 9. Phase 5 — Static UI ✅ Complete
 
 ### 9.1 — Purpose
 
@@ -1394,7 +1395,351 @@ Regenerate the data after a re-score with the `--export-index` command above.
 
 ---
 
-## 10. Phase 6 — Fine-Tuned Analyser (Future Enhancement)
+## 10. Phase 6 — Interactive UI
+
+### 10.1 — Purpose
+
+Replace the static read-only UI with an interactive interface that allows
+workflow state management and scoring annotations directly from the browser.
+
+The CLI pipeline remains unchanged. The scoring engine remains unchanged.
+`activity_log.jsonl` and a new `annotations.jsonl` remain the source of
+truth for all human state. No database is introduced.
+
+This is the shift from "tool I occasionally check via CLI" to "tool I use
+as my primary job search interface."
+
+**What changes:** a FastAPI backend mediates writes; React + Vite replaces
+vanilla JS.
+
+**What does not change:** JSONL pipeline output, scoring logic, the
+activity log event model, all pipeline CLIs.
+
+---
+
+### 10.2 — What the interactive UI adds (over Phase 5)
+
+**Workflow writes from the browser:**
+
+- Update application status (shortlisted / applied / interviewing /
+  rejected / offer / archived) directly from the detail panel
+- Add notes to a role
+- Set a display title override for roles with bad extracted titles
+- All writes append to `corpus/activity_log.jsonl` via FastAPI — same
+  model as `python -m cli.track`, same `validate_activity_event` check,
+  same event format. The CLI remains a fully valid write path.
+
+**Scoring annotations (field-level):**
+
+Flag scoring issues directly from the detail panel with structured reason:
+
+| Annotation type | What it flags |
+|---|---|
+| `role_type_incorrect` | Extraction mapped to wrong role type |
+| `domain_incorrect` | Domain tag wrong (e.g. Enterprise Software catch-all) |
+| `seniority_incorrect` | Seniority extracted incorrectly |
+| `technical_depth_incorrect` | Depth tag wrong |
+| `fit_score_disagree` | Overall fit score feels wrong — free-text reason |
+| `should_be_blocked` | Should have fired capability blocker, didn't |
+| `false_block` | Capability blocker fired incorrectly |
+| `extraction_other` | Other extraction issue — free-text description |
+
+Annotations written to `corpus/annotations.jsonl` (append-only, separate
+from `activity_log.jsonl` — different purpose, different future consumer).
+
+Annotations record `scorer_label` and `scorer_fit_score` at the time of
+flagging — historical context preserved when scorer is later re-calibrated.
+
+**Purpose of annotations:** feeds Phase 7 (fine-tuning) calibration and
+future scorer tuning. Not immediate mutations — a feedback queue reviewed
+before any scorer change.
+
+**Security model (cv-tailor D-38/D-39 pattern):**
+
+- Public visitors: full read-only browse, no write controls visible
+- Owner (Michel): one-time key unlock → signed HttpOnly capability cookie
+  → full write access (status, notes, title, annotations)
+- `FULL_MODE_KEY` env var. No key configured = read-only for everyone
+  (fail-closed)
+- `GET /api/capabilities` → `{write_configured, write_unlocked}` drives
+  the UI: hide controls (not configured), show unlock prompt (configured,
+  not unlocked), enable controls (unlocked)
+- Cookie: HMAC-signed, HttpOnly, SameSite=Lax, short expiry
+- Backend enforces: write endpoints return 403 without valid cookie even
+  if UI is bypassed
+
+---
+
+### 10.3 — What the UI still never does
+
+- Trigger collection, labelling, scoring, or validation
+- Edit extraction fields directly — annotations flag issues; they never
+  mutate extractions
+- Modify JSONL pipeline output files
+- Submit applications
+
+---
+
+### 10.4 — Architecture
+
+**Stack:**
+```
+React (Vite)                  frontend — replaces ui/ static files
+FastAPI                       thin backend — mediates all writes, serves index.json
+corpus/activity_log.jsonl     workflow state — unchanged, appended via API
+corpus/annotations.jsonl      scoring flags — new, appended via API
+corpus/index.json             read cache — regenerated by stats --export-index
+JSONL pipeline                unchanged throughout
+```
+
+**No database.** SQLite deferred — add when complex queries across 1000+
+records, multiple concurrent users, or transactions are needed. None apply
+now.
+
+**API surface — task-oriented, not event-oriented:**
+
+Status updates are 90% of UI writes. The API speaks the domain language
+the UI uses. The event model (`activity_log.jsonl`) stays underneath —
+each task endpoint validates and appends to the appropriate JSONL file.
+
+```
+# Public — no auth required
+GET  /api/index              serves corpus/index.json (the joined read model)
+GET  /api/capabilities       {write_configured, write_unlocked}
+GET  /api/health             {status, records, last_indexed}
+
+# Auth
+POST /api/unlock             validates key, sets HttpOnly capability cookie
+POST /api/lock               clears capability cookie
+
+# Workflow writes — require valid capability cookie
+POST /api/status             {job_id, status, notes?}
+                             appends status event to activity_log.jsonl
+                             validated against APPLICATION_STATUS vocab
+
+POST /api/note               {job_id, text}
+                             appends note event to activity_log.jsonl
+                             pure note — no status change
+
+POST /api/title              {job_id, title}
+                             appends title event to activity_log.jsonl
+                             display override only, never scored
+
+# Annotation writes — require valid capability cookie
+POST /api/annotations        {job_id, annotation_type, field,
+                              observed, expected, reason}
+                             appends to corpus/annotations.jsonl
+                             validated against ANNOTATION_TYPE frozenset
+```
+
+**Why task-oriented over generic `POST /api/events`:**
+- Each endpoint validates only what it needs — `/api/status` validates
+  against `APPLICATION_STATUS`; `/api/note` validates non-empty text.
+  No shared payload shape all callers must get right.
+- FastAPI auto-generates self-documenting OpenAPI — four clear operations,
+  not one generic event emitter with a payload schema to decode.
+- Frontend code is clean — `api.shortlist(jobId)` not
+  `api.emitEvent({job_id, event: 'status', value: 'shortlisted'})`.
+- Error messages are specific and actionable per endpoint.
+- `POST /api/note` is separate from `POST /api/status` with optional notes
+  because a pure note (no state change) is a different intent — the frontend
+  never has to reason about which combination to send.
+
+**FastAPI is thin.** Imports `cli.track` for event validation and appending.
+Imports `models.record` for vocab constants. Never calls the scorer,
+labeller, or any pipeline stage. A write request is: validate → append
+→ return 200.
+
+**`corpus/annotations.jsonl` format:**
+```json
+{
+  "v": 1,
+  "ts": "2026-06-10T09:00:00Z",
+  "job_id": "sha256:abc123",
+  "annotation_type": "domain_incorrect",
+  "field": "domain",
+  "observed": ["Enterprise Software"],
+  "expected": [],
+  "reason": "Generic catch-all — nothing in the JD points to Enterprise Software",
+  "scorer_label": "strong_fit",
+  "scorer_fit_score": 9
+}
+```
+
+`ANNOTATION_TYPE` added to `models/record.py` as a frozenset constant
+(no schema version bump — constants only, same pattern as `OUTCOME`):
+
+```python
+ANNOTATION_TYPE = frozenset({
+    "role_type_incorrect",
+    "domain_incorrect",
+    "seniority_incorrect",
+    "technical_depth_incorrect",
+    "fit_score_disagree",
+    "should_be_blocked",
+    "false_block",
+    "extraction_other",
+})
+```
+
+**Docker:**
+```yaml
+api:
+  build:
+    context: .
+    dockerfile: Dockerfile.api
+  volumes:
+    - ./corpus:/app/corpus
+    - ./models:/app/models
+    - ./cli:/app/cli
+    - ./scoring:/app/scoring
+  ports:
+    - "8000:8000"
+  env_file:
+    path: .env
+    required: false
+  profiles: ["ui"]
+
+frontend:
+  build:
+    context: ./ui
+    dockerfile: Dockerfile.frontend
+  ports:
+    - "8080:80"
+  depends_on:
+    - api
+  profiles: ["ui"]
+```
+
+The Phase 5 nginx static server is retired. `docker compose --profile ui up`
+starts both api + frontend.
+
+---
+
+### 10.5 — Security model detail
+
+Following cv-tailor D-38/D-39 exactly. Copy and adapt `api/security.py`
+from cv-tailor — same HMAC + HttpOnly cookie pattern, proven implementation.
+
+**Unlock flow:**
+1. Owner clicks any write action (status, note, title, annotation)
+2. If not unlocked: UI shows unlock dialog (password field — never
+   persisted in React state, localStorage, or a readable cookie)
+3. UI POSTs key to `POST /api/unlock`
+4. Backend validates against `FULL_MODE_KEY`. Success → signed HttpOnly
+   cookie. Failure → 401, user stays read-only.
+5. Subsequent writes rely on the cookie; key never re-sent per action.
+6. Unlocked session shows a small "owner" indicator with a lock affordance.
+
+**`GET /api/capabilities` drives UI rendering:**
+
+| `write_configured` | `write_unlocked` | UI behaviour |
+|---|---|---|
+| false | false | Write controls hidden entirely — no dead buttons |
+| true | false | Write controls visible, click → unlock dialog |
+| true | true | Write controls enabled, owner indicator shown |
+
+**Fail-closed:** no `FULL_MODE_KEY` → all write endpoints 403, public
+deployment is clean read-only (matching Phase 5 experience for visitors).
+
+---
+
+### 10.6 — Write controls in the detail panel
+
+Visible to owner only (hidden when not configured, unlock dialog when
+configured but not unlocked):
+
+```
+─── Assessment ──────────────────────────────────────
+fit_label: strong_fit  fit_score: 9  priority: 10
+
+Status:   [Review] [Shortlist] [Apply] [Archive]
+Notes:    [                              ] [Save]
+Title:    [                              ] [Override]
+
+─── Flag scoring issue ──────────────────────────────
+Type:     [dropdown ▾]
+Observed: [pre-filled from record]
+Expected: [                              ]
+Reason:   [                              ]
+          [Submit Flag]
+```
+
+Status buttons are quick-action — one click, no confirmation for common
+transitions (review, shortlist, apply). Archive requires confirmation.
+
+---
+
+### 10.7 — React frontend scope
+
+**Views — same as Phase 5, enhanced:**
+- Browse — same filterable table; detail panel gains write controls
+- Pipeline — same kanban grouping; status changes via detail panel
+  (no drag-to-status in Phase 6 — future enhancement if needed)
+- Stats bar — unchanged
+
+**Tech:**
+- Vite + React
+- `ui/src/` replaces `ui/index.html` + `ui/app.js` + `ui/style.css`
+- Key components: `BrowseView`, `PipelineView`, `DetailPanel`,
+  `UnlockDialog`, `useCapabilities` hook, `useIndex` hook
+- `Dockerfile.frontend` — node:20-alpine build → nginx:alpine serve
+
+---
+
+### 10.8 — Implementation steps
+
+Build in this order. Each step tested before the next starts.
+
+1. `models/record.py` — add `ANNOTATION_TYPE` frozenset (constants only,
+   no schema bump)
+2. `api/security.py` — copy from cv-tailor, adapt for job-radar
+   (`FULL_MODE_KEY` env var, same HMAC + HttpOnly cookie pattern)
+3. `api/main.py` — FastAPI app, CORS for local dev
+4. `api/routers/index.py` — `GET /api/index`, `GET /api/capabilities`,
+   `GET /api/health`
+5. `api/routers/auth.py` — `POST /api/unlock`, `POST /api/lock`
+6. `api/routers/workflow.py` — `POST /api/status`, `POST /api/note`,
+   `POST /api/title` (all import `cli.track` validation + append logic)
+7. `api/routers/annotations.py` — `POST /api/annotations` (validates
+   `ANNOTATION_TYPE`, appends to `corpus/annotations.jsonl`)
+8. `Dockerfile.api` — python:3.13-slim, `fastapi[standard]`,
+   `itsdangerous`
+9. React frontend — Vite scaffold, components, hooks, write controls
+10. `Dockerfile.frontend` — node:20-alpine build → nginx:alpine serve
+11. `docker-compose.yml` — add `api` + `frontend` services under
+    `profiles: ["ui"]`, retire the Phase 5 `ui` nginx service
+
+**Definition of Done:**
+1. `docker compose --profile ui up` → frontend :8080, API :8000
+2. Public visitor: read-only browse, no write controls visible
+3. Owner unlock: key → cookie → write controls appear
+4. `POST /api/status` from UI appends correct event to
+   `activity_log.jsonl`, verified by `python -m cli.track list`
+5. `POST /api/annotations` from UI appends correct record to
+   `annotations.jsonl`
+6. `curl -X POST /api/status` without cookie → 403 (backend enforces)
+7. All existing 318 tests still pass (pipeline untouched)
+
+**Docs (same commit, not later):**
+- SPEC §2 phase table → Phase 6 ✅ complete
+- SPEC §10 → mark as built
+- CLAUDE.md Phase 6 row → ✅ complete + deviations
+- LEARNINGS → append Learning 29 (Phase 6 decisions + surprises)
+
+---
+
+### 10.9 — Deployment (TODO)
+
+**⚠️ TODO: public deployment to M720q follows Michel's established flow.**
+
+Same pattern as cv-tailor and RFI app. Not specced here — add as a named
+next step after Phase 6 is verified locally. Michel has an established
+flow for this.
+
+---
+
+## 11. Phase 7 — Fine-Tuned Analyser (Future Enhancement)
 
 This phase is **explicitly deferred**. It becomes Project 5 when the
 corpus is large enough to justify fine-tuning (target: 500+ labelled
@@ -1416,10 +1761,12 @@ rule-based scorer's failure modes are well-understood.
 - `corpus/finetune_export/export_eval_*.jsonl`
 - `CORPUS_FINDINGS.md` — schema, labelling rules, failure modes
 - `corpus/stats.json` — cost baseline
+- `corpus/annotations.jsonl` — field-level scoring disagreements from
+  Phase 6 (ground-truth correction signals for fine-tuning)
 
 ---
 
-## 11. Relationship to cv-tailor
+## 12. Relationship to cv-tailor
 
 cv-tailor is live in production. It is not modified as part of this
 project.
@@ -1450,20 +1797,20 @@ understood.
 
 ---
 
-## 12. Architecture Decisions
+## 13. Architecture Decisions
 
-### 12.1 — Job Radar as one product, not separate projects
+### 13.1 — Job Radar as one product, not separate projects
 
-**Decision:** Phases 1–5 are one product. Phase 6 is Project 5.
+**Decision:** Phases 1–6 are one product. Phase 7 is Project 5.
 
 **Rationale:** The corpus builder alone is not useful to Michel the
 job seeker. The job search tool needs the corpus. Building them
 separately creates a handoff problem and two incomplete products.
 One product with phases produces value incrementally.
 
-### 12.2 — Rule-based scoring before fine-tuning
+### 13.2 — Rule-based scoring before fine-tuning
 
-**Decision:** Phase 2 is rule-based. Fine-tuning is Phase 6 / Project 5.
+**Decision:** Phase 2 is rule-based. Fine-tuning is Phase 7 / Project 5.
 
 **Rationale:** 200 labelled records is insufficient for meaningful
 fine-tuning of a domain-specific scorer. A well-designed rule-based
@@ -1472,7 +1819,7 @@ without GPU, without training cost, and without the data requirements
 of fine-tuning. Fine-tuning adds value after the corpus exceeds 500
 records and the rule-based scorer's failure modes are documented.
 
-### 12.3 — Three-layer schema separation
+### 13.3 — Three-layer schema separation
 
 **Decision:** JDRecord (extraction) / JobPosting (product) /
 ApplicationRecord (annotation) are separate dataclasses.
@@ -1483,27 +1830,63 @@ creates migration problems when the product evolves. Three layers
 with clear ownership (Claude / system / Michel) keep each concern
 clean.
 
-### 12.4 — Static index for UI
+### 13.4 — Static index for UI
 
-**Decision:** UI reads `corpus/index.json`, not a live API.
+**Decision:** Phase 5 static UI reads `corpus/index.json`, not a live
+API. Phase 6 interactive UI keeps `index.json` as the read model but
+adds a FastAPI backend for writes.
 
-**Rationale:** The UI is read-only. A live API adds a backend service,
-a port, auth, and operational complexity for no functional benefit.
-A pre-built index regenerated by CLI after each pipeline run is
-simpler, faster to render, and consistent with "files all the way
-down."
+**Rationale:** The read model (a pre-built joined index) is simpler,
+faster to render, and consistent with "files all the way down." A
+live API adds operational complexity only worth taking on when write
+capability is needed — which Phase 5 didn't need and Phase 6 does.
 
-### 12.5 — CLI writes, UI reads
+### 13.5 — CLI writes, UI reads (Phase 5)
 
-**Decision:** All writes go through CLI. UI never modifies state.
+**Decision:** Phase 5 — all writes go through CLI. UI never modifies
+state.
 
 **Rationale:** Preserves the CLI as the single source of truth.
 Prevents accidental writes from the UI corrupting JSONL files.
 Keeps the UI stateless and deployable anywhere.
 
+### 13.6 — Task-oriented API, not generic event emitter (Phase 6)
+
+**Decision:** Phase 6 FastAPI exposes four task-oriented write
+endpoints (`/api/status`, `/api/note`, `/api/title`,
+`/api/annotations`) rather than a single generic `/api/events`.
+The activity log event model remains underneath.
+
+**Rationale:** Status updates are 90% of UI writes. The API should
+speak the domain language the UI uses, not the infrastructure language
+of the event log. Four specific endpoints validate only what they need,
+generate self-documenting OpenAPI output, and produce specific error
+messages. Frontend code reads as `api.shortlist(jobId)` not
+`api.emitEvent({job_id, event: "status", value: "shortlisted"})`.
+`/api/note` is separate from `/api/status` with optional notes because
+a pure note (no state change) is a different intent — the frontend
+never has to reason about which payload combination to send.
+
+### 13.7 — "CLI writes, UI reads" refined for Phase 6
+
+**Decision:** Phase 6 supersedes §13.5 for workflow state and
+annotations only. Writes that produce pipeline artifacts (collection,
+labelling, scoring, validation) remain CLI-only. Writes that record
+human judgement (workflow state, scoring annotations) are available
+via both CLI and FastAPI, validated identically by the same
+`models.record` constants.
+
+**Rationale:** The read-only constraint was correct during construction.
+Phase 5 delivered it correctly. But it creates daily friction: every
+status update and annotation requires a terminal. The FastAPI layer
+appends to the same JSONL files the CLI appends to — the data model
+is unchanged, the source of truth is unchanged, the CLI remains a
+valid write path. No database is introduced. "Files all the way down"
+is preserved.
+
 ---
 
-## 13. Documentation Standard
+## 14. Documentation Standard
 
 Follows `PROJECT_DOCUMENTATION_STANDARD.md`.
 
@@ -1531,7 +1914,7 @@ Follows `PROJECT_DOCUMENTATION_STANDARD.md`.
 
 ---
 
-## 14. Interview Narrative
+## 15. Interview Narrative
 
 **One product, multiple learning layers.** Job Radar is not a demo
 project. It is a system Michel uses daily for his job search. This
