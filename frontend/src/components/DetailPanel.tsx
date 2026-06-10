@@ -42,6 +42,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<void> }) {
   const { requestUnlock } = useUnlock();
   const [toast, setToast] = useState<Toast>(null);
+  const [flagToast, setFlagToast] = useState<Toast>(null);
   const [busy, setBusy] = useState(false);
   const [noteText, setNoteText] = useState(job.notes || "");
   const [titleText, setTitleText] = useState(job.title || "");
@@ -52,19 +53,21 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
   // Reset the editable fields when the drawer switches to a different job.
   useEffect(() => {
     setNoteText(job.notes || ""); setTitleText(job.title || "");
-    setFlagType(ANNOTATION_TYPES[0]); setExpected(""); setReason(""); setToast(null);
+    setFlagType(ANNOTATION_TYPES[0]); setExpected(""); setReason("");
+    setToast(null); setFlagToast(null);
   }, [job.job_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function guarded(run: () => Promise<Toast>) {
+  // setT routes the result toast to the right panel (workflow vs. flag form).
+  async function guarded(run: () => Promise<Toast>, setT: (t: Toast) => void = setToast) {
     if (!(await requestUnlock())) return; // opens dialog if locked; false = cancelled
     setBusy(true);
     try {
       const t = await run();
-      setToast(t);
+      setT(t);
       await onChanged();
     } catch (e) {
       const msg = e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e);
-      setToast({ kind: "err", text: msg });
+      setT({ kind: "err", text: msg });
     } finally {
       setBusy(false);
     }
@@ -99,7 +102,7 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
     });
     setExpected(""); setReason("");
     return { kind: "ok", text: "Flag submitted" };
-  });
+  }, setFlagToast);
 
   const { observed } = observedFor(flagType, job);
   const STATUS_BTNS: Array<{ label: string; value: string; danger?: boolean }> = [
@@ -129,13 +132,13 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
           <span className="wc-label">Notes</span>
           <input className="wc-input" value={noteText} placeholder="Add a note…"
             onChange={(e) => setNoteText(e.target.value)} disabled={busy} />
-          <button className="wc-status-btns" style={{ padding: "5px 11px" }} onClick={saveNote} disabled={busy}>Save</button>
+          <button className="wc-btn" onClick={saveNote} disabled={busy}>Save</button>
         </div>
         <div className="wc-row">
           <span className="wc-label">Title</span>
           <input className="wc-input" value={titleText} placeholder="Display title override…"
             onChange={(e) => setTitleText(e.target.value)} disabled={busy} />
-          <button className="wc-status-btns" style={{ padding: "5px 11px" }} onClick={saveTitle} disabled={busy}>Override</button>
+          <button className="wc-btn" onClick={saveTitle} disabled={busy}>Override</button>
         </div>
         {toast && <div className={`wc-toast ${toast.kind}`}>{toast.text}</div>}
       </div>
@@ -152,7 +155,10 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
         <input value={expected} placeholder="What it should be…" onChange={(e) => setExpected(e.target.value)} disabled={busy} />
         <label>Reason</label>
         <textarea value={reason} rows={2} placeholder="Why is the scoring wrong?" onChange={(e) => setReason(e.target.value)} disabled={busy} />
-        <button className="wc-status-btns" style={{ padding: "6px 12px" }} onClick={submitFlag} disabled={busy}>Submit Flag</button>
+        <div className="flag-footer">
+          <button className="wc-btn primary" onClick={submitFlag} disabled={busy}>Submit Flag</button>
+        </div>
+        {flagToast && <div className={`wc-toast ${flagToast.kind}`}>{flagToast.text}</div>}
       </div>
     </>
   );
