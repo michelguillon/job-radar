@@ -59,7 +59,7 @@ thing tests actually run against.
 | 1 — Corpus Engine | ✅ complete — Steps 0–9, 95 tests. Pipeline end-to-end. |
 | 2 — Scoring Engine | ✅ **complete (scorer v1)** — `scoring/{profile,scorer}.py` + `score.py`, 179 tests. Option A (`ApplicationRecord` v1.3 → `corpus/scored/`) + gates-vs-signal model + 3-tier role (primary/conditional/secondary) + capability/M&A blockers + negative-signal ceiling. Thresholds **set from evidence** (held against the 23-record corpus: 10 manual + 13 calibration). Calibration regression set: `corpus/calibration/`. Known limit F (extraction generosity) deferred. Conventions: `scoring/CLAUDE.md`. |
 | 3 — Job Tracker | 🔄 in progress — building a **real** corpus (target 500+ validated). Collection captures a **metadata sidecar** (`corpus/raw/meta_{date}.jsonl`: title + structured location, keyed by `source_url`) — `raw_text` stays employer JD text only. **Pre-label filter** (`pipeline/prefilter.py` + `prefilter.py`) cuts raw → 62 survivors. **First production scoring run done (2026-06-09):** 44-record representative subset labelled (Batch, $0.7672, 0 fail, sidecar metadata passed as `[ATS METADATA]` prompt block via `clean_readable` raw_text) → validated → scored (strong_fit 18 / stretch 7 / blocked_fit 8 / good_fit 6 / interview_practice 5). Capability blocker validated on real data; **Known Limit F confirmed** (Product/Enterprise-Software over-tagging → a Product-Marketing role scored strong_fit). **`track.py` built (2026-06-10)** — the Job Tracker proper (SPEC §7.4), model **C**: append-only `corpus/activity_log.jsonl` is the source of truth for workflow state (status/notes/outcome), the pure scorer is untouched, live state = latest score *joined* with a projection folded from the log by `job_id`. **Log-only** fork: outcome/application_date derived at read time, no schema bump (`OUTCOME`/`ACTIVITY_EVENT`/`validate_activity_event` added to `models/record.py` as vocab only). Forgiving transitions (warn, never block); `list` joins + sorts by priority. 263 tests; acceptance-tested on the 44 production records (Figma/Mistral marks → joined `list` verified). See deviation **23**. Also ongoing: **extraction-quality review**, widen seeds, structured score review after **100+** scored jobs. Scorer stays **locked**. Option D **deferred**. |
-| 4 — Discovery Layer | Not started |
+| 4 — Discovery Layer | 🔄 started — **incremental collection** built (`collect.py` cursor + `--full`, client-side per-job timestamp filter). Digest + cron pending. See deviation 24 + `collectors/CLAUDE.md`. |
 | 5 — UI | Not started |
 | 6 — Fine-Tuned Analyser | Deferred (Project 5) |
 
@@ -187,6 +187,23 @@ thing tests actually run against.
     ignored** like other corpus data (mutable personal state). Stable join key
     caveat: a JD text change → new content hash → new `job_id` → workflow does not
     carry to the new revision (accepted, not a bug).
+24. (Phase 4) **Incremental collection is client-side, not server-side.** The
+    public ATS **board** APIs expose **no `updated_after`/date-filter param**
+    (Greenhouse's `updated_after` is **Harvest API only**; Lever/Ashby boards take
+    none — verified against the authoritative docs). So `collect.py` fetches the
+    (single, cheap) full list per company and filters **client-side** on each job's
+    own timestamp via `collectors.base.passes_cursor`. The cost saved is the
+    **downstream Batch-labelling** spend (≈O(new) records enter the paid pipeline),
+    not the bulk GET. Per-source **cursor** `corpus/.last_collected_{source}`
+    (gitignored) = **start** timestamp of the last successful run (start-not-finish,
+    so a mid-run update is re-caught). Capability differs per source: greenhouse
+    `updated_at` (new+edited), ashby `publishedAt` (**new only** — no `updatedAt` on
+    the feed; `--full` reconciles edits), **lever none → always full**.
+    `INCREMENTAL_SOURCES` derives from each collector's `SUPPORTS_INCREMENTAL`.
+    `--full` re-fetches everything (schema change/debug) then re-baselines.
+    Cursors advance **only** on a full-source run (no `--company`) that returned ≥1
+    job; a missing/unparseable per-job timestamp is **kept** (never silently drop a
+    posting). Matrix + rationale: `collectors/CLAUDE.md`; mechanics: `SPEC §8.2`.
 
 ---
 
@@ -226,7 +243,8 @@ The separation exists by design for when scale makes it matter.
 
 Keep this file lean. Add area-specific conventions to nested files:
 
-- `collectors/CLAUDE.md` — API client patterns, rate limiting, encoding gotchas
+- `collectors/CLAUDE.md` — API client patterns, encoding gotchas, **incremental
+  capability matrix** (exists)
 - `pipeline/CLAUDE.md` — batch API patterns, cost tracking, label-merge defaults
 - `scoring/CLAUDE.md` — scoring logic, profile schema (Phase 2+)
 - `ui/CLAUDE.md` — UI conventions, index.json contract (Phase 5+)

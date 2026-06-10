@@ -1158,5 +1158,56 @@ apart.
 
 ---
 
+### Learning 25 — Verify the API before implementing the param; then move the filter to where the cost actually is
+
+#### Context
+
+The task specified incremental collection by "passing the `updated_after` query
+parameter" to Greenhouse, and "check whether Lever/Ashby support a date filter."
+The intuitive read is: add a server-side filter param per source. Checking the
+**authoritative** API docs (not memory, not the task's assumption) changed the
+shape of the whole feature:
+
+- **Greenhouse**'s `updated_after` exists — but only on the **Harvest API**
+  (authenticated). The public **Job Board** API `/jobs` endpoint takes only
+  `content`. It *does* return a per-job `updated_at`, though.
+- **Ashby**'s board API has no date param either, but each job carries
+  `publishedAt` (and **no** `updatedAt` — so first-publish only).
+- **Lever**'s v0 postings feed has no date param **and no timestamp field at
+  all** — incremental is simply impossible.
+
+#### What we did
+
+Implemented incremental **client-side**: fetch the (single, cheap) full list and
+keep only jobs at/after a per-source cursor, filtering on whatever timestamp the
+source actually exposes (`updated_at` / `publishedAt` / none). Capability is a
+flag on each collector (`SUPPORTS_INCREMENTAL`), and `collect.py` derives the
+incremental-source set from those flags rather than hard-coding it. Lever stays
+full and leans on the existing dedupe. The key reframing: the **expensive** part
+of "collection" was never the HTTP GET (one free request per company) — it is the
+**downstream Batch labelling spend**. A client-side filter cuts the records that
+enter that paid pipeline to ≈O(new), achieving the actual goal even though the
+GET is unchanged.
+
+#### Reusable Pattern
+
+**Verify the endpoint's real capabilities before designing around a parameter —
+the same param name often lives on a *different* (privileged) API tier than the
+one you're using** (`updated_after` is Harvest, not Job Board; this exact
+board-vs-admin split recurs across ATS/SaaS vendors). And when the server won't
+filter, ask *where the cost actually is* before concluding you can't optimize:
+here the bulk fetch was free and the spend was one stage downstream, so a
+client-side filter delivered the entire benefit. Two design rules that fell out
+and generalize: (1) **make the capability a per-source flag and derive behaviour
+from it** — heterogeneous backends (one filters, one half-filters, one can't) stay
+honest when the orchestrator reads a declared flag instead of special-casing names;
+(2) **on an incremental boundary, fail toward over-collection** — a missing or
+unparseable timestamp must *keep* the item, because over-collecting is recovered
+for free by dedupe while under-collecting is silent data loss. The cursor stores
+the run's **start**, not finish, for the same reason: re-collecting a few mid-run
+updates is cheap; missing them is not.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

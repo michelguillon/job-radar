@@ -50,7 +50,7 @@ cv-tailor workflow
 | 1 | Corpus Engine | ✅ Complete — 95 tests, pipeline proven | Labelled JD corpus |
 | 2 | Scoring Engine | ✅ Complete — scorer v1 locked, 179 tests | Fit + priority scores per role |
 | 3 | Job Tracker | 🔄 In progress — corpus pipeline + **`track.py` built** (§7.4, model C; 263 tests) | Application workflow state |
-| 4 | Discovery Layer | Not started | Continuous role ingestion |
+| 4 | Discovery Layer | 🔄 Started — incremental collection (cursor + `--full`) built; digest + cron pending | Continuous role ingestion |
 | 5 | UI | Not started | Read-only browse + filter interface |
 | 6 | Fine-Tuned Analyser | Future enhancement | Replace rule-based scoring |
 
@@ -1199,6 +1199,31 @@ without requiring manual source management.
 cron. New records appended, not overwritten. Dedup prevents
 re-processing.
 
+**Incremental collection (built — `collect.py`):** every run after the first
+collects only jobs new/updated since the last successful run, cutting the count
+entering the **paid** downstream pipeline (Batch labelling) from O(all live jobs)
+to O(new). The public board APIs expose **no server-side date filter**
+(Greenhouse's `updated_after` is Harvest-API-only; Lever/Ashby boards take none),
+so filtering is **client-side** on each job's own timestamp — the real saving is
+downstream, not the single bulk GET.
+
+- **Per-source cursor** `corpus/.last_collected_{source}` (gitignored) holds the
+  **start** timestamp of the last successful run. Start-not-finish guarantees a
+  job updated *during* a run is re-collected next time, never skipped. No cursor →
+  full collection (first run, or a new source).
+- **Capability by source** (see `collectors/CLAUDE.md` for the matrix):
+  greenhouse filters on `updated_at` (new + edited); ashby on `publishedAt` (new
+  only — no `updatedAt` on the public feed; a periodic `--full` reconciles edits);
+  **lever has no timestamp at all → always full collection** (relies on dedupe).
+  `INCREMENTAL_SOURCES` is derived from each collector's `SUPPORTS_INCREMENTAL`.
+- **`--full`** ignores cursors and re-fetches everything (after a schema change or
+  for debugging), then re-baselines the cursor to now.
+- **Advance rules:** a cursor advances only on a full-source run (no `--company`)
+  and only for a source that returned ≥1 job, so a `--company` subset or a
+  transient total-fetch failure can't skip postings next run. `--dry-run` never
+  advances. A missing/unparseable per-job timestamp is **kept** (never silently
+  dropped — over-collect is recovered by dedupe; under-collect is data loss).
+
 **Incremental scoring:** New records scored automatically after
 collection. `ApplicationRecord` created with `application_status:
 "new"` and `application_decision: "pending"`.
@@ -1219,9 +1244,13 @@ Output: terminal summary + optional export to `corpus/digest_{date}.md`
 
 ### 8.3 — Implementation
 
-New files:
+Done:
+- Incremental collection in `collect.py` (cursor + `--full`); client-side filter
+  in `collectors/base.passes_cursor`; per-collector `SUPPORTS_INCREMENTAL`.
+
+New files (not yet built):
 - `digest.py` — daily digest CLI
-- `cron/collect_weekly.sh` — cron wrapper
+- `cron/collect_weekly.sh` — cron wrapper (calls `collect.py`; incremental by default)
 - `cron/digest_daily.sh` — cron wrapper
 
 Cron setup (Ubuntu Server):
