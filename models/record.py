@@ -131,6 +131,64 @@ APPLICATION_STATUS = frozenset(
     }
 )
 
+# --- Activity log vocabulary (Phase 3 tracker, job_radar_SPEC §7.4) ---
+# The Job Tracker keeps workflow state in an append-only event log
+# (corpus/activity_log.jsonl), NOT on ApplicationRecord, so the pure scorer can
+# regenerate scored records without wiping human state (see CLAUDE.md deviation
+# 23 + job_radar_TRACKER_PLAN.md model C). These are vocabulary constants only —
+# they do not touch any record dataclass and do not bump SCHEMA_VERSION.
+ACTIVITY_LOG_VERSION = 1
+
+# Event kinds in the activity log.
+#  status  — value is an APPLICATION_STATUS the human moved the job to.
+#  outcome — value is a terminal OUTCOME (job_radar_SPEC §7.3).
+#  note    — value is null; the comment text lives in ``notes``.
+ACTIVITY_EVENT = frozenset({"status", "outcome", "note"})
+
+# Terminal outcomes (job_radar_SPEC §7.3). Derived from the log at read time;
+# never persisted on ApplicationRecord (model C / Log-only — TRACKER_PLAN fork).
+OUTCOME = frozenset(
+    {
+        "rejected_pre_screen",
+        "rejected_post_screen",
+        "rejected_interview",
+        "rejected_final",
+        "offer_declined",
+        "offer_accepted",
+        "withdrew",
+    }
+)
+
+
+def validate_activity_event(event: dict) -> list[str]:
+    """Return a list of validation error strings for one activity-log event.
+
+    Vocabulary check only — the tracker enforces transition *order* loosely
+    (warn, never block); this guards the closed enums and required fields so a
+    malformed line never enters the append-only log.
+    """
+    errors: list[str] = []
+    for name in ("ts", "job_id"):
+        value = event.get(name)
+        if not isinstance(value, str) or not value:
+            errors.append(f"{name}: must be a non-empty string")
+    if not isinstance(event.get("notes", ""), str):
+        errors.append("notes: must be a string")
+
+    kind = event.get("event")
+    if kind not in ACTIVITY_EVENT:
+        errors.append(f"event: {kind!r} not in {sorted(ACTIVITY_EVENT)}")
+        return errors
+
+    value = event.get("value")
+    if kind == "status":
+        _check_enum(errors, "value", value, APPLICATION_STATUS)
+    elif kind == "outcome":
+        _check_enum(errors, "value", value, OUTCOME)
+    elif kind == "note" and value is not None:
+        errors.append("value: must be null for a note event")
+    return errors
+
 ROLE_TYPE_MAX = 3
 
 # Field groupings used for envelope (de)serialisation.

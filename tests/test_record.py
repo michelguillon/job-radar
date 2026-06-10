@@ -11,12 +11,15 @@ from pathlib import Path
 import pytest
 
 from models.record import (
+    ACTIVITY_EVENT,
     JDRECORD_SCHEMA_VERSION,
+    OUTCOME,
     SCHEMA_VERSION,
     ApplicationRecord,
     JDRecord,
     SchemaVersionError,
     validate,
+    validate_activity_event,
     validate_application_record,
 )
 
@@ -261,3 +264,54 @@ def test_application_record_known_bad_values_fail(field, value, needle):
     setattr(rec, field, value)
     errors = validate_application_record(rec)
     assert any(needle in e for e in errors), f"expected error on {field}, got {errors}"
+
+
+# --- activity-log event validation (Phase 3 tracker, §7.4) ---------------------
+
+
+def _status_event(**over) -> dict:
+    event = {
+        "v": 1,
+        "ts": "2026-06-10T09:00:00Z",
+        "job_id": "sha256:abc",
+        "event": "status",
+        "value": "applied",
+        "notes": "",
+    }
+    event.update(over)
+    return event
+
+
+def test_outcome_and_activity_event_vocab_are_closed():
+    assert "rejected_post_screen" in OUTCOME
+    assert ACTIVITY_EVENT == {"status", "outcome", "note"}
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        _status_event(),
+        _status_event(value="interviewing", notes="R1 booked"),
+        _status_event(event="outcome", value="rejected_interview"),
+        _status_event(event="note", value=None, notes="recruiter emailed"),
+    ],
+)
+def test_valid_activity_events_pass(event):
+    assert validate_activity_event(event) == []
+
+
+@pytest.mark.parametrize(
+    "event,needle",
+    [
+        (_status_event(value="amazing"), "value"),          # not an APPLICATION_STATUS
+        (_status_event(event="outcome", value="rejected"), "value"),  # not an OUTCOME
+        (_status_event(event="promote"), "event"),          # unknown event kind
+        (_status_event(event="note", value="should be null"), "value"),
+        (_status_event(ts=""), "ts"),
+        (_status_event(job_id=None), "job_id"),
+        (_status_event(notes=5), "notes"),
+    ],
+)
+def test_bad_activity_events_fail(event, needle):
+    errors = validate_activity_event(event)
+    assert any(needle in e for e in errors), f"expected error on {needle}, got {errors}"
