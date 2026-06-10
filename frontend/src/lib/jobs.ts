@@ -10,6 +10,12 @@ export const FIT_LABELS = [
 export const STATUS_ORDER = [
   "new", "review", "shortlisted", "applied", "interviewing", "offer", "rejected", "archived",
 ];
+// Pipeline lane order: most-progressed/active stages on top, the big untriaged "new"
+// backlog below them, terminal states at the bottom (the funnel STATUS_ORDER reads the
+// other way and is still used by the stats bar + filters).
+export const PIPELINE_ORDER = [
+  "offer", "interviewing", "applied", "shortlisted", "review", "new", "rejected", "archived",
+];
 export const LABEL_TEXT: Record<string, string> = {
   strong_fit: "strong", good_fit: "good", stretch: "stretch",
   interview_practice: "practice", income_bridge: "bridge", blocked_fit: "blocked",

@@ -1,5 +1,5 @@
 import type { Job } from "@/lib/api";
-import { LABEL_TEXT, STATUS_ORDER } from "@/lib/jobs";
+import { LABEL_TEXT, PIPELINE_ORDER } from "@/lib/jobs";
 
 // Ported from ui/app.js renderPipeline(): cards grouped by application_status in funnel
 // order, priority-sorted within each lane. Status changes happen in the detail panel
@@ -8,7 +8,7 @@ export function PipelineView({ rows, onOpen }: { rows: Job[]; onOpen: (job: Job)
   const byStatus: Record<string, Job[]> = {};
   for (const r of rows) (byStatus[r.application_status] ||= []).push(r);
 
-  const order = STATUS_ORDER.filter((s) => byStatus[s]);
+  const order = PIPELINE_ORDER.filter((s) => byStatus[s]);
   if (!order.length) return <p className="empty">No roles match the current filters.</p>;
 
   return (
