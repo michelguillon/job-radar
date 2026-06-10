@@ -127,6 +127,17 @@ def test_system_prompt_mentions_ats_metadata_block():
     assert "ATS METADATA" in label.build_system_prompt()
 
 
+def test_system_prompt_has_role_domain_disambiguation():
+    p = label.build_system_prompt()
+    assert "Role and domain disambiguation" in p
+    # Product Marketing -> GTM, not Product
+    assert "Product Marketing" in p and 'NOT "Product"' in p
+    # post-sales / CSM is not AI Delivery
+    assert 'NOT "AI Delivery"' in p and "Customer Success" in p
+    # no Enterprise Software default; empty-list fallback for domain
+    assert "Do NOT use it as a default" in p and "empty list []" in p
+
+
 # --- build_user_content (metadata injection) ---
 
 

@@ -694,6 +694,18 @@ Survivors from §5.8 carry only `raw_html` (`raw_text=""`). Before labelling:
   **`[ATS METADATA]`** block (`label.build_user_content`, `label.py --meta`) —
   authoritative context for title/location, **never** merged into `raw_text`.
 
+**Role/domain disambiguation (added to the prompt to fix Known Limitation F).**
+`build_system_prompt` now instructs: Product Marketing / Growth / Demand Generation
+→ `GTM` (not `Product`); Customer Success / Account Management / post-sales are not
+`AI Delivery`; and **no "Enterprise Software" default** — return `domain: []` when
+no vocabulary domain clearly applies (`domain` is a list; it has no `not_stated`
+value). Measured on a re-label of the 44 production + 13 calibration records, scored
+through the unchanged scorer: "Enterprise Software" in `domain` fell **27→10** (prod)
+and **6→1** (calibration), both Product-Marketing roles left `strong_fit`, OneOcean
+dropped `strong_fit`→`good_fit`, and **no calibration negative flipped positive**.
+The calibration baseline is kept as the locked regression fixture (re-labels go to
+new comparison files). See LEARNINGS 21–22.
+
 `scripts/build_score_subset.py` builds a representative subset for a run (selection
 rules documented in the script). Flow: subset → `label.py --input … --meta …`
 (Batch, Tier 4) → `validate.py` → `score.py` → `scripts/score_report.py`.

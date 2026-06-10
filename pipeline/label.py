@@ -107,6 +107,18 @@ def build_system_prompt() -> str:
         lines.append(f"  {field} ({card}): {', '.join(_sorted(allowed))}")
     lines += [
         "",
+        "Role and domain disambiguation (avoid over-tagging):",
+        "  - Product Marketing, Growth Marketing, and Demand Generation roles are \"GTM\",",
+        "    NOT \"Product\". \"Product\" role_type is reserved for roles whose primary",
+        "    responsibility is product strategy, roadmap, and delivery.",
+        "  - \"AI Delivery\" is for roles that architect, build, and deploy AI solutions in",
+        "    production. Customer Success, Account Management, and post-sales roles are",
+        "    NOT \"AI Delivery\".",
+        "  - \"Enterprise Software\" is a specific domain for B2B software companies selling",
+        "    to enterprises. Do NOT use it as a default when no other domain clearly",
+        "    matches. If no vocabulary domain clearly applies, return an empty list []",
+        "    rather than padding with \"Enterprise Software\".",
+        "",
         "Free-form fields:",
         "  years_experience_required (string): e.g. '10+', '5-7', or 'not_stated'.",
         "  location (string): as stated, or 'not_stated'.",

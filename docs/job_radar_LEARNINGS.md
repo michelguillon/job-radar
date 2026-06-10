@@ -1018,5 +1018,48 @@ keywords themselves.
 
 ---
 
+### Learning 22 — Fixing extraction beat tuning the scorer; the deflation exposed a masked gap
+
+#### Learning
+
+Known Limitation F (Learning 20) was fixed at its source: three disambiguation rules
+added to the extraction prompt — Product Marketing → `GTM` (not `Product`); post-sales
+/ Customer Success is not `AI Delivery`; and **no "Enterprise Software" default** (an
+empty `domain: []` when nothing in the vocabulary clearly applies, since `domain` is a
+list with no `not_stated` value). The 44 production + 13 calibration records were
+re-labelled into **new** files (the calibration baseline kept as the locked
+regression fixture) and the old vs new extractions scored through the **unchanged**
+scorer, so every label delta is an extraction effect. Result: "Enterprise Software"
+in `domain` fell **27→10** (prod) and **6→1** (calibration); both Product-Marketing
+roles left `strong_fit`; OneOcean dropped `strong_fit`→`good_fit` as its
+Enterprise-Software tag vanished (the exact Learning-19 residual, fixed); the
+Customer Success *Engineer* moved off `AI Delivery`; and — critically — **no
+calibration negative flipped positive** (regression integrity held).
+
+#### Surprise
+
+De-inflating the domain didn't just correct over-scores — it **exposed a gap the
+over-tag had been masking**: a cluster of GTM / partner-enablement / Chief-of-Staff
+roles collapsed `good_fit`→`interview_practice`, because they score 0 on the role
+dimension (`GTM` is not a `target_role`) and had been propped up entirely by the
+spurious Enterprise-Software domain. The fix didn't create the problem; it revealed
+it. (That cluster became the watchlist, Learning 21 — not a scorer change.) A second
+surprise: re-labelling is **non-deterministic** — one Figma "Solutions Consultant"
+flipped `strong_fit`→`blocked_fit` purely because the model tagged `technical_depth`
+differently this run, nothing to do with the prompt change.
+
+#### Reusable Pattern
+
+The cheapest, highest-leverage quality fix in an extract→score pipeline is almost
+always **upstream, in the extraction prompt** — not in the scoring rules. But two
+disciplines make it safe: (1) re-label into **new** files and diff old-vs-new through
+the **unchanged** scorer, so you measure the extraction effect in isolation and never
+overwrite a locked regression fixture; (2) expect collateral — fixing an over-tag can
+**unmask latent gaps** elsewhere (here, a missing target_role) and surface
+run-to-run model variance. Read the full before/after diff and triage which deltas
+are the intended fix, which are newly-exposed structure, and which are just noise.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

@@ -147,11 +147,15 @@ thing tests actually run against.
     separate **`[ATS METADATA]`** block (`label.build_user_content`, `label.py
     --meta`), never merged into `raw_text`. `scripts/build_score_subset.py` builds
     a representative run subset; `scripts/score_report.py` reports a scoring run.
-21. (Phase 3) **Known Limitation F is now an observed production fact**, not just a
-    risk: a Product-Marketing JD was extracted as `role_type=Product` and scored
-    `strong_fit`; "Enterprise Software" is tagged on almost every record. The fix
-    is **extraction-prompt/corpus** work (the next real lever), **not** a scorer
-    change — the scorer stays locked until the 100+-job structured review.
+21. (Phase 3) **Known Limitation F — observed in production, then fixed in the
+    extraction prompt** (scorer untouched). `build_system_prompt` gained role/domain
+    disambiguation: Product Marketing → `GTM` (not `Product`); post-sales/Customer
+    Success is not `AI Delivery`; **no "Enterprise Software" default** (`domain: []`
+    when nothing applies — `domain` is a list, no `not_stated`). Re-label + diff
+    through the unchanged scorer: Enterprise Software in `domain` 27→10 (prod) / 6→1
+    (calibration), Product-Marketing roles left `strong_fit`, OneOcean de-inflated,
+    **no calibration negative flipped positive**. Calibration baseline kept locked
+    (re-labels → new comparison files). Scorer stays locked until the 100+-job review.
 22. (Phase 3) **GTM/partner observation watchlist** (SPEC §5.10) — `prefilter.py`
     diverts location-workable GTM/partner-class roles (`watchlist_signal` + role
     bucket `gtm_partner`/`off_target`) out of the labelling/scoring stream into an
