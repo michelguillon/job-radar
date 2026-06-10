@@ -2,7 +2,7 @@
 
 import json
 
-import tier2_review as t2
+import cli.tier2_review as t2
 from collectors.base import build_raw_record
 from models.record import _EXTRACTION_FIELDS, JDRecord
 

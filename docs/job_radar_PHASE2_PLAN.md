@@ -151,9 +151,9 @@ in the score itself. Filter table per spec §6.3.
 
 ## score.py CLI
 ```bash
-python score.py --input "corpus/validated/validated_*.jsonl"
-python score.py --input "corpus/validated/validated_*.jsonl" --min-fit 6
-python score.py --input "corpus/validated/validated_*.jsonl" --mode active
+python -m cli.score --input "corpus/validated/validated_*.jsonl"
+python -m cli.score --input "corpus/validated/validated_*.jsonl" --min-fit 6
+python -m cli.score --input "corpus/validated/validated_*.jsonl" --mode active
 ```
 - Default `--input`: `corpus/validated/validated_*.jsonl` (spec §6.8's
   `corpus/labelled/validated_*` path is STALE — Step 8 writes to

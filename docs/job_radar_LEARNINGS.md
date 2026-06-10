@@ -1209,5 +1209,34 @@ updates is cheap; missing them is not.
 
 ---
 
+### Learning 26 — Moving a script into a package changes how it must be run (`-m`), not just where it lives
+
+#### Context
+
+The 10 pipeline-stage CLIs sat in the repo root and were run as `python score.py`.
+They import repo-root packages (`from scoring.scorer import score`,
+`from models.record import …`). Moving them into a `cli/` package looked purely
+cosmetic — but `python cli/score.py` then **fails to import** those packages.
+
+#### What we did
+
+Ran them as modules instead: `python -m cli.score`. The full suite (292) stayed
+green; the only code change was test imports (`import score` → `import cli.score`).
+
+#### Reusable Pattern
+
+`python path/to/script.py` puts **the script's own directory** on `sys.path[0]`,
+not the directory you launched from — so a script that imports sibling top-level
+packages works in the repo root but breaks the moment it moves into a subdir.
+`python -m pkg.script`, run from the repo root, puts the **repo root** on the path
+(and keeps CWD there, so relative data paths like `corpus/…` still resolve). So
+"organize the scripts into a folder" is really two changes: the move *and* the
+invocation switch to `-m` (plus an `__init__.py` to make the folder a package).
+Worth catching before it bites in a cron wrapper or a teammate's muscle memory —
+and it pairs cleanly with any existing `python -m scripts.X` convention, so adopt
+the same form rather than inventing a `sys.path` hack.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

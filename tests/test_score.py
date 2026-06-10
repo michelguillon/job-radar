@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-import score as cli
+import cli.score as cli
 from models.record import ApplicationRecord, validate_application_record
 from tests.factories import make_record
 

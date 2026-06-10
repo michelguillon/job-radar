@@ -8,5 +8,5 @@ services:
     volumes:
       - .:/app
     working_dir: /app
-    # Override with: docker compose run --rm job-radar python collect.py ...
+    # Override with: docker compose run --rm job-radar python -m cli.collect ...
     command: ["python", "--version"]

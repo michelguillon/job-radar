@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-import track
+import cli.track as track
 from models.record import SCHEMA_VERSION, ApplicationRecord
 
 from tests.factories import make_record

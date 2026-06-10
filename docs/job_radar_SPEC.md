@@ -236,14 +236,17 @@ A CLI pipeline: collect → clean → dedupe → label → validate → export.
 Each phase produces a durable JSONL checkpoint. The pipeline is
 resumable at any point.
 
+Stage CLIs live in `cli/` (run as `python -m cli.<stage>`); one-off tools in
+`scripts/` (`python -m scripts.<name>`).
+
 ```
-collect.py    → corpus/raw/raw_{timestamp}.jsonl
-dedupe.py     → corpus/raw/clean_{timestamp}.jsonl
-label.py      → corpus/labelled/labelled_{timestamp}.jsonl
-validate.py   → corpus/labelled/validated_{timestamp}.jsonl
-              → corpus/labelled/failures_{timestamp}.jsonl
-export.py     → corpus/finetune_export/export_{timestamp}.jsonl
-              → corpus/stats.json
+cli/collect.py    → corpus/raw/raw_{timestamp}.jsonl
+cli/dedupe.py     → corpus/raw/clean_{timestamp}.jsonl
+cli/label.py      → corpus/labelled/labelled_{timestamp}.jsonl
+cli/validate.py   → corpus/labelled/validated_{timestamp}.jsonl
+                  → corpus/labelled/failures_{timestamp}.jsonl
+cli/export.py     → corpus/finetune_export/export_{timestamp}.jsonl
+                  → corpus/stats.json
 ```
 
 ### 5.2 — Phase 1 complete (Steps 0–9)
@@ -296,10 +299,10 @@ JSONL looks fine — and only surfaces in cleaned output downstream.
 
 **CLI:**
 ```bash
-python collect.py --source greenhouse
-python collect.py --source greenhouse --company anthropic
-python collect.py --source all
-python collect.py --dry-run
+python -m cli.collect --source greenhouse
+python -m cli.collect --source greenhouse --company anthropic
+python -m cli.collect --source all
+python -m cli.collect --dry-run
 ```
 
 Output: appends to `corpus/raw/raw_{YYYYMMDD}.jsonl`
@@ -400,7 +403,7 @@ boards:
 > deferred (see Learning 4 already present — append a build note
 > confirming the finding was validated during Step 5).
 
-*Verification:* `python collect.py --source vc_boards` runs without
+*Verification:* `python -m cli.collect --source vc_boards` runs without
 error, logs all boards as skipped with reasons, exits cleanly.
 
 ---
@@ -410,7 +413,7 @@ error, logs all boards as skipped with reasons, exits cleanly.
 Build `tier2_review.py` CLI for the interactive deep-review workflow.
 
 ```bash
-python tier2_review.py --input corpus/raw/clean_*.jsonl
+python -m cli.tier2_review --input corpus/raw/clean_*.jsonl
 ```
 
 For each unlabelled record:
@@ -481,7 +484,7 @@ writes:
 
 **`stats.py`:** Prints corpus summary to terminal. Also supports:
 ```bash
-python stats.py --export-index    # writes corpus/index.json for Phase 5 UI
+python -m cli.stats --export-index    # writes corpus/index.json for Phase 5 UI
 ```
 
 `corpus/index.json` format — flat array of denormalised records for
@@ -1006,9 +1009,9 @@ New files:
 - `score.py` — CLI entry point
 
 ```bash
-python score.py --input corpus/labelled/validated_*.jsonl
-python score.py --input corpus/labelled/validated_*.jsonl --min-fit 6
-python score.py --input corpus/labelled/validated_*.jsonl --mode active
+python -m cli.score --input corpus/labelled/validated_*.jsonl
+python -m cli.score --input corpus/labelled/validated_*.jsonl --min-fit 6
+python -m cli.score --input corpus/labelled/validated_*.jsonl --mode active
 ```
 
 > **As-built note:** the default input is `corpus/validated/validated_*.jsonl`
@@ -1164,13 +1167,13 @@ is accepted behaviour, not a bug.
 
 **CLI:**
 ```bash
-python track.py --job-id sha256:abc --status applied
-python track.py --job-id sha256:abc --status interviewing --notes "First round booked"
-python track.py --job-id sha256:abc --outcome rejected_post_screen
-python track.py --job-id sha256:abc --title "Solutions Engineer"   # display override
-python track.py --job-id sha256:abc --notes "recruiter emailed"    # pure note
-python track.py list --status shortlisted
-python track.py list --min-fit 7 --location-workable yes
+python -m cli.track --job-id sha256:abc --status applied
+python -m cli.track --job-id sha256:abc --status interviewing --notes "First round booked"
+python -m cli.track --job-id sha256:abc --outcome rejected_post_screen
+python -m cli.track --job-id sha256:abc --title "Solutions Engineer"   # display override
+python -m cli.track --job-id sha256:abc --notes "recruiter emailed"    # pure note
+python -m cli.track list --status shortlisted
+python -m cli.track list --min-fit 7 --location-workable yes
 ```
 One CLI call can record several events (e.g. `--status` + `--title`); they share a
 `ts` and `--notes` attaches to the first.
@@ -1292,7 +1295,7 @@ Serves Michel the job seeker, not Michel the data engineer.
 
 **Static index approach:**
 
-`python stats.py --export-index` generates `corpus/index.json` — a
+`python -m cli.stats --export-index` generates `corpus/index.json` — a
 flat denormalised array of all validated records. The UI reads this
 one file. No API, no database, no additional backend service.
 

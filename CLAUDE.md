@@ -38,6 +38,11 @@ thing tests actually run against.
 - **Extraction vs annotation boundary is strict** — Claude never
   populates annotation fields; human never populates extraction fields
 - **CLI writes, UI reads** — all state changes through CLI scripts only
+- **Stage CLIs live in `cli/`** — run as `python -m cli.<stage>` (e.g.
+  `python -m cli.score`, `python -m cli.track list`). NOT `python score.py`
+  (a moved script run by path can't import the repo-root packages). One-off
+  corpus tools live in `scripts/` (`python -m scripts.<name>`). `conftest.py`
+  stays at repo root.
 - **Definition of done (EVERY task)** — a change is not complete until the
   docs are current. This is not optional and not an afterthought:
   1. **`docs/job_radar_SPEC.md`** — if anything about the architecture,
@@ -204,6 +209,16 @@ thing tests actually run against.
     Cursors advance **only** on a full-source run (no `--company`) that returned ≥1
     job; a missing/unparseable per-job timestamp is **kept** (never silently drop a
     posting). Matrix + rationale: `collectors/CLAUDE.md`; mechanics: `SPEC §8.2`.
+25. (Housekeeping) **Stage CLIs moved from repo root into the `cli/` package**
+    (`git mv`, history preserved): `collect, dedupe, export, label, prefilter,
+    score, stats, tier2_review, track, validate`. Invocation changed from
+    `python <stage>.py` to **`python -m cli.<stage>`** — a script run by path
+    (`python cli/score.py`) puts `cli/` on `sys.path` and can't import the
+    repo-root packages, whereas `-m` from the repo root keeps the root importable
+    and CWD-relative corpus paths intact (same pattern as the existing
+    `scripts/` package). No code logic changed; test imports became
+    `import cli.<stage>`; `conftest.py` stays at root. Root now holds only
+    `conftest.py`.
 
 ---
 

@@ -1,6 +1,6 @@
 """Tests for the collect.py CLI: selection, routing, writing, and dry-run."""
 
-import collect
+import cli.collect as collect
 from collectors.base import CollectedJob, build_meta, build_raw_record
 
 

@@ -2,7 +2,7 @@
 
 import json
 
-import stats
+import cli.stats as stats
 from tests.factories import make_record
 
 

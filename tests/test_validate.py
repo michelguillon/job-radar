@@ -1,6 +1,6 @@
 """Tests for pipeline.validate and the validate.py CLI loader."""
 
-import validate as cli
+import cli.validate as cli
 from models.record import JDRECORD_SCHEMA_VERSION
 from pipeline.validate import validate_records
 from tests.factories import base_envelope, make_record

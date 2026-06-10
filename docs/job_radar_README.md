@@ -56,27 +56,27 @@ truth — all writes go through it.
 ```text
 Sources (Greenhouse / Lever / Ashby / VC Boards / Manual)
 ↓
-collect.py
+cli/collect.py
 ↓
 corpus/raw/ (raw JSONL)
 ↓
-dedupe.py (SHA-256 on normalised text)
+cli/dedupe.py (SHA-256 on normalised text)
 ↓
 corpus/raw/clean_* (deduplicated)
 ↓
-label.py (Claude Batch API)
+cli/label.py (Claude Batch API)
 ↓
 corpus/labelled/ (extraction schema applied)
 ↓
-validate.py
+cli/validate.py
 ↓
 corpus/labelled/validated_*
 ↓
-score.py (rule-based, candidate profile)
+cli/score.py (rule-based, candidate profile)
 ↓
 corpus/scored/ (fit + priority scores)
 ↓
-stats.py --export-index
+cli/stats.py --export-index
 ↓
 corpus/index.json
 ↓
@@ -119,8 +119,8 @@ cp .env.example .env
 # Add ANTHROPIC_API_KEY to .env
 
 docker compose build
-docker compose run --rm job-radar python collect.py --dry-run --source greenhouse
-docker compose run --rm job-radar python stats.py
+docker compose run --rm job-radar python -m cli.collect --dry-run --source greenhouse
+docker compose run --rm job-radar python -m cli.stats
 ```
 
 **Phase 1 status check:**

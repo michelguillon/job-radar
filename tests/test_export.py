@@ -2,7 +2,7 @@
 
 import json
 
-import export
+import cli.export as export
 from collectors.base import build_raw_record
 from models.record import _EXTRACTION_FIELDS
 from tests.factories import make_record

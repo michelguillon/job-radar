@@ -1,7 +1,7 @@
 """Tests for the pre-label filter — pure screens (pipeline.prefilter) and the
 prefilter.py CLI run()/IO."""
 
-import prefilter
+import cli.prefilter as prefilter
 from collectors.base import build_meta, build_raw_record
 from pipeline.prefilter import (
     collapse_near_duplicates,
