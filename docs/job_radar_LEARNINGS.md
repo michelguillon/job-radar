@@ -1106,5 +1106,57 @@ log) — fixtures alone wouldn't have caught a wrong join path.
 
 ---
 
+### Learning 24 — A spare-capacity event log absorbs the next feature for free; and a content-hash join makes collection-method variants distinct on purpose
+
+#### Context
+
+Two things surfaced the day after `track.py` shipped, both downstream of scoring
+the original 10 hand-authored records and joining them into the tracker.
+
+1. **No title to show.** The schema-locked `JDRecord` (v1.2) has no `title` field —
+   that signal lives in the metadata sidecar, keyed by `source_url`. But the legacy
+   manual records carry `source_url="unknown"`, so the sidecar both *misses* them
+   and would *collide* eight-to-one if it tried to key them. The tracker fell back
+   to the first line of `raw_text`, which for hand-pasted JD bodies is prose
+   ("About Airwallex", "Job Responsibilities"), not a title.
+2. **The same real job, twice.** Several of the 10 (Figma, Mistral, Databricks)
+   are the *same roles* already present in the 44-record collected set. They did
+   **not** dedupe — a hand-authored body and an ATS-collected body hash to different
+   `job_id`s. Worse, they scored differently: the Mistral "AI Deployment Strategist –
+   UK" was `strong_fit` hand-labelled but `blocked_fit` auto-labelled (the capability
+   blocker fired on the generous Tier-4 extraction, Known Limit F, not the human one).
+
+#### What we did
+
+For (1): added a **`title` event** to the *existing* append-only activity log rather
+than a new store. The projection already folded events per `job_id`; one more event
+kind and a `title_override` field gave a CLI-set, UI-readable display title, with
+resolution **override → sidecar → raw_text first line → job_id**. Zero new
+machinery — the model-C log (Learning 23) had spare capacity. For (2): treated the
+duplication as a **curation** decision, not a code problem — removed the manual
+Mistral from the (regenerable) validated+scored set, keeping the collected record as
+canonical. The hand-authored fixtures stay in `corpus/manual/` untouched.
+
+#### Reusable Pattern
+
+**An append-only-event-log-projected-on-read design has spare capacity: the next
+per-entity, mutable, latest-wins attribute is a new `event` kind plus one projected
+field — not a new table.** Title override here, but the same hole fits a priority
+pin, a snooze-until date, a "hidden" flag. Resist spinning up a parallel store each
+time; you already have the mechanism, the validator, and the audit trail. Watch one
+boundary: keep *presentation* overrides clearly non-scoring (the `title` event never
+touches the scorer) so the log can carry human annotation without leaking into the
+pure pipeline. Second, **a content-hash join key is a deliberate identity choice
+with consequences worth stating**: it makes the *same real-world job* a *different
+record* when its text differs (collected vs hand-authored vs a later revision). That
+is correct for provenance and for not silently merging a generous auto-extraction
+with a careful human one — but it means cross-source dedup is a **curation** step you
+own, not something identity gives you for free. The score gap between the two Mistral
+copies was itself the most useful artifact: a free, head-to-head measurement of
+extraction quality (Known Limit F) that only existed *because* the join kept them
+apart.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*
