@@ -56,6 +56,19 @@ def settings(tmp_path) -> Settings:
     )
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_cookie_env(monkeypatch):
+    """Keep the suite independent of the ambient environment.
+
+    The tests drive the unlock cookie over the TestClient's plain-http transport, which
+    (like a browser) refuses to store a ``Secure`` cookie sent over http. A production
+    ``.env`` with ``COOKIE_SECURE=true`` loaded into the container (e.g. ``docker compose
+    run job-radar pytest`` on the server) would therefore drop the cookie and 403 every
+    gated write. Pin it off so the unlock flow is exercised regardless of how pytest is run.
+    """
+    monkeypatch.delenv("COOKIE_SECURE", raising=False)
+
+
 @pytest.fixture
 def client(settings):
     app.dependency_overrides[get_settings] = lambda: settings

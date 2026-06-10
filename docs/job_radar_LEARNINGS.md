@@ -1636,5 +1636,43 @@ architecture, not the Nth symptom.
 
 ---
 
+### Phase 6 §10.9 — prod `.env` contaminating the test suite (COOKIE_SECURE)
+
+**Context:** Running the deploy smoke test on the server — `docker compose run --rm
+job-radar python -m pytest -q` — failed 14 of the `tests/test_api.py` cases (all the
+unlock-gated write paths: status/note/title/outcome/annotations + the live overlay), while
+340 passed. The same suite is green on the dev box.
+
+#### Surprise / root cause
+
+The `job-radar` compose service loads `.env` via `env_file`. The deploy `.env` sets
+`COOKIE_SECURE=true` (correct for prod — the browser↔proxy leg is HTTPS). But pytest inherits
+that env, so the `/api/unlock` endpoint issues the `jr_write` capability cookie with the
+`Secure` flag — and the FastAPI/Starlette `TestClient` talks to `http://testserver`, so (like
+a browser) it **refuses to store a Secure cookie over plain http**. Every subsequent gated
+write arrives cookie-less → 403. The tests that *don't* depend on a persisted cookie
+(`capabilities_locked`, `unlock_wrong_key_401`) passed, which is the tell: it's a transport/
+cookie issue, not a logic regression. **The deployed app is correct** — in prod the cookie
+*should* be Secure and the real browser uses HTTPS.
+
+#### Fix
+
+An `autouse` fixture in `tests/test_api.py` that `monkeypatch.delenv("COOKIE_SECURE")`, making
+the suite hermetic regardless of the ambient `.env`. Verified by forcing `COOKIE_SECURE=true`
+into the container and confirming all 27 api tests still pass. Also corrected the runbook: the
+pytest smoke step now overrides `-e COOKIE_SECURE=` (belt-and-braces for servers that haven't
+pulled the fixture yet), and the load-bearing corpus smoke checks are `cli.stats` + `cli.track
+list`, not pytest.
+
+#### Reusable Pattern
+
+A test that exercises a security feature must **pin the env that toggles that feature**, not
+inherit it. Secure-cookie/HTTPS-only behaviour in particular is invisible until something runs
+the suite in a prod-shaped environment (a server `.env`, CI secrets). Pin such flags off in an
+autouse fixture so "how was pytest invoked" can never change the result — and don't make a
+green test suite a *server* deployment gate when the same artifact already ran green in CI/dev.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*
