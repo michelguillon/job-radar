@@ -18,3 +18,9 @@ corpus/**/*
 # explicitly for clarity): incremental collection + daily digest.
 corpus/.last_collected_*
 corpus/.digest_last_run
+
+# Personal-data planning doc — real role URLs, job IDs, server paths, corpus
+# migration details. Lives locally + travels by scp like the corpus; never commit
+# (the repo is a public portfolio). The deploy runbook is self-contained and does
+# not depend on this file being present on the server.
+docs/BACKLOG_COMPANY_UNIVERSE.md
