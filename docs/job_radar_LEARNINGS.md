@@ -1536,5 +1536,105 @@ states) to adding a new toggle when the semantics line up.
 
 ---
 
+### Phase 6 §10.9 — Caddy-fronted prod deploy (mirroring cv-tailor)
+
+**Context:** Prepare job-radar for `job-radar.michel-portfolio.co.uk` behind the
+shared Caddy + Cloudflare home-server stack, reusing the cv-tailor pattern (nginx
+frontend = single entry point, FastAPI api internal-only). No live infra touched —
+repo overlay + a server runbook only.
+
+#### Decisions
+
+1. **Reused the existing `Dockerfile.prod` + `nginx.conf` as-is, plus a new
+   `docker-compose.prod.yml` overlay** — no app restructure. The overlay sets
+   `container_name`s, `ports: !override []`, joins the frontend to the external
+   `caddy` network, drops `--reload`, and `restart: unless-stopped`. Validated with
+   `docker compose ... config` (no host ports survive; frontend on `caddy`+`default`)
+   and `... build api frontend` (the prod bundle compiles).
+2. **The `/api` nginx upstream had to change from the bare `api` alias to the
+   `job-radar-api` container_name** (PLAYBOOK gotcha #6). `api` is an extremely
+   common service name; on the shared `caddy` network two apps with an `api` alias
+   would give Docker DNS multiple A records and flaky cross-app bleed. Container
+   names stay globally unique. The base dev path is unaffected (dev uses the Vite
+   server, not nginx).
+
+#### Surprises
+
+1. **The served surface spends zero API budget — the exposure model is the
+   *opposite* of cv-tailor's.** cv-tailor's risk is per-run spend; job-radar's api
+   makes no model calls at all. The real risk is that public `GET /api/index` leaks
+   the entire personal pipeline incl. private notes. So the cost section became an
+   *exposure* section: Cloudflare Access (email-gate), not a spend cap.
+2. **`index.json` is the only derived artefact, and it's cheap to rebuild — but the
+   `scored/` records are load-bearing for *writes*, not just the index.** A write
+   404s unless the `job_id` is in `corpus/scored/`. So seeding can't just ship
+   `index.json`; the scored records must travel too. The clean split: scp the
+   source-of-truth JSONL (scored/validated/meta/activity_log/annotations/stats),
+   regenerate `index.json` on the server via the pure-join `cli.stats --export-index`
+   (no Batch spend).
+
+#### Reusable Pattern
+
+When adding an app to a shared reverse-proxy network, the overlay is mechanical
+(container_names + `!override []` ports + external net + no-reload + restart), but
+**audit every intra-stack hostname for service-alias collisions** — anything a
+sidecar resolves by bare service name (`api`, `frontend`, `backend`) must become a
+container_name once it joins the shared network. And **map the data dependencies by
+*operation*, not just "what the homepage reads"**: the read path and the write path
+can need different files (here, index vs scored), and only the irreplaceable/expensive
+ones must be copied — the cheap joins regenerate in place.
+
+---
+
+### Learning 33 — Porting global CSS into a utility-class app is a silent-collision trap; the bug isn't the symptom, it's the architecture
+
+#### Context
+
+The Browse table's headers stopped lining up with their columns. The proximate cause took a
+while to find: the `<table>` had `class="grid"`, and **Tailwind ships a `.grid` utility
+(`display:grid`)**. So the table became a CSS grid container, `thead`/`tbody` became grid
+items, and the header row sized itself independently of the body — headers bunched left,
+body spread right. The deeper cause: M2 had copied the Phase 5 hand-written global
+stylesheet (`.grid`/`.pill`/`.badge`/`.drawer`/…) wholesale into a Tailwind app. Global
+class names live in one namespace shared with every Tailwind utility, and the collisions
+fail *silently* — no error, just broken layout. We'd already burned several rounds on
+CSS whack-a-mole from this same root.
+
+#### What we did
+
+Stopped patching CSS and rearchitected the styling to how the stack is meant to work:
+Tailwind utility classes directly on the JSX + the shadcn `components/ui/` primitives, with
+**dynamic** value→colour styling moved into JS lookup maps (`src/lib/ui.ts` — a `fit_label`
+or status string returns a full Tailwind class string). Deleted the entire global semantic
+stylesheet; `index.css` now holds only `@tailwind` + the design tokens + a body reset. The
+Browse table uses shadcn `ui/table.tsx` (`table-fixed` + a `<colgroup>` to pin columns).
+Every view (App, StatBar, Sidebar, BrowseView, PipelineView, DetailPanel) was converted.
+The design and all behaviour are unchanged; 354 tests still pass (frontend-only); verified
+the table's header and cell x-positions are now identical.
+
+#### Surprises
+
+1. **The maddening part was that an explicit `.grid thead { display: table-header-group }`
+   with `!important` *didn't* fix it.** Because the table itself was `display:grid`, fixing
+   the thead was meaningless — the children were already grid items. The tell was
+   `getComputedStyle(table).display === "grid"`, not anything about thead. Diagnose the
+   container, not the child.
+2. **A class name that "describes the thing" is exactly the danger.** `.grid` for a data
+   grid, `.table`, `.card`, `.hidden`, `.flex` — the most natural semantic names are all
+   taken by Tailwind utilities. In a utility-class app there is no safe global namespace;
+   the only safe move is to not have one.
+
+#### Reusable Pattern
+
+Don't mix a global semantic stylesheet with a utility-class framework — the namespaces
+overlap and collisions are silent. Style with the framework's utilities on the elements,
+push dynamic styling into JS maps that return class strings (collision-proof and
+co-located with the logic), and keep the global stylesheet to resets + tokens only. When a
+layout bug resists CSS patches, check the computed `display` of the *container* before
+theorising about the children — and treat a recurring bug class as a signal to fix the
+architecture, not the Nth symptom.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

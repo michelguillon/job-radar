@@ -1766,13 +1766,43 @@ Build in this order. Each step tested before the next starts.
 
 ---
 
-### 10.9 — Deployment (TODO)
+### 10.9 — Deployment (Caddy-fronted, M720q)
 
-**⚠️ TODO: public deployment to M720q follows Michel's established flow.**
+Public URL: **`https://job-radar.michel-portfolio.co.uk`** (Cloudflare tunnel →
+`localhost:80` → Caddy → the per-app entry container). Same pattern as cv-tailor
+and the RFI app; the server runbook is `C:\tmp\caddy-stack\DEPLOY-job-radar.md`
+(mirrors `DEPLOY-cv-tailor.md`).
 
-Same pattern as cv-tailor and RFI app. Not specced here — add as a named
-next step after Phase 6 is verified locally. Michel has an established
-flow for this.
+**Prod overlay — `docker-compose.prod.yml`** (layered on `docker-compose.yml`):
+
+- `frontend` becomes the **nginx prod image** (`Dockerfile.prod`, multi-stage
+  Node build → nginx-alpine on `:80`) and is the **single Caddy entry point**,
+  reached by `container_name: job-radar-frontend` over the shared external
+  `caddy` network (`reverse_proxy job-radar-frontend:80`).
+- `api` drops `--reload`, stays on the per-app `default` network only
+  (`container_name: job-radar-api`, never published to the host).
+- Host ports dropped with `ports: !override []` (Compose concatenates `ports:`
+  across overlays — a bare `[]` would not remove the dev bindings; PLAYBOOK
+  gotcha #3); both `restart: unless-stopped`.
+- `frontend/nginx.conf` proxies `/api/*` → **`job-radar-api:8000` by
+  container_name**, not the bare `api` service alias — aliases collide across
+  apps on the shared `caddy` network (PLAYBOOK gotcha #6).
+- Bring up: `docker compose -f docker-compose.yml -f docker-compose.prod.yml
+  --profile ui up -d --build api frontend` (both are `profiles: ["ui"]`; naming
+  them avoids starting the throwaway `job-radar` CLI-runner).
+
+**The served surface spends no API budget** — the api is a thin JSONL read/write
+layer, no Anthropic calls per request. The exposure is **personal data**: the
+public `GET /api/index` reveals the whole pipeline incl. private notes, so the
+runbook §7 recommends **Cloudflare Access** (email-gated). Writes are fail-closed
+(`JR_WRITE_KEY` unset → all writes 403).
+
+**Data seeding:** `corpus/` is gitignored, so records ship out-of-band (scp the
+`scored/`, `validated/`, `raw/meta_*`, `activity_log.jsonl`, `annotations.jsonl`,
+`stats.json`) and `corpus/index.json` is **regenerated on the server** by the
+pure-join `python -m cli.stats --export-index` (no API cost). `.env` keys:
+`JR_WRITE_KEY` (owner writes; blank = read-only), `COOKIE_SECURE=true` (HTTPS
+leg). `ANTHROPIC_API_KEY` is pipeline-only, not needed to serve.
 
 ---
 
@@ -1826,6 +1856,17 @@ CLAUDE.md deviations 32–34.
    lane, filter, default-hide) even if its logged status lane was never moved
    (e.g. a CLI `--outcome` write) — a read-time derivation, the underlying log is
    untouched. So "rejected" never displays as "applied".
+
+6. **Styling rearchitected to Tailwind utilities + shadcn primitives (no global CSS).**
+   M2 had ported the Phase 5 hand-written global stylesheet (`.grid`/`.pill`/`.badge`/…)
+   into the Tailwind app, where global class names collide silently with Tailwind
+   utilities — `.grid` (= `display:grid`) turned the Browse `<table>` into a grid
+   container and detached the header row from its columns. Every view was restyled with
+   Tailwind utility classes; dynamic value→colour styling moved to JS lookup maps
+   (`frontend/src/lib/ui.ts`); the Browse table uses shadcn `ui/table.tsx` primitives
+   (`table-fixed` + `<colgroup>` to pin columns); `index.css` keeps only `@tailwind` +
+   tokens + a body reset. UI/UX unchanged, the whole class of class-name-collision bugs
+   eliminated. (Deviation 35.)
 
 ---
 
