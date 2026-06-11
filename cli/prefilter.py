@@ -26,6 +26,7 @@ Writes: corpus/filtered/filtered_{date}.jsonl     (survivors for labelling)
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import logging
 import os
@@ -46,11 +47,45 @@ RAW_DIR = "corpus/raw"
 FILTERED_DIR = "corpus/filtered"
 WATCHLIST_DIR = "corpus/watchlist"
 
+# Already-processed corpus: a job whose content hash is in either of these has
+# already cost a Batch-labelling call (and likely a score), so it must not re-enter
+# the paid pipeline on a full re-collect. job_id (scored) and id (labelled) are the
+# same sha256 content hash that pipeline.dedupe computes.
+LABELLED_GLOB = "corpus/labelled/labelled_*.jsonl"
+SCORED_GLOB = "corpus/scored/scored_*.jsonl"
+
 
 def load_records(path: str) -> list[JDRecord]:
     """Load JDRecords from a raw JSONL file."""
     with open(path, encoding="utf-8") as fh:
         return [JDRecord.from_jsonl(line) for line in fh if line.strip()]
+
+
+def load_processed_hashes(
+    labelled_glob: str = LABELLED_GLOB, scored_glob: str = SCORED_GLOB
+) -> set[str]:
+    """Content hashes of every job already labelled or scored (cross-run dedupe key).
+
+    Reads the ``id`` of each labelled JDRecord and the ``job_id`` of each scored
+    ApplicationRecord — both the ``sha256:…`` content hash ``pipeline.dedupe`` assigns.
+    Missing files/dirs are fine (fresh deploy) → empty set → no exclusion.
+    """
+    seen: set[str] = set()
+    for path in sorted(glob.glob(labelled_glob)):
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                if line.strip():
+                    h = json.loads(line).get("id")
+                    if h:
+                        seen.add(h)
+    for path in sorted(glob.glob(scored_glob)):
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                if line.strip():
+                    h = json.loads(line).get("job_id")
+                    if h:
+                        seen.add(h)
+    return seen
 
 
 def load_meta(path: str) -> dict[str, dict]:
@@ -68,14 +103,27 @@ def load_meta(path: str) -> dict[str, dict]:
 def run(
     records: list[JDRecord],
     meta_index: dict[str, dict],
+    seen: set[str] | None = None,
 ) -> tuple[list[JDRecord], dict]:
     """Clean+dedupe then screen ``records`` against their metadata.
+
+    ``seen`` is the set of content-hash job_ids already labelled/scored
+    (``load_processed_hashes``); any record whose hash is in it is dropped as
+    *already-processed*, so a full re-collect never re-pays to label a job you've
+    already seen. ``None``/empty → batch-only dedupe (the pure, corpus-independent
+    behaviour the unit tests rely on).
 
     Returns ``(survivors, report)``. ``report`` holds counts and distributions
     for the stdout summary. Pure given its inputs (no IO).
     """
+    corpus_seen = set(seen) if seen else set()
     raw_count = len(records)
-    kept_records, dropped_dupes = dedupe(records, set())
+    # 1) exact dedupe WITHIN this batch (also assigns each record.id = content hash).
+    batch_unique, dropped_dupes = dedupe(records, set())
+    # 2) cross-run dedupe: drop anything already labelled/scored in the corpus. Reuses
+    #    the .id dedupe() just assigned, so no second (expensive) clean/hash pass.
+    kept_records = [r for r in batch_unique if r.id not in corpus_seen]
+    already_processed = len(batch_unique) - len(kept_records)
 
     entries: list[dict] = []
     watchlist: list[dict] = []
@@ -134,6 +182,8 @@ def run(
     report = {
         "raw_count": raw_count,
         "dropped_dupes": dropped_dupes,
+        "already_processed": already_processed,
+        "corpus_known": len(corpus_seen),
         "deduped_count": len(kept_records),
         "screened_kept": screened_kept,
         "near_dupes_collapsed": collapsed,
@@ -192,6 +242,9 @@ def print_report(report: dict) -> None:
     print("=" * 60)
     print(f"raw records        : {raw}")
     print(f"  exact dupes dropped: {report['dropped_dupes']}")
+    if report.get("corpus_known"):
+        print(f"  already processed  : {report['already_processed']} "
+              f"(excluded vs {report['corpus_known']} labelled/scored job_ids)")
     print(f"  unique after dedupe: {report['deduped_count']}")
     if report["no_meta"]:
         print(f"  WARNING no metadata: {report['no_meta']} (treated as dropped)")
@@ -240,6 +293,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--meta", help="Override metadata JSONL path")
     parser.add_argument("--out", help="Override survivors output path")
     parser.add_argument("--dry-run", action="store_true", help="Report only; write nothing")
+    parser.add_argument(
+        "--include-processed",
+        action="store_true",
+        help="Do NOT exclude jobs already labelled/scored (re-process the whole batch — "
+             "e.g. to re-label after a JD/prompt change). Default excludes them.",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -251,7 +310,11 @@ def main(argv: list[str] | None = None) -> int:
 
     records = load_records(raw_path)
     meta_index = load_meta(meta_path)
-    survivors, report = run(records, meta_index)
+    # Cross-run dedupe: exclude jobs already in the labelled/scored corpus unless asked
+    # to re-process. A full re-collect (e.g. a cursor-less first server run) otherwise
+    # re-surfaces — and re-pays to label — everything already seen.
+    seen = set() if args.include_processed else load_processed_hashes()
+    survivors, report = run(records, meta_index, seen=seen)
 
     print_report(report)
 

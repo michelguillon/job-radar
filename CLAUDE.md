@@ -154,6 +154,14 @@ thing tests actually run against.
     single best-located representative (UK first); specialisation parentheticals
     are preserved so distinct roles aren't merged. The survivors file is JDRecords
     only; the sidecar remains the join source for the later labelling step.
+    **Cross-run dedupe (2026-06-11):** prefilter now seeds the `dedupe` `seen` set
+    from `load_processed_hashes()` — the content hash of every already-**labelled**
+    (`labelled_*.jsonl` `id`) or **scored** (`scored_*.jsonl` `job_id`) job — and drops
+    matches as *already-processed* before screening, so a `--full`/new-environment
+    re-collect can't re-pay to label jobs already seen. `--include-processed` opts out.
+    (Found in the first 102-company universe run: ~half of 99 survivors were already
+    scored because `dedupe(records, set())` only deduped within the batch. `cli/dedupe.py`
+    is an empty stub, so prefilter is the *only* dedup in the running pipeline.)
 20. (Phase 3) **Labelling collected survivors.** Survivors have `raw_text=""`
     (only `raw_html`). `pipeline.clean.clean_readable` populates `raw_text` for
     labelling/scoring — HTML/boilerplate stripped but **line breaks + case kept**

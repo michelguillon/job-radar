@@ -1674,5 +1674,45 @@ green test suite a *server* deployment gate when the same artifact already ran g
 
 ---
 
+### Phase 4/6 — the pipeline had no cross-corpus dedupe (re-paid to re-label seen jobs)
+
+**Context:** First production run of the 102-company universe on the deployed server.
+Collect pulled 5,498 raw → prefilter cut to 99 survivors — but ~half were jobs already
+labelled/scored on the dev box, about to be sent to the paid labeller a second time.
+
+#### Root cause
+
+`cli.prefilter` called `dedupe(records, set())` with an **empty** `seen` set, so it only
+deduped *within the current batch*. `pipeline.dedupe` is explicitly built to drop
+"corpus-wide duplicates" via `seen`, and `job_id`/`id` in the scored/labelled files **is**
+the same `sha256:` content hash it computes — but nothing ever seeded `seen` from the
+existing corpus. The incremental **collection cursor** (the intended re-fetch guard) didn't
+help here because a fresh server deploy has no cursor → full pull (and a `--full` run does
+the same). And `cli/dedupe.py` turned out to be an **empty stub** ("no logic yet"), so the
+cron's `dedupe` step is a no-op and prefilter's within-batch pass was the *only* dedup in
+the whole running pipeline. (The cron's bare `cli.label` is also broken — it requires
+`--input`/`--tier` — i.e. the documented weekly sequence was never actually runnable.)
+
+#### Fix
+
+`prefilter.load_processed_hashes()` reads every `labelled_*.jsonl` `id` + `scored_*.jsonl`
+`job_id` into a set; `run()` takes a `seen` arg and drops matches as *already-processed*
+(reusing the `.id` that the within-batch `dedupe` already assigned — no second expensive
+clean/hash pass). Default-on; `--include-processed` opts out to deliberately re-label after
+a JD/prompt change. +4 tests (358 total). The report now prints "already processed: N
+(excluded vs M labelled/scored job_ids)".
+
+#### Reusable Pattern
+
+A dedup/idempotency mechanism is only as good as what you seed its "seen" set from — an
+empty seed silently degrades "skip everything I've already done" into "skip dupes in this
+one batch," and the gap stays invisible until volume (or a fresh environment with migrated
+output but no cursor) makes the re-processing obvious. When migrating state between
+environments, the *derived guards* (cursors, seen-sets) must be reconstructable from the
+migrated data — here, rebuilding "already processed" from the labelled/scored hashes is
+robust precisely because it doesn't depend on a gitignored cursor that never travels.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

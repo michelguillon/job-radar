@@ -662,9 +662,21 @@ No model calls, no scoring. Pure logic in `pipeline/prefilter.py`; IO + report i
 `prefilter.py`. Both screens are **generous** — recall over precision; the scorer's
 gates handle nuance later.
 
-**Pipeline:** re-collect (+meta) → clean → dedupe → **screen** → **near-dedupe** →
-`corpus/filtered/filtered_{date}.jsonl` (JDRecords only) + a survivor-distribution
-report.
+**Pipeline:** re-collect (+meta) → clean → dedupe → **drop already-processed** →
+**screen** → **near-dedupe** → `corpus/filtered/filtered_{date}.jsonl` (JDRecords only)
+\+ a survivor-distribution report.
+
+**Cross-run dedupe (added 2026-06-11).** Within-batch dedupe alone re-surfaces every
+job on a full re-collect — exactly what a cursor-less first run (e.g. a fresh server
+deploy) does, and what re-paid to label ~50 already-scored jobs in the first universe
+run. So `prefilter.load_processed_hashes()` seeds the dedupe `seen` set with the content
+hash of every job already **labelled** (`labelled_*.jsonl` `id`) or **scored**
+(`scored_*.jsonl` `job_id`) — the same `sha256:` hash `pipeline.dedupe` assigns — and any
+match is dropped as *already-processed* before screening. `--include-processed` opts out
+(to deliberately re-label after a JD/prompt change). A JD text change → new hash → treated
+as new (the accepted stable-key caveat). This is the only cross-corpus guard in the running
+pipeline: the incremental collection cursor avoids re-fetching, but a `--full` run or a new
+environment re-collects everything, and this is what stops the re-spend.
 
 - **Location screen** — keep UK / London / UK-remote / Europe-remote / EMEA-remote /
   multi-location-incl-UK / bare-Remote / not-stated (ambiguous kept); drop clear

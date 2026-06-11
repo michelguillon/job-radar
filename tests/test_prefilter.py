@@ -270,6 +270,58 @@ def test_run_screens_dedupes_and_reports():
     assert report["by_company"]["Acme"] == 1
 
 
+def test_run_excludes_already_processed():
+    """A record whose content hash is in ``seen`` (already labelled/scored) is dropped
+    as already-processed — even though it passes every screen — so a re-collect never
+    re-pays to label it."""
+    from pipeline.dedupe import _content_hash
+
+    keep = _rec("https://x/1", html="<p>brand new role</p>")
+    done = _rec("https://x/2", html="<p>already labelled role</p>")
+    meta_index = {
+        "https://x/1": _meta(title="Solutions Engineer", location_str="London", source_url="https://x/1"),
+        "https://x/2": _meta(title="Solutions Engineer", location_str="London", source_url="https://x/2"),
+    }
+    seen = {_content_hash(done)}  # pretend #2 was labelled/scored on a prior run
+    survivors, report = prefilter.run([keep, done], meta_index, seen=seen)
+
+    assert [r.source_url for r in survivors] == ["https://x/1"]
+    assert report["already_processed"] == 1
+    assert report["corpus_known"] == 1
+    assert report["dropped_dupes"] == 0   # #2 is NOT a within-batch dup, only a corpus dup
+    assert report["kept_count"] == 1
+
+
+def test_run_no_seen_keeps_everything_unprocessed():
+    """seen=None → batch-only dedupe (backward-compatible / pure behaviour)."""
+    rec = _rec("https://x/1")
+    meta_index = {"https://x/1": _meta(source_url="https://x/1")}
+    survivors, report = prefilter.run([rec], meta_index)
+    assert [r.source_url for r in survivors] == ["https://x/1"]
+    assert report["already_processed"] == 0
+    assert report["corpus_known"] == 0
+
+
+def test_load_processed_hashes_unions_labelled_and_scored(tmp_path):
+    import json
+
+    lab = tmp_path / "labelled"; lab.mkdir()
+    sco = tmp_path / "scored"; sco.mkdir()
+    (lab / "labelled_1.jsonl").write_text(
+        json.dumps({"id": "sha256:aaa"}) + "\n" + json.dumps({"id": "sha256:bbb"}) + "\n",
+        encoding="utf-8")
+    (sco / "scored_1.jsonl").write_text(
+        json.dumps({"job_id": "sha256:bbb"}) + "\n" + json.dumps({"job_id": "sha256:ccc"}) + "\n",
+        encoding="utf-8")
+    seen = prefilter.load_processed_hashes(
+        str(lab / "labelled_*.jsonl"), str(sco / "scored_*.jsonl"))
+    assert seen == {"sha256:aaa", "sha256:bbb", "sha256:ccc"}
+
+
+def test_load_processed_hashes_missing_files_ok():
+    assert prefilter.load_processed_hashes("nope/labelled_*.jsonl", "nope/scored_*.jsonl") == set()
+
+
 def test_run_flags_missing_metadata():
     records = [_rec("https://x/1")]
     survivors, report = prefilter.run(records, {})  # no meta for the record
