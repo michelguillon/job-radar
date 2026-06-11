@@ -24,3 +24,6 @@ corpus/.digest_last_run
 # (the repo is a public portfolio). The deploy runbook is self-contained and does
 # not depend on this file being present on the server.
 docs/BACKLOG_COMPANY_UNIVERSE.md
+
+# Working prompt scratch (DEPLOY_PROMPT / PHASE*_PROMPT). Kept locally, never tracked.
+docs/*PROMPT*
