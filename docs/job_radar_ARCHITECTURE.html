@@ -63,7 +63,7 @@ td:first-child { font-family: 'Courier New', monospace; font-size: 12px; white-s
 <div class="header">
   <h2 style="font-size:11px;font-weight:400;text-transform:uppercase;letter-spacing:2px;color:var(--muted);margin-bottom:6px;">Job Radar</h2>
   <h1>Architecture Reference</h1>
-  <p>Personal job search intelligence system. CLI pipeline + scoring engine + read-only web UI. Six phases, deployed on home server.</p>
+  <p>Personal job search intelligence system. CLI pipeline + scoring engine + tracker + interactive UI + reporting. Seven phases, deployed on home server (job-radar.michel-portfolio.co.uk).</p>
 </div>
 
 <div class="tabs">
@@ -72,6 +72,7 @@ td:first-child { font-family: 'Courier New', monospace; font-size: 12px; white-s
   <div class="tab" onclick="show('schema')">Schema</div>
   <div class="tab" onclick="show('journeys')">User Journeys</div>
   <div class="tab" onclick="show('principles')">Design Principles</div>
+  <div class="tab" onclick="show('retrospective')">Retrospective</div>
 </div>
 
 <div class="content">
@@ -169,7 +170,14 @@ td:first-child { font-family: 'Courier New', monospace; font-size: 12px; white-s
     <tr><td>AI provider</td><td>Anthropic claude-opus-4-8 · Batch API (50% cost discount) · cost tracked per run · prompt caching active</td></tr>
     <tr><td>Deployment</td><td>Lenovo M720q · Ubuntu Server 24.04 · Docker Compose</td></tr>
     <tr><td>Integration point</td><td>Job Radar shortlist → cv-tailor (one-way handoff)</td></tr>
-    <tr><td>Phase 1 status</td><td>✅ Complete — Steps 0–9 · 95 tests passing · pipeline end-to-end proven · commit efb8d41</td></tr>
+    <tr><td>Tracker</td><td>Model C — append-only activity_log.jsonl · workflow state survives re-scores · outcome + application_date derived at read time</td></tr>
+    <tr><td>UI (Phase 5)</td><td>Static SPA (vanilla JS) · reads corpus/index.json · nginx · read-only</td></tr>
+    <tr><td>UI (Phase 6)</td><td>React + Vite frontend · FastAPI backend · task-oriented API · cv-tailor auth pattern · annotations.jsonl feedback loop</td></tr>
+    <tr><td>Company universe</td><td>81 companies confirmed · Greenhouse (31) · Ashby (30) · Lever (5) · manual watch (1) · domain + fit_hypothesis + action metadata per company</td></tr>
+    <tr><td>Reporting</td><td>cli/analyse.py — score-distribution · status · companies · gaps · yield · GET /api/report/yield download</td></tr>
+    <tr><td>AI provider</td><td>Anthropic claude-opus-4-8 · Batch API (50% cost discount) · cost tracked per run in corpus/stats.json · $3.18 total to date</td></tr>
+    <tr><td>Deployment</td><td>Lenovo M720q · Ubuntu Server 24.04 · Docker Compose · Caddy + Cloudflare · job-radar.michel-portfolio.co.uk</td></tr>
+    <tr><td>Test count</td><td>412 passing · pipeline proven end-to-end · production run: 81 companies · weekly cron live</td></tr>
   </table>
 </div>
 
@@ -609,6 +617,67 @@ td:first-child { font-family: 'Courier New', monospace; font-size: 12px; white-s
     <tr><td>Incremental value delivery</td><td>6 phases · each independently useful · Phase 1 complete before Phase 2 starts</td></tr>
     <tr><td>Multi-source data engineering</td><td>3 public ATS APIs · SHA-256 dedup · boilerplate normalisation · VC board deferral decision</td></tr>
     <tr><td>System boundary design</td><td>CLI writes / UI reads · Job Radar vs cv-tailor ownership · one-way integration point</td></tr>
+  </table>
+</div>
+
+<!-- ═══════════════════════════════════ RETROSPECTIVE ═══════════════════════════════════ -->
+<div class="panel" id="retrospective">
+  <h2>What changed from spec to system</h2>
+  <p>The most significant decisions were not in the original spec. They emerged from building — from real data, calibration failures, and daily use. These are the shifts that mattered.</p>
+
+  <div class="decision">
+    <strong>"jd-refinery" → "job-radar" — the corpus is infrastructure, not the product.</strong>
+    <span>The original scope was a corpus builder. The corpus was the output. A job search tool was not in scope. After recognising that a corpus builder you don't use daily is a portfolio piece, the framing became: build what you'll use every morning. The pipeline code didn't change. The product built on top of it did. The same Phase 1 build survived a complete product reframe — validating the data-layer-first approach.</span>
+  </div>
+
+  <div class="decision">
+    <strong>10 JDs triggered 10 schema changes before any automation ran.</strong>
+    <span>The original schema had 9 fields. After 10 manually-labelled JDs: 17 extraction fields. required_skills split into 4 fields. delivery_motion added as a first-class dimension — not in the original design, now one of the most useful. culture_signals added. application_decision replaced applied: bool. The schema that works is the one that survived contact with real data.</span>
+  </div>
+
+  <div class="decision">
+    <strong>The initial scorer architecture was wrong — five equal dimensions produce a floor, not a scale.</strong>
+    <span>The first version had five equal-weight dimensions and produced a score floor of 7–8 for every realistic JD. Four of five dimensions didn't discriminate. The fix: seniority and location became gates; role, domain, and depth became the signal. Then: conditional Product role scoring, language blocker fix, M&A blocker, domain narrowing, location gate hardening. Each fix from calibration evidence — not one failure fixed by moving a threshold.</span>
+  </div>
+
+  <div class="decision">
+    <strong>The spec described a contradiction in the tracker — workflow state in a regenerable artifact.</strong>
+    <span>SPEC §7.4 said the tracker "updates ApplicationRecord in corpus/scored/" and "appends to activity_log.jsonl" — a direct contradiction. The scorer regenerates every ApplicationRecord from scratch on each run. Model C (append-only event log) was chosen explicitly before any code was written. 30 minutes to resolve correctly; would have been a significant production bug otherwise.</span>
+  </div>
+
+  <div class="decision">
+    <strong>The UI data contract was wrong on paper — JDRecords don't carry scoring output.</strong>
+    <span>SPEC §9.4 described index.json as "a flat array of validated records" (JDRecords). The UI asked for fit_label, fit_score, application_status — none exist on a JDRecord. The real read model (the tracker's join) had been built twice already. Fix: rebuild export_index to emit that same join. The spec prose was the bug. The tie-break rule: when the code is right and the spec is wrong, fix the spec.</span>
+  </div>
+
+  <div class="decision">
+    <strong>The "automated weekly pipeline" had never actually run — bare invocation was broken.</strong>
+    <span>cron/collect_weekly.sh called every stage bare but all three had --input required=True, so each bare line exited non-zero. cli/dedupe.py was an empty stub. The weekly cron, shipped and documented since Phase 4, could never have completed a single run. It was never exercised because the corpus was always built by ad-hoc commands during development. Fix: bare-invocation defaults keyed to the current UTC day.</span>
+  </div>
+
+  <div class="decision">
+    <strong>The yield report join key drifted — fix the source, don't alias the consumer.</strong>
+    <span>First live yield run: ~22 of 53 scored jobs landed under domain (unknown). Corpus values like "Mistral" didn't match seed name "Mistral AI". Rather than add a fuzzy matcher (which would hide drift it should expose), the fix was to align the seed name to the corpus string. The (unknown) bucket is the diagnostic — the alias map is the trap.</span>
+  </div>
+
+  <h3>Top 5 decisions made right</h3>
+  <table>
+    <tr><th>Decision</th><th>Why it mattered</th></tr>
+    <tr><td>Schema before automation</td><td>10 changes from real data; would have been 10 migrations if discovered after collection ran</td></tr>
+    <tr><td>Model C tracker design</td><td>Resolved before code; free audit trail, spare capacity for future event kinds</td></tr>
+    <tr><td>Calibrate from negatives</td><td>5 scorer bugs found that positive-only testing would never have exposed</td></tr>
+    <tr><td>Fix extraction, not scorer</td><td>One prompt change deflated Enterprise Software from 27→10 records. Cheaper and more durable</td></tr>
+    <tr><td>Task-oriented API</td><td>90% of writes are status updates. /api/status speaks the domain language</td></tr>
+  </table>
+
+  <h3>Top 5 things to do differently</h3>
+  <table>
+    <tr><th>Mistake</th><th>What I'd do instead</th></tr>
+    <tr><td>Spec described a corpus builder</td><td>Start with "what will I use every morning?" not "what data does this produce?"</td></tr>
+    <tr><td>Scorer not sketched before implementing</td><td>Sketch the score distribution first — if nothing scores below 6, the architecture is wrong</td></tr>
+    <tr><td>Calibration corpus added after implementation</td><td>Build adversarial negatives before tuning, not after</td></tr>
+    <tr><td>Cron wrapper never run end-to-end</td><td>Run the wrapper exactly as the scheduler would before calling it "done"</td></tr>
+    <tr><td>UI data contract not verified against consumer</td><td>Before speccing a producer, check the consumer's field list — if mismatch, fix the spec</td></tr>
   </table>
 </div>
 

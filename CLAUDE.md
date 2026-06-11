@@ -55,7 +55,9 @@ thing tests actually run against.
 - **Temporary build docs (feature PLANs, handoffs, prompts) are NOT repo content.**
   Write them under a gitignored **`tmp/`** directory, never in `docs/`. `docs/` holds
   only durable source-of-truth (`job_radar_SPEC.md`, `job_radar_LEARNINGS.md`,
-  `CORPUS_FINDINGS.md`, `job_radar_ARCHITECTURE.*`, `RETROSPECTIVE`, `README`). Before
+  `CORPUS_FINDINGS.md`, `job_radar_ARCHITECTURE.*`, `RETROSPECTIVE`). The canonical
+  `README.md` lives at the **repo root** (the stale `docs/job_radar_README.md` stub
+  was removed 2026-06-11 — don't recreate a second README under `docs/`). Before
   discarding a plan, **migrate any durable decision/deferral into SPEC / LEARNINGS / the
   nearest `CLAUDE.md`** — never let the plan become the only home for a decision (the
   anti-pattern that once left retired phase plans cited as "authoritative" in code + source

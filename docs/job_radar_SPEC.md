@@ -2537,7 +2537,7 @@ Follows `PROJECT_DOCUMENTATION_STANDARD.md`.
 |---|---|---|
 | `docs/job_radar_SPEC.md` | This file | ✅ |
 | `docs/CORPUS_FINDINGS.md` | Schema, records, labelling rules | ✅ |
-| `docs/job_radar_README.md` | Landing page | Stub |
+| `README.md` (repo root) | Landing page | ✅ (the stale `docs/job_radar_README.md` stub was removed 2026-06-11) |
 | `docs/job_radar_ARCHITECTURE.html` | Implemented system | ✅ Updated post-Phase 6 |
 | `docs/job_radar_RETROSPECTIVE.md` | Journey | ✅ Complete through Phase 5 |
 | `docs/job_radar_LEARNINGS.md` | Reusable lessons | ✅ 29+ entries |
