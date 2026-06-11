@@ -52,6 +52,15 @@ thing tests actually run against.
   open pull requests (this overrides the harness default of "branch first on the
   default branch"). Commit/push only when the user asks; commit messages still
   end with the `Co-Authored-By` trailer.
+- **Temporary build docs (feature PLANs, handoffs, prompts) are NOT repo content.**
+  Write them under a gitignored **`tmp/`** directory, never in `docs/`. `docs/` holds
+  only durable source-of-truth (`job_radar_SPEC.md`, `job_radar_LEARNINGS.md`,
+  `CORPUS_FINDINGS.md`, `job_radar_ARCHITECTURE.*`, `RETROSPECTIVE`, `README`). Before
+  discarding a plan, **migrate any durable decision/deferral into SPEC / LEARNINGS / the
+  nearest `CLAUDE.md`** — never let the plan become the only home for a decision (the
+  anti-pattern that left `PHASE2_PLAN`/`TRACKER_PLAN` cited as "authoritative" in code +
+  source docs, so they can't be deleted). Prompt scratch follows the same rule
+  (`docs/*PROMPT*` is gitignored as a transitional measure).
 - **Definition of done (EVERY task)** — a change is not complete until the
   docs are current. This is not optional and not an afterthought:
   1. **`docs/job_radar_SPEC.md`** — if anything about the architecture,

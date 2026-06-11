@@ -145,3 +145,13 @@ which labels are *shown* — that filter lives in `score.py` (`is_shown`, `_HIDD
 `--mode` overrides the profile's mode for a run; `--min-fit` is a presentation
 filter on top. The scored file always contains **every** record — filtering never
 drops rows from the durable artifact.
+
+## Deferred: Option D — career-pattern scoring (do NOT build yet)
+
+A richer scoring model that weighs **career pattern / trajectory** (not just the
+current `role + domain + depth + blockers` dimensions) is **deferred**. Trigger to
+revisit: only once **production data shows that role + domain + depth + blockers
+cannot explain observed scoring errors** — i.e. the current dimensions are demonstrably
+insufficient, not merely imperfect. Until then it stays unbuilt (avoid speculative
+complexity in a locked scorer). Pairs with the "scorer locked until the 100+-scored-job
+review" guard (CLAUDE.md deviation 21). *(Migrated here from the retired Phase 3 plan.)*
