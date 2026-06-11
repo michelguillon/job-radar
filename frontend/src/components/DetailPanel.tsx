@@ -79,6 +79,14 @@ const CV_TAILOR_MODES = ["full", "targeted", "minimal"];
 function CvTailorSection({ job, onChanged }: { job: Job; onChanged: () => Promise<void> }) {
   const { unlocked, requestUnlock } = useUnlock();
   const cv = job.cv_tailor || { has_output: false };
+  // cv-tailor handoff (Phase 2, INTEGRATION_SPEC §5.1): a plain link, not a mutation — visible
+  // to everyone, never lock-gated (cv-tailor's own key gate handles non-owner access). A run
+  // exists → open it; none yet → start one pre-seeded with this job_id (cv-tailor fetches the
+  // JD via the public GET /api/jobs/{job_id} built in Phase 1).
+  const cvTailorUrl = cv.has_output
+    ? `https://cv-tailor.michel-portfolio.co.uk/runs/${cv.run_id}`
+    : `https://cv-tailor.michel-portfolio.co.uk/new?source=job_radar&job_id=${job.job_id}`;
+  const cvTailorLabel = cv.has_output ? "Open in cv-tailor ↗" : "Create CV in cv-tailor ↗";
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<Toast>(null);
@@ -188,6 +196,11 @@ function CvTailorSection({ job, onChanged }: { job: Job; onChanged: () => Promis
           {unlocked && <button className={BTN} onClick={() => { resetForm(); setEditing(true); }} disabled={busy}>Add cv-tailor metrics</button>}
         </div>
       )}
+
+      {/* Handoff link (Phase 2) — always visible, never lock-gated; opens in a new tab. */}
+      <div className="mt-[12px] border-t border-line-soft pt-[12px]">
+        <a href={cvTailorUrl} target="_blank" rel="noopener" className={cn(BTN, "inline-block no-underline")}>{cvTailorLabel}</a>
+      </div>
 
       {toast && <div className={cn("mt-2 rounded-md px-[9px] py-[6px] text-[12px]", TOAST[toast.kind])}>{toast.text}</div>}
     </div>

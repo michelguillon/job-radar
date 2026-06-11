@@ -6,9 +6,9 @@
 
 **Project:** 4 — Job Radar
 **Repository:** job-radar (renamed from jd-refinery)
-**Status:** Phases 1–6 complete — 400 tests. **Deployed + operational** at
+**Status:** Phases 1–6 complete — 430 tests. **Deployed + operational** at
 job-radar.michel-portfolio.co.uk (Caddy + Cloudflare, SPEC §10.9). Discovery now runs the
-**73-company universe v1.1** (§11.1) via a working weekly cron; first real server run: 5,498
+**81-company universe v2** (§11.1) via a working weekly cron; first real server run: 5,498
 collected → 65 new survivors → **117 scored, $3.18** labelling to date.
 **Last updated:** 2026-06-11
 **Deployment target:** M720q home server, Ubuntu Server 24.04, Docker + Caddy + Cloudflare
@@ -2495,7 +2495,14 @@ for owner). "Add CV-Tailor metrics" control owner-gated same as all writes.
 
 ---
 
-### Phase 2 — Open job in cv-tailor
+### Phase 2 — Open job in cv-tailor — Job Radar side ✅ built
+
+**Status (Job Radar side):** Built — a frontend-only smart button at the bottom of
+`CvTailorSection`. Visible to all (public + owner), never lock-gated, opens in a new
+tab: `has_output` → `Open in cv-tailor ↗` (`/runs/<run_id>`), else `Create CV in
+cv-tailor ↗` (`/new?source=job_radar&job_id=<job_id>`). No backend/endpoint/schema
+change — `GET /api/jobs/{job_id}` and the `cv_tailor.*` index fields shipped in Phase 1.
+The cv-tailor `/new`-route fetch/prefill (INTEGRATION_SPEC §5.2) remains a cv-tailor build.
 
 **Trigger:** After 5–10 real Phase 1 applications — confirm data model is
 correct before building the handoff.

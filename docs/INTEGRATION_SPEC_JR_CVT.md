@@ -1,7 +1,7 @@
 # Job Radar ↔ cv-tailor Integration Spec
 ## Unified specification — changes to both applications
 
-**Status:** Phase 1 build prompt written. Phases 2–4 pending.
+**Status:** Phase 1 ✅ built (commit 32d1a09). Phases 2–4 pending.
 **Last updated:** 2026-06-11
 **Owned by:** Both repos — `job-radar` and `cv-tailor`
 
@@ -76,7 +76,25 @@ Do not build Phase 4 before Phase 3 is stable.
 
 ---
 
-## 4. Phase 1 — Manual cv-tailor metrics in Job Radar
+## 4. Phase 1 — Manual cv-tailor metrics in Job Radar ✅ built
+
+**Status:** Complete — commit 32d1a09, 430 tests. See `job-radar` CLAUDE.md
+deviation 41 + LEARNINGS.
+
+**As built:**
+- `corpus/cv_tailor_links.jsonl` — new append-only file, gitignored
+- `CV_TAILOR_LINK_VERSION = 1` + `CV_TAILOR_SOURCE` vocab + `validate_cv_tailor_link()`
+  in `models/record.py` — constants only, no `SCHEMA_VERSION` bump
+- `cli/stats.py` — `load_cv_tailor_links()`, `cv_tailor_view()`, join in
+  `build_index_rows`; `GET /api/index` live overlay refreshes cv-tailor links
+  alongside activity log and annotations
+- `api/routers/cv_tailor.py` (new) — per-route gating: `POST /api/cv-tailor-results`
+  (owner-gated, 404 unknown job, 422 bad score) + `GET /api/jobs/{job_id}` (public,
+  no auth — returns `raw_text` for Phase 2 handoff). Per-route rather than
+  router-level because the two endpoints have different access levels (deviation 41)
+- React detail panel — `CvTailorSection`: read-only for all, owner Add/Edit form
+  (scores entered 0–100, sent as 0.0–1.0 floats)
+- `api/settings.py` — `JR_CV_TAILOR_LINKS_PATH` env var
 
 **Trigger:** Unblocked. Build after yield tracking and rejection reasons
 are stable.
@@ -195,28 +213,53 @@ None in Phase 1. cv-tailor is unaware of Job Radar.
 **Trigger:** 5–10 real Phase 1 applications — confirm the data model is
 correct before building the handoff.
 
-**Goal:** "Open in cv-tailor" button in Job Radar detail panel. Opens
-cv-tailor with the selected JD preloaded via `job_id` reference — no JD
-text in the URL (avoids URL length limits, encoding issues, browser history
-leakage, and duplicated source of truth).
+**Goal:** Smart button in Job Radar detail panel that adapts based on
+whether a cv-tailor run already exists for the role.
 
-### 5.1 Changes to Job Radar
+### 5.1 Changes to Job Radar — ✅ built
 
-**UI only — one new button in the detail panel:**
+**Status:** Built (frontend-only — no backend/endpoint/schema change). The smart
+handoff button lives at the bottom of `CvTailorSection` (`frontend/src/components/
+DetailPanel.tsx`): always visible (public + owner), never lock-gated, opens in a new
+tab. `has_output` → `Open in cv-tailor ↗` (→ `/runs/<run_id>`); else `Create CV in
+cv-tailor ↗` (→ `/new?source=job_radar&job_id=<job_id>`). The cv-tailor `/new`-route
+handling (§5.2) remains a cv-tailor build. `tsc -b` clean; 430 pytest unchanged.
 
-```
-[Open in cv-tailor ↗]
-```
+**UI only — one smart button in the detail panel:**
 
 Visible to all users (public + owner). Not write-gated — it's a link,
-not a mutation. Opens in a new tab:
+not a mutation. cv-tailor's own key gate handles access control.
 
+**State 1 — No cv-tailor run recorded (`cv_tailor.has_output === false`):**
 ```
-https://cv-tailor.michel-portfolio.co.uk/new?source=job_radar&job_id=<job_id>
+[Create CV in cv-tailor ↗]
+→ https://cv-tailor.michel-portfolio.co.uk/new?source=job_radar&job_id=<job_id>
 ```
+
+**State 2 — Run exists (`cv_tailor.has_output === true`):**
+```
+[Open in cv-tailor ↗]
+→ https://cv-tailor.michel-portfolio.co.uk/runs/<cv_tailor.run_id>
+```
+
+Logic:
+```typescript
+const url = job.cv_tailor.has_output
+  ? `https://cv-tailor.michel-portfolio.co.uk/runs/${job.cv_tailor.run_id}`
+  : `https://cv-tailor.michel-portfolio.co.uk/new?source=job_radar&job_id=${job.job_id}`
+
+const label = job.cv_tailor.has_output
+  ? "Open in cv-tailor ↗"
+  : "Create CV in cv-tailor ↗"
+```
+
+Both states open in a new tab. Public visitors who click either button
+will hit cv-tailor's own key gate — Job Radar does not need to replicate
+that check.
 
 No other Job Radar changes needed. `GET /api/jobs/{job_id}` was built in
-Phase 1 and is already public.
+Phase 1 and is already public. The `cv_tailor.has_output` and
+`cv_tailor.run_id` fields are already in the index row.
 
 ### 5.2 Changes to cv-tailor
 
@@ -448,16 +491,22 @@ Mistral extraction. Do not block the run.
 
 ## 8. Auth summary across all phases
 
-| Phase | Mechanism | Direction |
-|---|---|---|
-| Phase 1 — Manual POST from browser | HttpOnly capability cookie (`JR_WRITE_KEY`) | Browser → Job Radar API |
-| Phase 2 — cv-tailor fetches JD | No auth — `GET /api/jobs/{job_id}` is public | cv-tailor server → Job Radar API |
-| Phase 3 — cv-tailor POSTs results | Bearer token (`CV_TAILOR_SERVICE_KEY`) | cv-tailor server → Job Radar API |
-| Phase 4 — cv-tailor fetches extraction | No auth — same public endpoint as Phase 2 | cv-tailor server → Job Radar API |
+| Phase | Mechanism | Direction | Status |
+|---|---|---|---|
+| Phase 1 — Manual POST from browser | HttpOnly capability cookie (`JR_WRITE_KEY`) — per-route (deviation 41/42) | Browser → Job Radar API | ✅ |
+| Phase 2 — cv-tailor fetches JD | No auth — `GET /api/jobs/{job_id}` is public | cv-tailor server → Job Radar API | 🔲 |
+| Phase 3 — cv-tailor POSTs results | Bearer token (`CV_TAILOR_SERVICE_KEY`) | cv-tailor server → Job Radar API | 🔲 |
+| Phase 4 — cv-tailor fetches extraction | No auth — same public endpoint as Phase 2 | cv-tailor server → Job Radar API | 🔲 |
 
 The browser capability cookie (HttpOnly, SameSite=Lax) is never sent in
 machine-to-machine calls — it's physically inaccessible outside the browser.
 Phase 3 uses a separate shared secret specifically for service-to-service auth.
+
+**Per-route gating (deviation 41/42):** `require_unlocked` is declared on each
+individual write route, not at the router level. This makes the security decision
+explicit at the point of definition — a public endpoint and an owner-only endpoint
+can coexist in the same router without ambiguity. All write endpoints across
+`workflow.py`, `annotations.py`, and `cv_tailor.py` follow this pattern.
 
 ---
 
@@ -487,20 +536,25 @@ output_link ──────────────────────�
 
 ### Job Radar
 
-| File | Change | Phase |
-|---|---|---|
-| `corpus/cv_tailor_links.jsonl` | New append-only file | 1 |
-| `models/record.py` | `CV_TAILOR_LINK_VERSION` constant + `validate_cv_tailor_link()` | 1 |
-| `cli/stats.py` | `load_cv_tailor_links()` + join in `build_index_rows` | 1 |
-| `api/routers/cv_tailor.py` | `POST /api/cv-tailor-results` + `GET /api/jobs/{job_id}` | 1 |
-| `api/main.py` | Register new router | 1 |
-| `frontend` | cv-tailor section in detail panel | 1 |
-| `frontend` | "Open in cv-tailor" button | 2 |
-| `api/routers/cv_tailor.py` | Add Bearer token auth for service calls | 3 |
-| `frontend` | Run history (multiple runs) in detail panel | 3 |
-| `api/routers/cv_tailor.py` | Return `extraction` in `GET /api/jobs/{job_id}` | 4 |
-| `.gitignore` | `corpus/cv_tailor_links.jsonl` | 1 |
-| `.env.example` | `CV_TAILOR_SERVICE_KEY=` (Phase 3) | 3 |
+| File | Change | Phase | Status |
+|---|---|---|---|
+| `corpus/cv_tailor_links.jsonl` | New append-only file | 1 | ✅ |
+| `models/record.py` | `CV_TAILOR_LINK_VERSION` + `CV_TAILOR_SOURCE` vocab + `validate_cv_tailor_link()` | 1 | ✅ |
+| `cli/stats.py` | `load_cv_tailor_links()` + `cv_tailor_view()` + join in `build_index_rows` | 1 | ✅ |
+| `api/routers/cv_tailor.py` | `POST /api/cv-tailor-results` (owner) + `GET /api/jobs/{job_id}` (public) — per-route gating | 1 | ✅ |
+| `api/settings.py` | `JR_CV_TAILOR_LINKS_PATH` env var | 1 | ✅ |
+| `api/main.py` | Register cv_tailor router | 1 | ✅ |
+| `api/routers/index.py` | Live overlay refreshes cv-tailor links | 1 | ✅ |
+| `frontend/src/lib/api.ts` | `CvTailor` types + `recordCvTailorResult()` | 1 | ✅ |
+| `frontend/src/components/DetailPanel.tsx` | `CvTailorSection` component | 1 | ✅ |
+| `.gitignore` | `corpus/cv_tailor_links.jsonl` | 1 | ✅ |
+| `api/routers/workflow.py` | Per-route `require_unlocked` (deviation 42 refactor) | 1 | ✅ |
+| `api/routers/annotations.py` | Per-route `require_unlocked` (deviation 42 refactor) | 1 | ✅ |
+| `frontend` | Smart cv-tailor button — "Create CV" (no run) or "Open in cv-tailor" (run exists) | 2 | 🔲 |
+| `api/routers/cv_tailor.py` | Add Bearer token auth for service calls | 3 | 🔲 |
+| `frontend` | Run history (multiple runs) in detail panel | 3 | 🔲 |
+| `api/routers/cv_tailor.py` | Return `extraction` in `GET /api/jobs/{job_id}` | 4 | 🔲 |
+| `.env.example` | `CV_TAILOR_SERVICE_KEY=` | 3 | 🔲 |
 
 ### cv-tailor
 

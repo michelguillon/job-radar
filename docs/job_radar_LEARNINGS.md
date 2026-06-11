@@ -2004,5 +2004,16 @@ mutation should be re-modelled as an append event first.
 
 ---
 
+### cv-tailor integration Phase 2 (§11.3 / INTEGRATION_SPEC §5.1) — built 2026-06-11
+
+The whole Job Radar side of "open in cv-tailor" was **one frontend link button** — because
+Phase 1 had already shipped the two things it needs (`GET /api/jobs/{job_id}` public, and
+`cv_tailor.has_output`/`run_id` on every index row). Sequencing the data model + public read
+first (Phase 1) turned the handoff into a zero-backend change: a `<a target="_blank">` whose
+URL/label branch on `has_output`, never lock-gated (it's a link, not a mutation — cv-tailor's
+own key gate guards non-owner access). `tsc -b` clean; 430 pytest unchanged.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*
