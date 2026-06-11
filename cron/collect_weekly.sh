@@ -7,8 +7,10 @@
 # runs in the Docker service; output is timestamped to a rotating log.
 set -euo pipefail
 
-PROJECT_DIR="/home/michel/dev/job-radar"
-LOG_DIR="/var/log/job-radar"
+# Derive the project dir from this script's own location (cron/..), so it works wherever
+# the repo is cloned (server: /opt/apps/job-radar; dev: ~/dev/job-radar) without editing.
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LOG_DIR="${JR_LOG_DIR:-/var/log/job-radar}"   # override JR_LOG_DIR if not writable (needs mkdir perms)
 LOG_FILE="${LOG_DIR}/collect_weekly.log"
 
 mkdir -p "${LOG_DIR}"
