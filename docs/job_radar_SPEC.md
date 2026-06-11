@@ -1933,14 +1933,32 @@ CLAUDE.md deviations 32–34.
    tokens + a body reset. UI/UX unchanged, the whole class of class-name-collision bugs
    eliminated. (Deviation 35.)
 
----
+7. **Manual fit override + annotation visibility** (the two §10.11 enhancements, now
+   built). Both follow the existing event-log-append + read-model-join pattern with no
+   scorer/schema/pipeline change (deviation 37). **Fit override (Feature 1):** a
+   `fit_override` `ACTIVITY_EVENT` (value = a `fit_label`, or `null` to clear; reason in
+   `notes`) lets the owner assert a fit label over the scorer's — `project` folds the
+   latest override, the index export exposes `scorer_*`/`user_*`/`display_*` +
+   `has_fit_override` (the UI sorts/filters on `display_fit_label`; the scorer value is
+   preserved for corpus analysis), `POST /api/fit-override` appends, and the detail panel
+   shows scorer-vs-override side by side with Save/Edit/Clear. **Annotation visibility
+   (Feature 2):** the index export embeds existing annotations per job
+   (`annotations`/`annotation_count`/`has_annotations`), the detail panel lists them above
+   the flag form, Browse shows a `⚠` badge when `annotation_count > 0`, and exact
+   duplicates (same `job_id` + `annotation_type` + `field` + `reason`) are rejected
+   `409` by `POST /api/annotations` with a client-side "submit anyway?" warning. Both the
+   live override and the live annotations are overlaid by `GET /api/index` so a write shows
+   on reload without a re-export.
 
 ---
 
-### 10.11 — Workflow enhancements (backlog — next to build)
+---
+
+### 10.11 — Workflow enhancements ✅ built (see §10.10 item 7 + deviation 37)
 
 Two usability gaps identified during daily use. Both follow existing patterns
-— event log append, read-model join, no scorer or schema changes.
+— event log append, read-model join, no scorer or schema changes. The design below
+is as-built; the end-state summary lives in §10.10 item 7.
 
 ---
 

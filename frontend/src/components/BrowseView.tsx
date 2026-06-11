@@ -68,6 +68,12 @@ export function BrowseView({
                 <TableCell className={cn("font-semibold", blocked && "font-medium")}>{r.company}</TableCell>
                 <TableCell className="whitespace-normal break-words">
                   <span className={cn(blocked && "line-through decoration-ink-faint")}>{r.title}</span>
+                  {r.annotation_count > 0 && (
+                    <span className="ml-[5px] align-middle text-[11px] text-[#b4540f]" title={`${r.annotation_count} scoring flag${r.annotation_count > 1 ? "s" : ""}`}>⚠</span>
+                  )}
+                  {r.has_fit_override && (
+                    <span className="ml-[5px] align-middle rounded-full bg-[#fdf7e8] px-[5px] py-px text-[9.5px] font-bold uppercase tracking-wide text-[#8a5a14]" title={`Fit overridden — scorer said ${r.scorer_fit_label}`}>ovr</span>
+                  )}
                 </TableCell>
                 <TableCell><Badge label={r.fit_label} /></TableCell>
                 <TableCell className="text-right text-[15px] font-bold tabular-nums">{r.fit_score}</TableCell>

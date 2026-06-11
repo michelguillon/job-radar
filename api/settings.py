@@ -12,11 +12,12 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from cli.stats import INDEX_PATH
+from cli.stats import ANNOTATIONS_PATH, INDEX_PATH
 from cli.track import LOG_PATH, META_GLOB, SCORED_GLOB, VALIDATED_GLOB
 
-# New Phase-6 sink: field-level scoring flags (separate from the activity log).
-ANNOTATIONS_PATH = "corpus/annotations.jsonl"
+# ANNOTATIONS_PATH (field-level scoring flags, separate from the activity log) is the
+# canonical read-model constant in cli.stats — re-exported here so the API and the index
+# export resolve the same file.
 
 
 @dataclass(frozen=True)

@@ -106,6 +106,70 @@ def test_build_index_rows_defaults_when_jd_missing():
     assert row["application_status"] == "new"  # default projection state
 
 
+# --- fit override (Feature 1) -------------------------------------------------
+
+def test_build_index_rows_no_override_displays_scorer_value():
+    scores = {"sha256:a": _score("sha256:a", label="strong_fit")}
+    row = stats.build_index_rows(scores, {}, {}, {})[0]
+    assert row["scorer_fit_label"] == "strong_fit"
+    assert row["user_fit_label"] is None
+    assert row["display_fit_label"] == "strong_fit"
+    assert row["fit_label"] == "strong_fit"  # display value drives the existing UI
+    assert row["has_fit_override"] is False
+
+
+def test_build_index_rows_override_wins_for_display_but_preserves_scorer():
+    scores = {"sha256:a": _score("sha256:a", label="strong_fit")}
+    workflow = {"sha256:a": {**stats._default_state(), "fit_override": "good_fit",
+                             "fit_override_reason": "AI depth gap"}}
+    row = stats.build_index_rows(scores, {}, {}, workflow)[0]
+    assert row["scorer_fit_label"] == "strong_fit"   # scorer preserved
+    assert row["user_fit_label"] == "good_fit"
+    assert row["user_fit_reason"] == "AI depth gap"
+    assert row["display_fit_label"] == "good_fit"
+    assert row["fit_label"] == "good_fit"            # UI sorts/filters on the display value
+    assert row["has_fit_override"] is True
+
+
+# --- annotations (Feature 2) --------------------------------------------------
+
+def test_load_annotations_groups_by_job(tmp_path):
+    f = tmp_path / "annotations.jsonl"
+    f.write_text("\n".join([
+        json.dumps({"v": 1, "ts": "2026-06-10T12:00:00Z", "job_id": "sha256:a",
+                    "annotation_type": "fit_score_disagree", "field": "fit_score",
+                    "observed": 10, "expected": 7, "reason": "too high",
+                    "scorer_label": "strong_fit", "scorer_fit_score": 10}),
+        json.dumps({"v": 1, "ts": "2026-06-10T12:05:00Z", "job_id": "sha256:a",
+                    "annotation_type": "domain_incorrect", "field": "domain",
+                    "observed": ["Enterprise Software"], "expected": [], "reason": "over-tag",
+                    "scorer_label": "strong_fit", "scorer_fit_score": 10}),
+    ]) + "\n", encoding="utf-8")
+    by_job = stats.load_annotations(str(f))
+    assert len(by_job["sha256:a"]) == 2
+    assert by_job["sha256:a"][0]["annotation_type"] == "fit_score_disagree"
+    assert by_job["sha256:a"][0]["reason"] == "too high"
+
+
+def test_load_annotations_missing_file_returns_empty(tmp_path):
+    assert stats.load_annotations(str(tmp_path / "none.jsonl")) == {}
+
+
+def test_build_index_rows_embeds_annotations():
+    scores = {"sha256:a": _score("sha256:a")}
+    annotations = {"sha256:a": [{"annotation_type": "domain_incorrect", "field": "domain",
+                                 "reason": "over-tag"}]}
+    row = stats.build_index_rows(scores, {}, {}, {}, annotations)[0]
+    assert row["annotation_count"] == 1
+    assert row["has_annotations"] is True
+    assert row["annotations"][0]["annotation_type"] == "domain_incorrect"
+
+
+def test_build_index_rows_no_annotations_defaults_empty():
+    row = stats.build_index_rows({"sha256:a": _score("sha256:a")}, {}, {}, {})[0]
+    assert row["annotations"] == [] and row["annotation_count"] == 0 and row["has_annotations"] is False
+
+
 def test_index_stats_block():
     rows = [
         {"fit_score": 8, "fit_label": "strong_fit", "application_status": "new"},

@@ -51,6 +51,12 @@ class OutcomeRequest(BaseModel):
     notes: str | None = None
 
 
+class FitOverrideRequest(BaseModel):
+    job_id: str
+    fit_label: str | None = None  # null clears a prior override
+    reason: str | None = None
+
+
 def _require_scored(job_id: str, scored_glob: str) -> None:
     """404 unless the job_id is in the scored corpus (HTTP has no --force)."""
     if job_id not in load_scores(scored_glob):
@@ -102,3 +108,14 @@ def set_outcome(body: OutcomeRequest, settings: Settings = Depends(get_settings)
     _require_scored(body.job_id, settings.scored_glob)
     _append(settings.log_path, body.job_id, event="outcome", value=body.outcome, notes=body.notes or "")
     return {"ok": True, "job_id": body.job_id, "outcome": body.outcome}
+
+
+@router.post("/fit-override")
+def set_fit_override(body: FitOverrideRequest, settings: Settings = Depends(get_settings)) -> dict:
+    """Override the scorer's fit_label with the owner's assessment (job_radar_SPEC §10.11
+    Feature 1). A workflow decision — it appends a fit_override event and NEVER mutates the
+    scored ApplicationRecord (the scorer's value is preserved). fit_label=null clears a prior
+    override; an invalid fit_label → 422 (build_event runs validate_activity_event)."""
+    _require_scored(body.job_id, settings.scored_glob)
+    _append(settings.log_path, body.job_id, event="fit_override", value=body.fit_label, notes=body.reason or "")
+    return {"ok": True, "job_id": body.job_id, "fit_label": body.fit_label}

@@ -140,14 +140,19 @@ APPLICATION_STATUS = frozenset(
 ACTIVITY_LOG_VERSION = 1
 
 # Event kinds in the activity log.
-#  status  — value is an APPLICATION_STATUS the human moved the job to.
-#  outcome — value is a terminal OUTCOME (job_radar_SPEC §7.3).
-#  note    — value is null; the comment text lives in ``notes``.
-#  title   — value is a human-set display title override (the schema-locked
-#            JDRecord has no title field; the sidecar is keyed by source_url and
-#            collides on legacy "unknown" URLs, so this is the per-job_id escape
-#            hatch). Latest title event wins; presentation only, never scored.
-ACTIVITY_EVENT = frozenset({"status", "outcome", "note", "title"})
+#  status       — value is an APPLICATION_STATUS the human moved the job to.
+#  outcome      — value is a terminal OUTCOME (job_radar_SPEC §7.3).
+#  note         — value is null; the comment text lives in ``notes``.
+#  title        — value is a human-set display title override (the schema-locked
+#                 JDRecord has no title field; the sidecar is keyed by source_url and
+#                 collides on legacy "unknown" URLs, so this is the per-job_id escape
+#                 hatch). Latest title event wins; presentation only, never scored.
+#  fit_override — value is a FIT_LABEL the owner asserts over the scorer's verdict
+#                 (job_radar_SPEC §10.11 Feature 1), or null to clear a prior override;
+#                 the reason lives in ``notes``. A workflow decision ("treat this role
+#                 as X today") — it NEVER mutates the scored ApplicationRecord, so the
+#                 scorer's value is preserved for corpus quality analysis. Latest wins.
+ACTIVITY_EVENT = frozenset({"status", "outcome", "note", "title", "fit_override"})
 
 # Terminal outcomes (job_radar_SPEC §7.3). Derived from the log at read time;
 # never persisted on ApplicationRecord (model C / Log-only — job_radar_SPEC.md §7.4).
@@ -214,6 +219,10 @@ def validate_activity_event(event: dict) -> list[str]:
     elif kind == "title":
         if not isinstance(value, str) or not value.strip():
             errors.append("value: must be a non-empty string for a title event")
+    elif kind == "fit_override":
+        # null clears a prior override; otherwise it must name a valid fit_label.
+        if value is not None:
+            _check_enum(errors, "value", value, FIT_LABEL)
     elif kind == "note" and value is not None:
         errors.append("value: must be null for a note event")
     return errors

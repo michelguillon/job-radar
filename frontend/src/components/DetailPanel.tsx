@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { api, ApiError, type Job } from "@/lib/api";
+import { api, ApiError, type Annotation, type Job } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { CHIP, fitBadgeClass, statusPillClass, TOAST } from "@/lib/ui";
 import {
-  daysSince, effectiveStatus, fmtDate, isStaleApplied, LABEL_TEXT, listText,
+  daysSince, effectiveStatus, FIT_LABELS, fmtDate, isStaleApplied, LABEL_TEXT, listText,
   OUTCOMES, rejectionStageFor, statusForOutcome,
 } from "@/lib/jobs";
 import { useUnlock } from "@/components/UnlockProvider";
@@ -55,6 +55,19 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function Pill({ status }: { status: string }) {
   return <span className={cn("inline-block rounded-[5px] px-2 py-[2px] text-[11px] font-semibold", statusPillClass(status))}>{status}</span>;
 }
+function AnnotationItem({ a }: { a: Annotation }) {
+  const exp = listText(a.expected);
+  return (
+    <div className="rounded-md border border-line-soft bg-white px-[10px] py-[7px]">
+      <div className="mb-[2px] flex items-center justify-between gap-2">
+        <span className="rounded-[4px] bg-[#eef1f6] px-[7px] py-px text-[11px] font-semibold text-ink-soft">{a.annotation_type}</span>
+        <span className="text-[11px] text-ink-faint">{fmtDate(a.ts)}</span>
+      </div>
+      <p className="text-[12.5px] text-ink">{a.reason}</p>
+      {exp && <p className="mt-[2px] text-[11.5px] text-ink-faint">expected: {exp}</p>}
+    </div>
+  );
+}
 
 function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<void> }) {
   const { requestUnlock } = useUnlock();
@@ -68,11 +81,16 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
   const [reason, setReason] = useState("");
   const [outcome, setOutcomeSel] = useState(rejectionStageFor(job.application_status));
   const [outcomeNotes, setOutcomeNotes] = useState("");
+  const [fitSel, setFitSel] = useState(job.user_fit_label || job.scorer_fit_label);
+  const [fitReason, setFitReason] = useState(job.user_fit_reason || "");
+  const [editingOverride, setEditingOverride] = useState(false);
 
   useEffect(() => {
     setNoteText(job.notes || ""); setTitleText(job.title || "");
     setFlagType(ANNOTATION_TYPES[0]); setExpected(""); setReason("");
     setOutcomeSel(rejectionStageFor(job.application_status)); setOutcomeNotes("");
+    setFitSel(job.user_fit_label || job.scorer_fit_label); setFitReason(job.user_fit_reason || "");
+    setEditingOverride(false);
     setToast(null); setFlagToast(null);
   }, [job.job_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -111,9 +129,25 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
     setOutcomeNotes("");
     return { kind: "ok", text: `Recorded: ${outcome.replace(/_/g, " ")}` };
   });
+  const saveOverride = () => guarded(async () => {
+    await api.setFitOverride(job.job_id, fitSel, fitReason.trim() || undefined);
+    setEditingOverride(false);
+    return { kind: "ok", text: `Fit override → ${LABEL_TEXT[fitSel] || fitSel}` };
+  });
+  const clearOverride = () => guarded(async () => {
+    await api.setFitOverride(job.job_id, null);
+    setEditingOverride(false);
+    return { kind: "ok", text: "Override cleared" };
+  });
   const submitFlag = () => guarded(async () => {
     if (!reason.trim()) return { kind: "err", text: "Reason is required" };
     const { field, observed } = observedFor(flagType, job);
+    // Client-side duplicate check (job_radar_SPEC §10.11 Feature 2): same type + field +
+    // reason as an existing flag. Courtesy warning — the API is the backstop (409).
+    const dup = (job.annotations || []).some(
+      (a) => a.annotation_type === flagType && a.field === field && a.reason === reason.trim(),
+    );
+    if (dup && !window.confirm("This flag already exists. Submit anyway?")) return null;
     await api.flagAnnotation({ job_id: job.job_id, annotation_type: flagType, field, observed, expected: expected.trim(), reason: reason.trim() });
     setExpected(""); setReason("");
     return { kind: "ok", text: "Flag submitted" };
@@ -134,6 +168,41 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
 
   return (
     <>
+      <div className="mt-[18px] rounded-lg border border-line bg-[#fbfcfe] p-[14px]">
+        <h3 className="mb-[10px] text-[11px] font-bold uppercase tracking-wide text-brand">Fit assessment</h3>
+        <div className="mb-[10px] text-[12.5px] text-ink-soft">
+          <span className="font-semibold text-ink">Scorer</span>{" "}
+          <span className={cn("ml-1 inline-block rounded-full px-2 py-px text-[11px] font-bold", fitBadgeClass(job.scorer_fit_label))}>{LABEL_TEXT[job.scorer_fit_label] || job.scorer_fit_label}</span>
+          <span className="ml-2 tabular-nums">fit {job.scorer_fit_score} · priority {job.scorer_priority_score}</span>
+        </div>
+
+        {job.has_fit_override && !editingOverride ? (
+          <div className="rounded-md border border-[#e2c98f] bg-[#fdf7e8] p-[10px]">
+            <div className="mb-[6px] flex flex-wrap items-center gap-2 text-[12px]">
+              <span className="font-bold uppercase tracking-wide text-[#8a5a14]">⚠ Manual override active</span>
+              <span className={cn("inline-block rounded-full px-2 py-px text-[11px] font-bold", fitBadgeClass(job.user_fit_label || ""))}>{LABEL_TEXT[job.user_fit_label || ""] || job.user_fit_label}</span>
+            </div>
+            {job.user_fit_reason && <p className="mb-[8px] text-[12.5px] italic text-ink-soft">“{job.user_fit_reason}”</p>}
+            <div className="flex flex-wrap gap-[6px]">
+              <button className={BTN} onClick={() => { setFitSel(job.user_fit_label || job.scorer_fit_label); setFitReason(job.user_fit_reason || ""); setEditingOverride(true); }} disabled={busy}>Edit override</button>
+              <button className={BTN} onClick={clearOverride} disabled={busy}>Clear override</button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-end gap-2">
+            <div>
+              <label className={LABEL}>Override fit label</label>
+              <select className={cn(FIELD_INPUT, "w-auto min-w-[150px]")} value={fitSel} disabled={busy} onChange={(e) => setFitSel(e.target.value)}>
+                {FIT_LABELS.map((l) => <option key={l} value={l}>{LABEL_TEXT[l] || l}</option>)}
+              </select>
+            </div>
+            <input className={cn(FIELD_INPUT, "min-w-[140px] flex-1")} value={fitReason} placeholder="Reason (recommended)…" disabled={busy} onChange={(e) => setFitReason(e.target.value)} />
+            <button className={BTN_PRIMARY} onClick={saveOverride} disabled={busy}>Save override</button>
+            {editingOverride && <button className={BTN} onClick={() => setEditingOverride(false)} disabled={busy}>Cancel</button>}
+          </div>
+        )}
+      </div>
+
       <div className="mt-[18px] rounded-lg border border-line bg-[#fbfcfe] p-[14px]">
         <h3 className="mb-[10px] text-[11px] font-bold uppercase tracking-wide text-brand">Workflow</h3>
 
@@ -192,7 +261,14 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
       </div>
 
       <div className="mt-[18px] rounded-lg border border-line bg-[#fbfcfe] p-[14px]">
-        <h3 className="mb-[10px] text-[11px] font-bold uppercase tracking-wide text-brand">Flag scoring issue</h3>
+        <h3 className="mb-[10px] text-[11px] font-bold uppercase tracking-wide text-brand">
+          Flag scoring issue{!!(job.annotations || []).length && ` · ${job.annotations.length} existing`}
+        </h3>
+        {!!(job.annotations || []).length && (
+          <div className="mb-[12px] space-y-[6px]">
+            {job.annotations.map((a, i) => <AnnotationItem key={i} a={a} />)}
+          </div>
+        )}
         <label className={LABEL}>Type</label>
         <select className={cn(FIELD_INPUT, "mb-2")} value={flagType} disabled={busy} onChange={(e) => setFlagType(e.target.value)}>
           {ANNOTATION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -229,6 +305,7 @@ export function DetailPanel({ job, onClose, onChanged }: { job: Job; onClose: ()
           <h2 className="mb-[10px] mt-[2px] text-[19px] font-semibold">{job.title}</h2>
           <div className="flex flex-wrap items-center gap-2">
             <span className={cn("inline-block rounded-full px-2 py-[2px] text-[11px] font-bold", fitBadgeClass(job.fit_label))}>{LABEL_TEXT[job.fit_label] || job.fit_label}</span>
+            {job.has_fit_override && <span className="rounded-full bg-[#fdf7e8] px-[7px] py-px text-[10.5px] font-bold uppercase tracking-wide text-[#8a5a14]" title={`Overridden — scorer said ${LABEL_TEXT[job.scorer_fit_label] || job.scorer_fit_label}`}>override</span>}
             <Pill status={effectiveStatus(job)} />
             {job.outcome && <span className="rounded-[5px] bg-[#f3dede] px-2 py-px text-[11px] font-semibold text-[#9a3636]">{job.outcome.replace(/_/g, " ")}</span>}
             {isStaleApplied(job) && <span className="rounded-full bg-[#f6e3d3] px-[7px] py-px text-[10.5px] font-bold uppercase tracking-wide text-[#b4540f]">stale</span>}

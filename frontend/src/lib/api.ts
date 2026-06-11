@@ -43,13 +43,27 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// One scoring flag embedded per job (job_radar_SPEC §10.11 Feature 2). observed/expected are
+// whatever was flagged (a value or list), passed through from corpus/annotations.jsonl.
+export interface Annotation {
+  ts: string;
+  annotation_type: string;
+  field: string;
+  observed: unknown;
+  expected: unknown;
+  reason: string;
+  scorer_label: string | null;
+  scorer_fit_score: number | null;
+}
+
 // One denormalised index row — score ⨝ JDRecord ⨝ sidecar ⨝ activity-log projection
 // (built by cli.stats.build_index_rows; the API overlays live workflow state on read).
 export interface Job {
   job_id: string;
   company: string;
   title: string;
-  // scoring (ApplicationRecord)
+  // scoring (ApplicationRecord) — fit_label/priority_score are the DISPLAY values (the
+  // owner's fit override wins over the scorer here; scorer_* preserves the original).
   fit_score: number;
   fit_label: string;
   fit_label_reason: string;
@@ -58,6 +72,19 @@ export interface Job {
   blocking_constraints: string[];
   scored_at: string;
   profile_version: string;
+  // fit override (Feature 1): scorer verdict vs owner override, both preserved
+  scorer_fit_label: string;
+  scorer_fit_score: number;
+  scorer_priority_score: number;
+  user_fit_label: string | null;
+  user_fit_reason: string | null;
+  display_fit_label: string;
+  display_priority_score: number;
+  has_fit_override: boolean;
+  // scoring flags (Feature 2)
+  annotations: Annotation[];
+  annotation_count: number;
+  has_annotations: boolean;
   // live workflow state (activity-log projection)
   application_status: string;
   outcome: string | null;
@@ -136,6 +163,9 @@ export const api = {
   setTitle: (job_id: string, title: string) => post<{ ok: boolean; title: string }>("/title", { job_id, title }),
   setOutcome: (job_id: string, outcome: string, notes?: string) =>
     post<{ ok: boolean; outcome: string }>("/outcome", { job_id, outcome, notes }),
+  // fit_label=null clears a prior override (job_radar_SPEC §10.11 Feature 1).
+  setFitOverride: (job_id: string, fit_label: string | null, reason?: string) =>
+    post<{ ok: boolean; fit_label: string | null }>("/fit-override", { job_id, fit_label, reason }),
   flagAnnotation: (payload: AnnotationPayload) =>
     post<{ ok: boolean; annotation_type: string }>("/annotations", payload),
 };

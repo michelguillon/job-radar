@@ -1752,5 +1752,56 @@ keep bare runs safe (today's data only) rather than dropping the guard entirely.
 
 ---
 
+### Phase 6 (§10.11) — fit override + annotation visibility: the "display vs scorer" split
+
+**Context:** Two usability gaps from daily use (SPEC §10.11). Feature 1: the scorer's
+`fit_label` is sometimes wrong for the owner's situation, with no way to reflect that without
+mutating locked scorer output. Feature 2: annotations appended silently — no way to see
+existing flags or avoid duplicates. Both built as event-log-append + read-model-join, no
+scorer/schema/pipeline change.
+
+#### Decisions / surprises
+
+- **An override is a workflow decision, not a correction.** It rides the *same* append-only
+  activity log as status/notes (a new `fit_override` `ACTIVITY_EVENT`, value ∈ `FIT_LABEL` or
+  `null` to clear), and the scored `ApplicationRecord` is never touched. So `scorer_fit_label`
+  and `user_fit_label` coexist forever — the scorer value stays clean for corpus quality
+  analysis / future fine-tuning, while the UI shows the owner's call. Annotation (Feature 2)
+  is the *other* lane: "the system may be wrong, review later" — it changes nothing the owner
+  acts on today. Keeping the two orthogonal (and saying so in the SPEC table) stopped them
+  from collapsing into one muddy "feedback" concept.
+- **Resolve display in the read model, keep the field names the UI already uses.** Rather
+  than rename `fit_label`/`priority_score` everywhere and touch every view, `build_index_rows`
+  sets `fit_label` to the *display* value (override or scorer) and adds explicit
+  `scorer_*`/`user_*`/`display_*`/`has_fit_override` alongside. The whole existing UI
+  (sort/filter/badge/stats) then reflects the override with zero churn, and the detail panel
+  shows scorer-vs-override using the explicit fields. The live `GET /api/index` overlay
+  recomputes the display from the *preserved* `scorer_fit_label`, so it's correct even on an
+  index.json built before the override.
+- **Two-event folding gotcha.** `project` folds any event's non-empty `notes` into the
+  workflow `notes`. A `fit_override`'s `notes` is its *reason*, not a workflow note, so it had
+  to be excluded from that fold (and stored as `fit_override_reason`) — otherwise saving an
+  override silently overwrote the role's note. Caught only because the existing
+  `test_project_latest_..._notes` pinned the behaviour; my first cut (folding the dispatch and
+  the notes into one `if/elif` chain) also broke status-with-notes. The fix keeps the notes
+  fold a *separate* step that skips `fit_override`.
+- **Duplicate prevention is server-enforced, client-courteous.** The API is the backstop
+  (`409` on exact `job_id`+`type`+`field`+`reason`); the UI's "this flag already exists,
+  submit anyway?" is a pre-flight courtesy read from the embedded annotations. "Submit anyway"
+  then legitimately hits the `409` — the client warning just saves a round-trip and explains
+  the rejection. The same `load_annotations` projection feeds both the export embed and the
+  live overlay, so a freshly submitted flag shows on reload (revising the earlier "annotations
+  don't affect the read model" note now that they're part of it).
+
+#### Reusable pattern
+
+When a model output needs a human override but the producer is locked, **don't mutate the
+output — add an override event in the existing log and resolve a `display_*` in the read
+model, preserving the original `producer_*` beside it.** The UI keeps its field names; the
+provenance survives for later analysis; re-running the producer can't wipe the human's call.
++19 tests (381 total); frontend `tsc -b` clean.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

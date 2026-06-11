@@ -174,6 +174,33 @@ def test_project_keeps_latest_title_override():
     assert track.project(events)["j1"]["title_override"] == "Second"
 
 
+def test_project_folds_fit_override_with_reason():
+    events = [
+        _ev("j1", "fit_override", "good_fit", ts="2026-06-05T00:00:00Z", notes="depth gap"),
+    ]
+    state = track.project(events)["j1"]
+    assert state["fit_override"] == "good_fit"
+    assert state["fit_override_reason"] == "depth gap"
+    assert state["notes"] == ""  # the override reason is NOT a workflow note
+
+
+def test_project_latest_fit_override_wins_and_null_clears():
+    events = [
+        _ev("j1", "fit_override", "stretch", ts="2026-06-01T00:00:00Z", notes="r1"),
+        _ev("j1", "fit_override", None, ts="2026-06-05T00:00:00Z"),  # cleared
+    ]
+    state = track.project(events)["j1"]
+    assert state["fit_override"] is None
+    assert state["fit_override_reason"] is None
+
+
+def test_build_event_fit_override_validates_label():
+    track.build_event("sha256:a", event="fit_override", value="good_fit", notes="", ts="2026-06-10T00:00:00Z")
+    track.build_event("sha256:a", event="fit_override", value=None, notes="", ts="2026-06-10T00:00:00Z")  # clear is valid
+    with pytest.raises(ValueError):
+        track.build_event("sha256:a", event="fit_override", value="not_a_label", notes="", ts="2026-06-10T00:00:00Z")
+
+
 # --- filter / sort -------------------------------------------------------------
 
 def _rows():

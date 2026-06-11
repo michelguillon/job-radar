@@ -42,8 +42,9 @@ def settings(tmp_path) -> Settings:
         "stats": {"total": 1},
         "records": [{
             "job_id": "sha256:j1", "company": "Acme", "title": "Solutions Engineer",
-            "fit_score": 7, "fit_label": "good_fit", "application_status": "new",
-            "outcome": None, "application_date": None, "notes": "",
+            "fit_score": 7, "fit_label": "good_fit", "scorer_fit_label": "good_fit",
+            "scorer_fit_score": 7, "display_fit_label": "good_fit", "has_fit_override": False,
+            "application_status": "new", "outcome": None, "application_date": None, "notes": "",
         }],
     }), encoding="utf-8")
     return Settings(
@@ -238,6 +239,18 @@ def test_annotation_appends_with_scorer_context(client, monkeypatch):
     assert rec["scorer_fit_score"] == 7
 
 
+def test_annotation_duplicate_409(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    payload = {"job_id": "sha256:j1", "annotation_type": "domain_incorrect", "field": "domain",
+               "observed": [], "expected": [], "reason": "catch-all"}
+    assert client.post("/api/annotations", json=payload).status_code == 200
+    # exact dup (same job_id + type + field + reason) → 409
+    assert client.post("/api/annotations", json=payload).status_code == 409
+    # a different reason is not a dup
+    assert client.post("/api/annotations", json={**payload, "reason": "different"}).status_code == 200
+
+
 def test_annotation_bad_type_422(client, monkeypatch):
     monkeypatch.setenv("JR_WRITE_KEY", KEY)
     _unlock(client)
@@ -256,6 +269,63 @@ def test_annotation_unknown_job_id_404(client, monkeypatch):
         "observed": [], "expected": [], "reason": "r",
     })
     assert r.status_code == 404
+
+
+# --- fit override (Feature 1) --------------------------------------------------
+
+def test_fit_override_appends_event(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    r = client.post("/api/fit-override", json={"job_id": "sha256:j1", "fit_label": "stretch", "reason": "depth gap"})
+    assert r.status_code == 200
+    events = track.load_events(client.settings.log_path)
+    assert events[0]["event"] == "fit_override"
+    assert events[0]["value"] == "stretch"
+    assert events[0]["notes"] == "depth gap"
+
+
+def test_fit_override_invalid_label_422(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    assert client.post("/api/fit-override", json={"job_id": "sha256:j1", "fit_label": "nonsense"}).status_code == 422
+
+
+def test_fit_override_403_without_cookie(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    assert client.post("/api/fit-override", json={"job_id": "sha256:j1", "fit_label": "stretch"}).status_code == 403
+
+
+def test_fit_override_unknown_job_404(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    assert client.post("/api/fit-override", json={"job_id": "sha256:ghost", "fit_label": "stretch"}).status_code == 404
+
+
+def test_index_overlays_fit_override_and_clear(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    # the seeded index.json row scored good_fit; an override must show on reload (no re-export)
+    client.post("/api/fit-override", json={"job_id": "sha256:j1", "fit_label": "stretch", "reason": "depth gap"})
+    rec = client.get("/api/index").json()["records"][0]
+    assert rec["scorer_fit_label"] == "good_fit"     # scorer preserved
+    assert rec["user_fit_label"] == "stretch"
+    assert rec["display_fit_label"] == "stretch" and rec["fit_label"] == "stretch"
+    assert rec["has_fit_override"] is True
+    # clearing reverts the display to the scorer value
+    client.post("/api/fit-override", json={"job_id": "sha256:j1", "fit_label": None})
+    rec = client.get("/api/index").json()["records"][0]
+    assert rec["has_fit_override"] is False
+    assert rec["display_fit_label"] == "good_fit" and rec["user_fit_label"] is None
+
+
+def test_index_overlays_live_annotations(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    client.post("/api/annotations", json={"job_id": "sha256:j1", "annotation_type": "domain_incorrect",
+                                          "field": "domain", "observed": [], "expected": [], "reason": "over-tag"})
+    rec = client.get("/api/index").json()["records"][0]
+    assert rec["annotation_count"] == 1 and rec["has_annotations"] is True
+    assert rec["annotations"][0]["annotation_type"] == "domain_incorrect"
 
 
 # --- index: shape + live overlay -----------------------------------------------

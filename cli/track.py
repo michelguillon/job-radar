@@ -118,6 +118,8 @@ def _default_state() -> dict:
         "application_date": None,
         "notes": "",
         "title_override": None,
+        "fit_override": None,         # latest fit_label override (None = none / cleared)
+        "fit_override_reason": None,  # the override's reason (event notes)
     }
 
 
@@ -129,7 +131,11 @@ def project(events: list[dict]) -> dict[str, dict]:
       outcome           -> latest outcome event's value (default None)
       application_date  -> date of the *earliest* status=applied event
       title_override    -> latest title event's value (default None)
+      fit_override      -> latest fit_override value (None if never set or cleared)
+      fit_override_reason -> the latest fit_override event's notes
       notes             -> notes of the most recent event carrying non-empty notes
+                           (fit_override notes are the override *reason*, not a
+                           workflow note, so they are folded separately)
     """
     ordered = sorted(events, key=lambda e: e.get("ts", ""))
     states: dict[str, dict] = {}
@@ -147,8 +153,13 @@ def project(events: list[dict]) -> dict[str, dict]:
             state["outcome"] = event.get("value")
         elif kind == "title":
             state["title_override"] = event.get("value")
+        elif kind == "fit_override":
+            state["fit_override"] = event.get("value")  # None clears it
+            state["fit_override_reason"] = event.get("notes") or None
+        # status/outcome/note carry a workflow note in `notes`; a fit_override's notes
+        # are its own *reason* (folded above) and must not clobber the workflow note.
         note = event.get("notes")
-        if note:
+        if note and kind != "fit_override":
             state["notes"] = note
     return states
 

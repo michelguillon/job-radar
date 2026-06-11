@@ -42,6 +42,9 @@ from models.record import JDRECORD_SCHEMA_VERSION, SCHEMA_VERSION, JDRecord
 
 INDEX_PATH = "corpus/index.json"
 STATS_PATH = "corpus/stats.json"
+# Field-level scoring flags (Phase 6). Canonical path lives here so the read model
+# (this CLI) and the write path (api/) share one constant; api/settings imports it.
+ANNOTATIONS_PATH = "corpus/annotations.jsonl"
 
 
 def load_records(input_glob: str) -> list[JDRecord]:
@@ -130,34 +133,79 @@ def _location_for(jd: JDRecord | None, meta: dict | None) -> str:
     return jd.location if jd else ""
 
 
-def build_index_rows(scores, jds, metas, workflow) -> list[dict]:
+# Fields carried per annotation onto an index row (job_radar_SPEC §10.11 Feature 2).
+_ANNOTATION_VIEW_FIELDS = (
+    "ts", "annotation_type", "field", "observed", "expected", "reason",
+    "scorer_label", "scorer_fit_score",
+)
+
+
+def load_annotations(path: str = ANNOTATIONS_PATH) -> dict[str, list[dict]]:
+    """Group scoring flags from ``corpus/annotations.jsonl`` by ``job_id``.
+
+    Append-only and tolerant (reuses ``cli.track.load_events``); each annotation is
+    projected to the view fields the UI needs. Used by the index export (embed) and by
+    the live ``GET /api/index`` overlay so a freshly submitted flag shows on reload.
+    """
+    by_job: dict[str, list[dict]] = {}
+    for event in load_events(path):
+        job_id = event.get("job_id")
+        if not job_id:
+            continue
+        by_job.setdefault(job_id, []).append({f: event.get(f) for f in _ANNOTATION_VIEW_FIELDS})
+    return by_job
+
+
+def build_index_rows(scores, jds, metas, workflow, annotations=None) -> list[dict]:
     """One denormalised row per scored ``job_id``: scoring + live workflow state +
     JDRecord extraction (filters + detail) + full JD text. Mirrors the tracker's
     join (cli.track.build_rows) but carries the extra extraction/detail the UI needs.
+
+    Feature 1 (§10.11): exposes both the scorer's verdict (``scorer_*``) and any owner
+    ``fit_override`` (``user_*``), plus the resolved ``display_*`` the UI sorts/filters on.
+    The scorer's value is preserved — an override never mutates the ApplicationRecord.
+    Feature 2 (§10.11): embeds existing annotations per job for visibility + dup checks.
     """
+    annotations = annotations or {}
     rows: list[dict] = []
     for job_id, score in scores.items():
         jd = jds.get(job_id)
         meta = metas.get(jd.source_url) if jd else None
         state = workflow.get(job_id, _default_state())
+        override = state.get("fit_override")
+        display_fit = override or score.fit_label
+        job_annotations = annotations.get(job_id, [])
         row = {
             "job_id": job_id,
             "company": jd.company if jd else "?",
             "title": _title_for(jd, meta, state.get("title_override")),
-            # --- scoring (ApplicationRecord) ---
+            # --- scoring (ApplicationRecord), with the display value the UI uses ---
             "fit_score": score.fit_score,
-            "fit_label": score.fit_label,
+            "fit_label": display_fit,
             "fit_label_reason": score.fit_label_reason,
             "priority_score": score.priority_score,
             "requirement_gaps": score.requirement_gaps,
             "blocking_constraints": score.blocking_constraints,
             "scored_at": score.scored_at,
             "profile_version": score.profile_version,
+            # --- fit override (Feature 1): scorer vs user, both preserved ---
+            "scorer_fit_label": score.fit_label,
+            "scorer_fit_score": score.fit_score,
+            "scorer_priority_score": score.priority_score,
+            "user_fit_label": override,
+            "user_fit_reason": state.get("fit_override_reason"),
+            "display_fit_label": display_fit,
+            "display_priority_score": score.priority_score,
+            "has_fit_override": override is not None,
             # --- live workflow state (activity-log projection) ---
             "application_status": state["status"],
             "outcome": state["outcome"],
             "application_date": state["application_date"],
             "notes": state["notes"],
+            # --- scoring flags (Feature 2) ---
+            "annotations": job_annotations,
+            "annotation_count": len(job_annotations),
+            "has_annotations": bool(job_annotations),
             # --- location ---
             "location": _location_for(jd, meta),
             "location_workable": derive_location_workable(meta),
@@ -231,6 +279,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--validated", default=VALIDATED_GLOB, help=f"Glob for validated JDs used by --export-index (default: {VALIDATED_GLOB})")
     parser.add_argument("--meta", default=META_GLOB, help=f"Glob for metadata sidecars used by --export-index (default: {META_GLOB})")
     parser.add_argument("--activity-log", default=LOG_PATH, dest="activity_log", help=f"Activity log used by --export-index (default: {LOG_PATH})")
+    parser.add_argument("--annotations", default=ANNOTATIONS_PATH, help=f"Scoring-flag log embedded by --export-index (default: {ANNOTATIONS_PATH})")
     parser.add_argument("--stats-file", default=STATS_PATH, dest="stats_file", help=f"Cost ledger for cost-to-date (default: {STATS_PATH})")
     args = parser.parse_args(argv)
 
@@ -244,7 +293,8 @@ def main(argv: list[str] | None = None) -> int:
         jds = load_jdrecords(args.validated)
         metas = load_meta(args.meta)
         workflow = project(load_events(args.activity_log))
-        rows = build_index_rows(scores, jds, metas, workflow)
+        annotations = load_annotations(args.annotations)
+        rows = build_index_rows(scores, jds, metas, workflow, annotations)
         stats = index_stats(rows, cost_to_date=load_cost_to_date(args.stats_file))
         path = export_index(rows, stats)
         print(f"\nIndex → {path} ({len(rows)} scored job(s), ${stats['cost_to_date_usd']:.2f} to date)")

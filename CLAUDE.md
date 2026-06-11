@@ -84,7 +84,7 @@ thing tests actually run against.
 | 3 — Job Tracker | ✅ complete — `track.py` (model C, append-only event log), 263 tests. Extraction quality fixed (deviation 21). Real corpus build underway. Scorer locked. |
 | 4 — Discovery Layer | ✅ complete + **operational** — incremental collection (deviation 24) + `cli/digest.py` (deviation 26) + **working** weekly cron (`cron/`, fixed deviation 36) + cross-corpus dedupe (deviation 19). **102-company universe** seeded (SPEC §11.1); first real server run: 5,498 collected → 65 new survivors → 117 scored, $3.18 to date. |
 | 5 — Static UI | ✅ complete — `ui/{index.html,app.js,style.css}` static SPA (no framework/build/CDN), reads the joined `corpus/index.json`, served by nginx behind the `ui` Docker profile (`docker compose --profile ui up` → :8080). Browse + Pipeline + detail drawer + filters + stats bar. `index.json` contract changed to a join (deviation 27). 318 tests. |
-| 6 — Interactive UI | ✅ complete — thin FastAPI `api/` (security/settings/main + index/auth/workflow/annotations routers) over `cli.track` + `models.record`; stdlib-HMAC `jr_write` cookie, fail-closed (`JR_WRITE_KEY`/`COOKIE_SECURE`); `GET /api/index` re-projects the live activity log; `ANNOTATION_TYPE` + `validate_annotation_event` (constants only, no schema bump); `corpus/annotations.jsonl` sink. **React/Vite `frontend/`** (cv-tailor stack: `UnlockProvider`, typed `lib/api`, `useIndex`, Browse/Pipeline/Detail + owner write controls + flag form) replaces the retired Phase 5 `ui/`. `api` + `frontend` compose services (`--profile ui` → :8080/:8000). **362 tests + browser-verified.** **Deployed** behind Caddy + Cloudflare at job-radar.michel-portfolio.co.uk (`docker-compose.prod.yml`, SPEC §10.9). Conventions: `api/CLAUDE.md`, `frontend/CLAUDE.md` (deviations 28–36). |
+| 6 — Interactive UI | ✅ complete — thin FastAPI `api/` (security/settings/main + index/auth/workflow/annotations routers) over `cli.track` + `models.record`; stdlib-HMAC `jr_write` cookie, fail-closed (`JR_WRITE_KEY`/`COOKIE_SECURE`); `GET /api/index` re-projects the live activity log; `ANNOTATION_TYPE` + `validate_annotation_event` (constants only, no schema bump); `corpus/annotations.jsonl` sink. **React/Vite `frontend/`** (cv-tailor stack: `UnlockProvider`, typed `lib/api`, `useIndex`, Browse/Pipeline/Detail + owner write controls + flag form) replaces the retired Phase 5 `ui/`. `api` + `frontend` compose services (`--profile ui` → :8080/:8000). **362 tests + browser-verified.** **Deployed** behind Caddy + Cloudflare at job-radar.michel-portfolio.co.uk (`docker-compose.prod.yml`, SPEC §10.9). **§10.11 workflow enhancements built**: manual fit override + annotation visibility/dedup (event-log append + read-model join, no scorer/schema change; deviation 37). Conventions: `api/CLAUDE.md`, `frontend/CLAUDE.md` (deviations 28–37). |
 | 7 — Fine-Tuned Analyser | Deferred (Project 5) |
 
 ---
@@ -385,6 +385,30 @@ thing tests actually run against.
     label → validate → score → stats --export-index), `dedupe` line dropped (prefilter dedups).
     Caveat baked into the script: **don't schedule near 00:00 UTC** — the date-keyed stages
     would split across two stamps. +4 tests (362). (Manual run cost $3.18 to date / 117 scored.)
+37. (Phase 6 — §10.11 workflow enhancements, built) **Manual fit override + annotation
+    visibility** — two event-log-append + read-model-join features, **no scorer/schema/
+    pipeline change** (`SCHEMA_VERSION` stays 1.3; constants + read-model only, same pattern
+    as deviations 23/32). **Feature 1 (fit override):** added `"fit_override"` to
+    `ACTIVITY_EVENT` (`models/record.py`; `validate_activity_event` requires `value ∈
+    FIT_LABEL`, or `null` to clear). `cli.track.project` folds the latest override into
+    `fit_override`/`fit_override_reason` — the override's `notes` is its **reason**, folded
+    separately so it never clobbers the workflow `notes`. `cli.stats.build_index_rows` emits
+    `scorer_*` (preserved) + `user_fit_label`/`user_fit_reason` + `display_*` +
+    `has_fit_override`, and sets `fit_label`/`priority_score` to the **display** value so the
+    existing UI (sort/filter/badge) reflects the override with no churn. `POST
+    /api/fit-override {job_id, fit_label, reason?}` (gated; 404 unknown job; 422 bad label;
+    `fit_label:null` clears). **Feature 2 (annotation visibility):** `cli.stats.load_annotations`
+    groups `corpus/annotations.jsonl` by `job_id`; `build_index_rows` embeds
+    `annotations`/`annotation_count`/`has_annotations`. `POST /api/annotations` returns **409**
+    on an exact duplicate (`job_id` + `annotation_type` + `field` + `reason`); the React flag
+    form warns client-side ("submit anyway?") from the embedded list. **`GET /api/index`
+    overlay extended** (`overlay_workflow`) to re-resolve the live fit override (display
+    recomputed from the preserved `scorer_fit_label`) **and** refresh embedded annotations from
+    the live log — both show on reload without a re-export (revises deviation 29's "annotations
+    don't affect the read model"). `ANNOTATIONS_PATH` moved to the canonical `cli.stats`
+    (re-exported by `api.settings`). Frontend: detail-panel "Fit assessment" card (scorer vs
+    override, Save/Edit/Clear) + existing-annotations list above the flag form; Browse `⚠`/`ovr`
+    row badges. +19 tests (381); `tsc -b` clean.
 
 ---
 
