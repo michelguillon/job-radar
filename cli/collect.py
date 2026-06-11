@@ -83,22 +83,31 @@ def write_cursor(source: str, ts: str, cursor_dir: str | None = None) -> None:
 
 
 def load_companies(path: str = SEEDS_PATH) -> list[dict]:
-    """Load the company seed list from ``company_seeds.yaml``."""
+    """Load the company seed list from ``company_seeds.yaml``.
+
+    Accepts either a bare top-level list (the v2 metadata format) or a
+    ``{companies: [...]}`` mapping (the v1.1 wrapped format) — both ship from
+    the same generator and either is valid. Each entry is ``{name, ats, slug}``
+    plus the optional v2 metadata (``domain``, ``fit_hypothesis``, ``action``,
+    ``notes``) — all optional, missing → absent (the consumer defaults them).
+    """
     with open(path, encoding="utf-8") as fh:
-        return yaml.safe_load(fh)["companies"]
+        data = yaml.safe_load(fh)
+    return data["companies"] if isinstance(data, dict) else data
 
 
 def select(companies: list[dict], source: str, company: str | None) -> list[dict]:
     """Filter the seed list by ``--source`` (ATS, or ``all``) and ``--company``.
 
     ``--company`` matches either the slug or the display name, case-insensitively.
+    Manual watch entries (``slug: null``) only match by name — they carry no slug.
     """
     selected = []
     for c in companies:
         if source != "all" and c["ats"] != source:
             continue
         if company is not None and company.lower() not in (
-            c["slug"].lower(),
+            (c.get("slug") or "").lower(),
             c["name"].lower(),
         ):
             continue
@@ -123,9 +132,16 @@ def collect(
     cursors = updated_after_by_source or {}
     jobs = []
     for c in companies:
+        # Editorial `action` is advisory in v1 (BACKLOG_YIELD_TRACKING §8): `pause`
+        # logs a skip notice but still collects (no automatic behaviour change yet);
+        # `investigate_ats` is surfaced only in the yield report. Neither alters flow.
+        if c.get("action") == "pause":
+            log.info("action=pause for %s — still collecting in v1 (skip is a future enhancement)", c["name"])
         fetch = registry.get(c["ats"])
         if fetch is None:
-            log.warning("no collector for ats %r (%s) — skipping", c["ats"], c["name"])
+            # ats=manual (slug: null) watch entries land here too — logged and skipped
+            # cleanly, never an error (BACKLOG_YIELD_TRACKING — manual watch entries).
+            log.info("no collector for ats %r (%s) — skipping", c["ats"], c["name"])
             continue
         jobs.extend(
             fetch(c["slug"], c["name"], collected_at=collected_at, updated_after=cursors.get(c["ats"]))

@@ -52,6 +52,48 @@ def test_select_by_company_name_case_insensitive():
     assert [c["name"] for c in out] == ["Mistral"]
 
 
+def test_select_handles_null_slug_manual_entry():
+    # A manual watch entry (slug: null) must match by name and never crash on slug.
+    seeds = [{"name": "Jack & Jill AI", "ats": "manual", "slug": None}]
+    assert collect.select(seeds, "all", "jack & jill ai") == seeds
+    assert collect.select(seeds, "all", "missing") == []
+    assert collect.select(seeds, "all", None) == seeds  # no --company filter
+
+
+# --- load_companies: both seed shapes ---
+
+
+def test_load_companies_bare_list(tmp_path):
+    p = tmp_path / "seeds.yaml"
+    p.write_text("- {name: A, ats: ashby, slug: a}\n- {name: B, ats: lever, slug: b}\n", encoding="utf-8")
+    out = collect.load_companies(str(p))
+    assert [c["name"] for c in out] == ["A", "B"]
+
+
+def test_load_companies_wrapped_mapping(tmp_path):
+    p = tmp_path / "seeds.yaml"
+    p.write_text("companies:\n  - {name: A, ats: ashby, slug: a}\n", encoding="utf-8")
+    assert [c["name"] for c in collect.load_companies(str(p))] == ["A"]
+
+
+# --- collect: advisory action + manual entries ---
+
+
+def test_collect_pause_action_still_collects(caplog):
+    import logging
+    seeds = [{"name": "Paused Co", "ats": "greenhouse", "slug": "paused", "action": "pause"}]
+    with caplog.at_level(logging.INFO):
+        records = collect.collect(seeds, registry={"greenhouse": lambda *a, **k: [_record("Paused Co")]})
+    assert len(records) == 1  # pause is advisory in v1 — still collected
+    assert any("action=pause" in r.message for r in caplog.records)
+
+
+def test_collect_manual_entry_skipped_no_error():
+    seeds = [{"name": "Jack & Jill AI", "ats": "manual", "slug": None, "action": "investigate_ats"}]
+    # manual ATS has no collector → logged + skipped, never raises
+    assert collect.collect(seeds, registry={"greenhouse": lambda *a, **k: [_record()]}) == []
+
+
 # --- collect / routing ---
 
 

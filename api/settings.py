@@ -12,7 +12,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from cli.stats import ANNOTATIONS_PATH, INDEX_PATH
+from cli.collect import SEEDS_PATH
+from cli.stats import ANNOTATIONS_PATH, INDEX_PATH, STATS_PATH
 from cli.track import LOG_PATH, META_GLOB, SCORED_GLOB, VALIDATED_GLOB
 
 # ANNOTATIONS_PATH (field-level scoring flags, separate from the activity log) is the
@@ -28,6 +29,10 @@ class Settings:
     meta_glob: str
     index_path: str
     annotations_path: str
+    # Yield report inputs (BACKLOG_YIELD_TRACKING). Defaulted so existing Settings(...)
+    # construction (e.g. the API test fixtures) keeps working without these.
+    seeds_path: str = SEEDS_PATH
+    stats_path: str = STATS_PATH
 
 
 def get_settings() -> Settings:
@@ -39,4 +44,6 @@ def get_settings() -> Settings:
         meta_glob=os.environ.get("JR_META_GLOB", META_GLOB),
         index_path=os.environ.get("JR_INDEX_PATH", INDEX_PATH),
         annotations_path=os.environ.get("JR_ANNOTATIONS_PATH", ANNOTATIONS_PATH),
+        seeds_path=os.environ.get("JR_SEEDS_PATH", SEEDS_PATH),
+        stats_path=os.environ.get("JR_STATS_PATH", STATS_PATH),
     )

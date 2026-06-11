@@ -1,7 +1,22 @@
 # Backlog Spec — Company Yield Tracking
 
-**Status:** Backlog — do not build until prerequisites are met (see §1).
-**Trigger:** §11.1 company metadata built + 4+ weeks production data accumulated.
+**Status:** ✅ **BUILT 2026-06-11.** Implemented as `cli.analyse --report yield` +
+`GET /api/report/yield` + a React sidebar download button, alongside the v2 company
+metadata seeds (`domain`/`fit_hypothesis`/`action`/`notes`). The spec below is retained
+as the design record. Deltas from this spec as built:
+- **Volume metric is `jobs_scored`** (not a separately tracked `jobs_labelled`); cost =
+  `jobs_scored × COST_PER_JOB`. `jobs_collected` (validated count) is tracked for the
+  "no live jobs" section.
+- **Rollups: `domain` + `ats`** in v1 (sector/archetype/complexity_type deferred — the v2
+  seeds carry `domain`, not a separate `sector` field; `domain` is the sector rollup).
+- **`high_score_rejected`** is derived directly (`fit_score ≥ 7` AND latest status
+  `rejected`), not from a `fit_score_disagree` annotation.
+- The join is **by exact company name**; corpus companies with no matching seed fall under
+  domain `(unknown)`.
+- The CLI flag is `--report yield` (the `--yield`/`--output FILE` forms in §9/§10 were not
+  added — the API endpoint serves the download).
+
+**Original trigger:** §11.1 company metadata built + 4+ weeks production data accumulated.
 
 ---
 

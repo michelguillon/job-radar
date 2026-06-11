@@ -1,131 +1,688 @@
-# company_seeds.yaml — Job Radar Company Universe v1.1 (merged)
-# Generated: 2026-06-11 — verified via find_ats_slugs.py
-# 73 companies | Greenhouse: 42 | Ashby: 27 | Lever: 4
+# company_seeds.yaml — Job Radar Company Universe v2
+# Adds per-company metadata: domain, fit_hypothesis, notes, action
+# Generated: 2026-06-11 | 81 companies: greenhouse 49 | ashby 27 | lever 4 | manual 1
+# Names align to the existing corpus' company values so the yield-report join
+# matches: "Mistral" (not "Mistral AI"); Perplexity reinstated (carried from v1,
+# has scored roles).
 #
-# Merge note: the curated v1.1 universe (72 companies, tiered A/B/C) is the canonical
-# seed list, carrying over Perplexity from v1 — the only v1 company absent from v1.1, and
-# it already has scored roles in the corpus, so it is kept (under ai_application_platforms).
+# domain vocabulary (company-level):
+#   frontier_ai | ai_application_platform | ai_data_platform | ai_infrastructure
+#   developer_tooling | fintech_infrastructure | fintech_platform
+#   adtech_martech | identity_security | enterprise_software
+#   semiconductor_ai_compute | strategic_ai_delivery | retail_media_data
+#   customer_data_martech
 #
-# Format note: cli.collect reads `yaml.safe_load(...)["companies"]`, so every entry lives
-# under the `companies:` key. v1.1 shipped as a bare list — wrapped here. Each entry is
-# {name, ats, slug}; ats ∈ {greenhouse, lever, ashby}.
-#
-# Not collectable (Workday / custom portal / not found on any ATS):
-#   Cognigy, Hugging Face, Checkout.com, Rapyd, Wise, Revolut, Klarna,
-#   Starling Bank, Arm, Groq, SambaNova, SiFive, HashiCorp, NVIDIA,
-#   Microsoft, AWS, Google Cloud, Oracle Cloud, Bloomberg, LSEG, FactSet,
-#   S&P Global, Auth0 (acquired by Okta), SailPoint, Atlassian, Miro, ServiceNow,
-#   Monday.com, FreeWheel, Magnite, Index Exchange, Criteo, LiveRamp, Amazon Ads,
-#   Walmart Connect, Tesco Media, CitrusAd, Experian, TransUnion, Nielsen,
-#   Circana, AMD, Qualcomm, Intel, Broadcom, Darktrace, Tessl, Accenture,
-#   Slalom, EPAM, Publicis Sapient, Segment, mParticle, Tealium
+# fit_hypothesis: high | medium | low | watch_only
+# action: keep | promote | downgrade | pause | remove | investigate_ats | review_manually
 
-companies:
-  # ══ TIER A — Core Targets ══════════════════════════════════════════════════
+# ══ TIER A — Core Targets ════════════════════════════════════════════════════
 
-  # foundation_models
-  - {name: OpenAI,           ats: ashby,      slug: openai}
-  - {name: Anthropic,        ats: greenhouse, slug: anthropic}
-  - {name: Mistral AI,       ats: lever,      slug: mistral}
-  - {name: Cohere,           ats: ashby,      slug: cohere}
-  - {name: Google DeepMind,  ats: greenhouse, slug: deepmind}
-  - {name: Aleph Alpha,      ats: ashby,      slug: alephalpha}
+# foundation_models
+- name: OpenAI
+  ats: ashby
+  slug: openai
+  domain: frontier_ai
+  fit_hypothesis: high
+  action: keep
+  notes: "Watch for SA/partner/applied AI roles; avoid research and hands-on engineering IC roles. Strong brand, broad role mix."
 
-  # ai_application_platforms
-  - {name: Writer,           ats: ashby,      slug: writer}
-  - {name: Intercom,         ats: greenhouse, slug: intercom}
-  - {name: Glean,            ats: greenhouse, slug: gleanwork}
-  - {name: Harvey,           ats: ashby,      slug: harvey}
-  - {name: Sierra,           ats: ashby,      slug: sierra}
-  - {name: Decagon,          ats: ashby,      slug: decagon}
-  - {name: Hebbia,           ats: ashby,      slug: hebbia-ai}
-  - {name: Cresta,           ats: greenhouse, slug: cresta}
-  - {name: PolyAI,           ats: greenhouse, slug: polyai}
-  - {name: Forethought,      ats: greenhouse, slug: forethought}
-  - {name: Rasa,             ats: ashby,      slug: rasa}
-  - {name: Perplexity,       ats: ashby,      slug: perplexity}   # carried over from v1 (has scored roles)
+- name: Anthropic
+  ats: greenhouse
+  slug: anthropic
+  domain: frontier_ai
+  fit_hypothesis: high
+  action: keep
+  notes: "Watch for SA/partner/applied AI roles; avoid research and hands-on engineering IC roles."
 
-  # ai_data_infrastructure
-  - {name: Databricks,       ats: greenhouse, slug: databricks}
-  - {name: Snowflake,        ats: ashby,      slug: snowflake}
-  - {name: Scale AI,         ats: greenhouse, slug: scaleai}
-  - {name: CoreWeave,        ats: greenhouse, slug: coreweave}
-  - {name: Together AI,      ats: greenhouse, slug: togetherai}
-  - {name: Modal,            ats: ashby,      slug: modal}
-  - {name: Pinecone,         ats: ashby,      slug: pinecone}
-  - {name: Weaviate,         ats: ashby,      slug: weaviate}
-  - {name: LangChain,        ats: ashby,      slug: langchain}
-  - {name: Anyscale,         ats: ashby,      slug: anyscale}
-  - {name: Baseten,          ats: ashby,      slug: baseten}
+# Display name kept as "Mistral" (not "Mistral AI") so the yield report's
+# company-name join matches the existing corpus, which collected under "Mistral".
+- name: Mistral
+  ats: lever
+  slug: mistral
+  domain: frontier_ai
+  fit_hypothesis: high
+  action: keep
+  notes: "Watch for SA/partner/applied AI roles; avoid research and hands-on engineering IC roles. Strong EMEA presence — advantage."
 
-  # fintech_infrastructure
-  - {name: Stripe,           ats: greenhouse, slug: stripe}
-  - {name: Adyen,            ats: greenhouse, slug: adyen}
-  - {name: Airwallex,        ats: ashby,      slug: airwallex}
-  - {name: Plaid,            ats: ashby,      slug: plaid}
-  - {name: Marqeta,          ats: greenhouse, slug: marqeta}
+- name: Cohere
+  ats: ashby
+  slug: cohere
+  domain: frontier_ai
+  fit_hypothesis: medium
+  action: keep
+  notes: "Watch for SA/partner/applied AI roles; avoid research and hands-on engineering IC roles. Similar EMEA footprint to Mistral but smaller."
 
-  # fintech_platforms
-  - {name: Monzo,            ats: greenhouse, slug: monzo}
+- name: Google DeepMind
+  ats: greenhouse
+  slug: deepmind
+  domain: frontier_ai
+  fit_hypothesis: medium
+  action: keep
+  notes: "Watch for SA/partner/applied AI roles; avoid research and hands-on engineering IC roles. Research-heavy — SA/partner roles rare."
 
-  # semiconductor_and_ai_compute
-  - {name: Baya Systems,     ats: greenhouse, slug: bayasystems}
-  - {name: Fractile,         ats: greenhouse, slug: fractile}
-  - {name: Cerebras,         ats: ashby,      slug: cerebras}
-  - {name: Tenstorrent,      ats: greenhouse, slug: tenstorrent}
-  - {name: Graphcore,        ats: greenhouse, slug: graphcore}
+- name: Aleph Alpha
+  ats: ashby
+  slug: alephalpha
+  domain: frontier_ai
+  fit_hypothesis: low
+  action: keep
+  notes: "Watch for SA/partner/applied AI roles; avoid research and hands-on engineering IC roles. German-centric, small EMEA presence."
 
-  # ══ TIER B — Strong Monitoring ═════════════════════════════════════════════
+# ai_application_platforms
+- name: Writer
+  ats: ashby
+  slug: writer
+  domain: ai_application_platform
+  fit_hypothesis: high
+  action: keep
+  notes: "Enterprise AI writing — SA/partner roles strong fit."
 
-  # platform_and_infrastructure
-  - {name: Cloudflare,       ats: greenhouse, slug: cloudflare}
-  - {name: Confluent,        ats: ashby,      slug: confluent}
-  - {name: MongoDB,          ats: greenhouse, slug: mongodb}
-  - {name: Elastic,          ats: greenhouse, slug: elastic}
-  - {name: Grafana Labs,     ats: greenhouse, slug: grafanalabs}
-  - {name: Datadog,          ats: greenhouse, slug: datadog}
+- name: Intercom
+  ats: greenhouse
+  slug: intercom
+  domain: ai_application_platform
+  fit_hypothesis: high
+  action: keep
+  notes: "Fin AI agent platform — target: AI Deployment Consultant (Partners), Solutions Architect. CSM/Customer Success = watch only."
 
-  # identity_platforms
-  - {name: Okta,             ats: greenhouse, slug: okta}
-  - {name: Ping Identity,    ats: greenhouse, slug: pingidentity}
+- name: Glean
+  ats: greenhouse
+  slug: gleanwork
+  domain: ai_application_platform
+  fit_hypothesis: high
+  action: keep
+  notes: "Enterprise search AI — SA/SC roles well-aligned."
 
-  # enterprise_platforms
-  - {name: Figma,            ats: greenhouse, slug: figma}
-  - {name: Notion,           ats: ashby,      slug: notion}
-  - {name: HubSpot,          ats: greenhouse, slug: hubspot}
+- name: Harvey
+  ats: ashby
+  slug: harvey
+  domain: ai_application_platform
+  fit_hypothesis: high
+  action: keep
+  notes: "Legal AI — SA/delivery roles, strong technical GTM."
 
-  # adtech_and_media_platforms
-  - {name: The Trade Desk,   ats: greenhouse, slug: thetradedesk}
-  - {name: Equativ,          ats: lever,      slug: equativ}
-  - {name: PubMatic,         ats: greenhouse, slug: pubmatic}
-  - {name: NextRoll,         ats: greenhouse, slug: nextroll}
+- name: Sierra
+  ats: ashby
+  slug: sierra
+  domain: ai_application_platform
+  fit_hypothesis: high
+  action: keep
+  notes: "Conversational AI for enterprise — clear SA/SC fit."
 
-  # retail_media_and_data
-  - {name: Dunnhumby,        ats: greenhouse, slug: dunnhumby}
+- name: Decagon
+  ats: ashby
+  slug: decagon
+  domain: ai_application_platform
+  fit_hypothesis: medium
+  action: keep
+  notes: "AI support automation. Earlier stage, limited EMEA."
 
-  # customer_data_and_martech
-  - {name: Twilio,           ats: greenhouse, slug: twilio}
-  - {name: Braze,            ats: greenhouse, slug: braze}
-  - {name: Klaviyo,          ats: greenhouse, slug: klaviyo}
-  - {name: Iterable,         ats: greenhouse, slug: iterable}
-  - {name: Amplitude,        ats: greenhouse, slug: amplitude}
-  - {name: Contentsquare,    ats: lever,      slug: contentsquare}
+- name: Hebbia
+  ats: ashby
+  slug: hebbia-ai
+  domain: ai_application_platform
+  fit_hypothesis: low
+  action: keep
+  notes: "Document AI for finance — niche, limited visibility into roles."
 
-  # ══ TIER C — Exploration / Watch Carefully ═════════════════════════════════
+- name: Cresta
+  ats: greenhouse
+  slug: cresta
+  domain: ai_application_platform
+  fit_hypothesis: low
+  action: downgrade
+  notes: "Contact centre AI — domain not interesting."
 
-  # frontier_watchlist
-  - {name: xAI,              ats: greenhouse, slug: xai}
+- name: PolyAI
+  ats: greenhouse
+  slug: polyai
+  domain: ai_application_platform
+  fit_hypothesis: high
+  action: keep
+  notes: "Voice AI, London-based — strong EMEA/SA fit."
 
-  # uk_european_scaleups
-  - {name: Faculty,          ats: ashby,      slug: faculty}
-  - {name: Quantexa,         ats: ashby,      slug: quantexa}
-  - {name: PhysicsX,         ats: greenhouse, slug: physicsx}
-  - {name: Synthesia,        ats: ashby,      slug: synthesia}
-  - {name: ElevenLabs,       ats: ashby,      slug: elevenlabs}
-  - {name: Stability AI,     ats: greenhouse, slug: stabilityai}
-  - {name: Wayve,            ats: greenhouse, slug: wayve}
-  - {name: Multiverse,       ats: ashby,      slug: multiverse}
+- name: Cognigy
+  ats: greenhouse
+  slug: cognigy
+  domain: ai_application_platform
+  fit_hypothesis: medium
+  action: investigate_ats
+  notes: "Conversational AI platform — SC roles exist but often technical. ATS not verified."
 
-  # strategic_ai_delivery
-  - {name: Thoughtworks,     ats: greenhouse, slug: thoughtworks}
-  - {name: Palantir,         ats: lever,      slug: palantir}
+- name: Forethought
+  ats: greenhouse
+  slug: forethought
+  domain: ai_application_platform
+  fit_hypothesis: low
+  action: keep
+  notes: "AI support, limited EMEA, quiet board (0 jobs last run)."
+
+- name: Rasa
+  ats: ashby
+  slug: rasa
+  domain: ai_application_platform
+  fit_hypothesis: low
+  action: keep
+  notes: "Open-source conversational AI, minimal jobs signal."
+
+- name: Perplexity
+  ats: ashby
+  slug: perplexity
+  domain: ai_application_platform
+  fit_hypothesis: medium
+  action: keep
+  notes: "Carried over from v1 — already has scored roles in the corpus. AI answer engine; watch for SA/partner/applied AI roles, US-centric hiring."
+
+# ai_data_infrastructure
+- name: Databricks
+  ats: greenhouse
+  slug: databricks
+  domain: ai_data_platform
+  fit_hypothesis: high
+  action: keep
+  notes: "Confirmed strong fit. Deployment Strategist (hybrid/PM for field) pattern is exactly right. Watch for hands-on vs hybrid distinction."
+
+- name: Snowflake
+  ats: ashby
+  slug: snowflake
+  domain: ai_data_platform
+  fit_hypothesis: medium
+  action: keep
+  notes: "Large, many roles but often too data-engineering-heavy. Watch for SA/partner roles specifically."
+
+- name: Scale AI
+  ats: greenhouse
+  slug: scaleai
+  domain: ai_data_platform
+  fit_hypothesis: medium
+  action: keep
+  notes: "Data labelling/AI training platform — SA roles possible but niche."
+
+- name: CoreWeave
+  ats: greenhouse
+  slug: coreweave
+  domain: ai_infrastructure
+  fit_hypothesis: low
+  action: keep
+  notes: "GPU cloud — very infrastructure/ops-heavy. Unlikely fit."
+
+- name: Together AI
+  ats: greenhouse
+  slug: togetherai
+  domain: ai_infrastructure
+  fit_hypothesis: low
+  action: keep
+  notes: "AI compute platform — research and infra focused. Watch only."
+
+- name: Modal
+  ats: ashby
+  slug: modal
+  domain: ai_infrastructure
+  fit_hypothesis: low
+  action: keep
+  notes: "Developer compute — very technical IC roles. Watch only."
+
+- name: Pinecone
+  ats: ashby
+  slug: pinecone
+  domain: ai_data_platform
+  fit_hypothesis: medium
+  action: keep
+  notes: "Vector DB — SA roles exist but small team."
+
+- name: Weaviate
+  ats: ashby
+  slug: weaviate
+  domain: ai_data_platform
+  fit_hypothesis: medium
+  action: keep
+  notes: "Vector DB — similar to Pinecone, very small board."
+
+- name: LangChain
+  ats: ashby
+  slug: langchain
+  domain: ai_data_platform
+  fit_hypothesis: medium
+  action: keep
+  notes: "AI orchestration — interesting SA/partner angle if roles appear."
+
+- name: Anyscale
+  ats: ashby
+  slug: anyscale
+  domain: ai_infrastructure
+  fit_hypothesis: low
+  action: keep
+  notes: "Ray/distributed compute — very technical. Watch only."
+
+- name: Baseten
+  ats: ashby
+  slug: baseten
+  domain: ai_infrastructure
+  fit_hypothesis: low
+  action: keep
+  notes: "Model serving infra — IC-heavy. Watch only."
+
+# fintech_infrastructure
+- name: Stripe
+  ats: greenhouse
+  slug: stripe
+  domain: fintech_infrastructure
+  fit_hypothesis: high
+  action: keep
+  notes: "Large SA/SC presence, developer platform — strong fit."
+
+- name: Adyen
+  ats: greenhouse
+  slug: adyen
+  domain: fintech_infrastructure
+  fit_hypothesis: high
+  action: keep
+  notes: "Enterprise payments, EMEA-strong. SA/SC roles well-aligned."
+
+- name: Airwallex
+  ats: ashby
+  slug: airwallex
+  domain: fintech_infrastructure
+  fit_hypothesis: high
+  action: keep
+  notes: "Global payments, London office. SA/partner roles — good fit."
+
+- name: Plaid
+  ats: ashby
+  slug: plaid
+  domain: fintech_infrastructure
+  fit_hypothesis: medium
+  action: keep
+  notes: "US-centric, fewer EMEA roles. Worth watching."
+
+- name: Marqeta
+  ats: greenhouse
+  slug: marqeta
+  domain: fintech_infrastructure
+  fit_hypothesis: low
+  action: keep
+  notes: "Card issuing infra — very US-heavy. Watch only."
+
+- name: Checkout.com
+  ats: greenhouse
+  slug: checkout
+  domain: fintech_infrastructure
+  fit_hypothesis: medium
+  action: investigate_ats
+  notes: "Payments platform, London HQ — SA roles possible. ATS not verified."
+
+- name: Rapyd
+  ats: greenhouse
+  slug: rapyd
+  domain: fintech_infrastructure
+  fit_hypothesis: low
+  action: investigate_ats
+  notes: "Global payments, limited public board. ATS not verified."
+
+# fintech_platforms
+- name: Monzo
+  ats: greenhouse
+  slug: monzo
+  domain: fintech_platform
+  fit_hypothesis: medium
+  action: keep
+  notes: "UK neobank — occasional technical roles but consumer-focused."
+
+- name: Wise
+  ats: greenhouse
+  slug: wise
+  domain: fintech_platform
+  fit_hypothesis: medium
+  action: investigate_ats
+  notes: "Global fintech, London-based. SA/platform roles possible. ATS not verified."
+
+- name: Revolut
+  ats: greenhouse
+  slug: revolut
+  domain: fintech_platform
+  fit_hypothesis: medium
+  action: investigate_ats
+  notes: "Fast-growing, London HQ. Worth watching for platform/SA roles. ATS not verified."
+
+- name: Klarna
+  ats: greenhouse
+  slug: klarna
+  domain: fintech_platform
+  fit_hypothesis: low
+  action: investigate_ats
+  notes: "Consumer BNPL — less technical SA, more commercial. ATS not verified."
+
+- name: Starling Bank
+  ats: greenhouse
+  slug: starlingbank
+  domain: fintech_platform
+  fit_hypothesis: low
+  action: investigate_ats
+  notes: "UK neobank, small team. Watch only. ATS not verified."
+
+# semiconductor_and_ai_compute
+- name: Baya Systems
+  ats: greenhouse
+  slug: bayasystems
+  domain: semiconductor_ai_compute
+  fit_hypothesis: medium
+  action: keep
+  notes: "Strong network — close friend works there. Worth pursuing directly alongside automated monitoring."
+
+- name: Fractile
+  ats: greenhouse
+  slug: fractile
+  domain: semiconductor_ai_compute
+  fit_hypothesis: medium
+  action: keep
+  notes: "Good network to get in. UK AI chip startup — worth monitoring."
+
+- name: Cerebras
+  ats: ashby
+  slug: cerebras
+  domain: semiconductor_ai_compute
+  fit_hypothesis: medium
+  action: keep
+  notes: "AI systems — some SA/partner roles as they scale."
+
+- name: Tenstorrent
+  ats: greenhouse
+  slug: tenstorrent
+  domain: semiconductor_ai_compute
+  fit_hypothesis: low
+  action: keep
+  notes: "AI hardware — engineering-heavy. Watch only."
+
+- name: Graphcore
+  ats: greenhouse
+  slug: graphcore
+  domain: semiconductor_ai_compute
+  fit_hypothesis: low
+  action: keep
+  notes: "UK AI chip — declining headcount, mostly engineering."
+
+- name: PhysicsX
+  ats: greenhouse
+  slug: physicsx
+  domain: semiconductor_ai_compute
+  fit_hypothesis: low
+  action: keep
+  notes: "AI for engineering simulation — niche, mostly IC."
+
+# ══ TIER B — Strong Monitoring ═══════════════════════════════════════════════
+
+# platform_and_infrastructure
+- name: Cloudflare
+  ats: greenhouse
+  slug: cloudflare
+  domain: developer_tooling
+  fit_hypothesis: medium
+  action: keep
+  notes: "Edge/security platform — SA roles exist, worth monitoring."
+
+- name: Confluent
+  ats: ashby
+  slug: confluent
+  domain: ai_data_platform
+  fit_hypothesis: medium
+  action: keep
+  notes: "Kafka/data streaming — SA/SC roles, data-heavy domain."
+
+- name: MongoDB
+  ats: greenhouse
+  slug: mongodb
+  domain: ai_data_platform
+  fit_hypothesis: medium
+  action: keep
+  notes: "Document DB with AI push — SA roles available."
+
+- name: Elastic
+  ats: greenhouse
+  slug: elastic
+  domain: ai_data_platform
+  fit_hypothesis: medium
+  action: keep
+  notes: "Search/observability — SA/SC roles, good EMEA presence."
+
+- name: Grafana Labs
+  ats: greenhouse
+  slug: grafanalabs
+  domain: developer_tooling
+  fit_hypothesis: low
+  action: keep
+  notes: "Observability — mostly technical, limited SA fit."
+
+- name: Datadog
+  ats: greenhouse
+  slug: datadog
+  domain: developer_tooling
+  fit_hypothesis: medium
+  action: keep
+  notes: "Observability platform — SA roles exist but often very technical."
+
+# identity_platforms
+- name: Okta
+  ats: greenhouse
+  slug: okta
+  domain: identity_security
+  fit_hypothesis: medium
+  action: keep
+  notes: "Identity platform — SA roles exist, strong enterprise GTM."
+
+- name: Ping Identity
+  ats: greenhouse
+  slug: pingidentity
+  domain: identity_security
+  fit_hypothesis: low
+  action: keep
+  notes: "Identity — similar to Okta but smaller presence."
+
+# enterprise_platforms
+- name: Figma
+  ats: greenhouse
+  slug: figma
+  domain: enterprise_software
+  fit_hypothesis: medium
+  action: keep
+  notes: "Design platform — confirmed Director SC role was strong fit."
+
+- name: Notion
+  ats: ashby
+  slug: notion
+  domain: enterprise_software
+  fit_hypothesis: low
+  action: keep
+  notes: "Productivity — consumer-adjacent, few SA roles."
+
+- name: HubSpot
+  ats: greenhouse
+  slug: hubspot
+  domain: enterprise_software
+  fit_hypothesis: low
+  action: keep
+  notes: "CRM/marketing — too commercial, not technical enough."
+
+# adtech_and_media_platforms
+- name: The Trade Desk
+  ats: greenhouse
+  slug: thetradedesk
+  domain: adtech_martech
+  fit_hypothesis: high
+  action: keep
+  notes: "AdTech platform — confirmed strong fit from production run."
+
+- name: Equativ
+  ats: lever
+  slug: equativ
+  domain: adtech_martech
+  fit_hypothesis: high
+  action: keep
+  notes: "Ad server/SSP — strong AdTech domain fit, EMEA-present."
+
+- name: PubMatic
+  ats: greenhouse
+  slug: pubmatic
+  domain: adtech_martech
+  fit_hypothesis: medium
+  action: keep
+  notes: "Programmatic SSP — SA roles possible, US-centric."
+
+- name: NextRoll
+  ats: greenhouse
+  slug: nextroll
+  domain: adtech_martech
+  fit_hypothesis: medium
+  action: keep
+  notes: "AdRoll/MarTech — SA/SC roles possible, small board."
+
+- name: Dunnhumby
+  ats: greenhouse
+  slug: dunnhumby
+  domain: retail_media_data
+  fit_hypothesis: high
+  action: keep
+  notes: "Retail media data — identity/data fit, UK-based."
+
+# customer_data_and_martech
+- name: Twilio
+  ats: greenhouse
+  slug: twilio
+  domain: customer_data_martech
+  fit_hypothesis: medium
+  action: keep
+  notes: "Communications platform — SA roles, developer-heavy."
+
+- name: Braze
+  ats: greenhouse
+  slug: braze
+  domain: customer_data_martech
+  fit_hypothesis: medium
+  action: keep
+  notes: "Customer engagement platform — SA/SC roles possible."
+
+- name: Klaviyo
+  ats: greenhouse
+  slug: klaviyo
+  domain: customer_data_martech
+  fit_hypothesis: low
+  action: keep
+  notes: "Email marketing — too commercial/SMB focused."
+
+- name: Iterable
+  ats: greenhouse
+  slug: iterable
+  domain: customer_data_martech
+  fit_hypothesis: low
+  action: keep
+  notes: "Marketing automation — similar to Klaviyo, limited SA fit."
+
+- name: Amplitude
+  ats: greenhouse
+  slug: amplitude
+  domain: customer_data_martech
+  fit_hypothesis: medium
+  action: keep
+  notes: "Product analytics — SA/SC roles, data-adjacent."
+
+- name: Contentsquare
+  ats: lever
+  slug: contentsquare
+  domain: customer_data_martech
+  fit_hypothesis: medium
+  action: keep
+  notes: "Digital experience analytics — SA roles, EMEA-present."
+
+# ══ TIER C — Exploration / Watch Carefully ═══════════════════════════════════
+
+# frontier_watchlist
+- name: xAI
+  ats: greenhouse
+  slug: xai
+  domain: frontier_ai
+  fit_hypothesis: watch_only
+  action: keep
+  notes: "Watch for SA/partner/applied AI roles; avoid research and hands-on engineering IC roles. US-centric, unpredictable hiring."
+
+# uk_european_scaleups
+- name: Faculty
+  ats: ashby
+  slug: faculty
+  domain: strategic_ai_delivery
+  fit_hypothesis: high
+  action: keep
+  notes: "UK AI consultancy — delivery/architect roles, London-based."
+
+- name: Quantexa
+  ats: ashby
+  slug: quantexa
+  domain: ai_application_platform
+  fit_hypothesis: medium
+  action: keep
+  notes: "Entity resolution/AI — SA roles, financial services domain."
+
+- name: Synthesia
+  ats: ashby
+  slug: synthesia
+  domain: ai_application_platform
+  fit_hypothesis: medium
+  action: keep
+  notes: "AI video — SA/SC roles possible as they scale."
+
+- name: ElevenLabs
+  ats: ashby
+  slug: elevenlabs
+  domain: ai_application_platform
+  fit_hypothesis: medium
+  action: keep
+  notes: "Voice AI — growing fast, SA roles emerging."
+
+- name: Stability AI
+  ats: greenhouse
+  slug: stabilityai
+  domain: frontier_ai
+  fit_hypothesis: low
+  action: keep
+  notes: "Watch for SA/partner/applied AI roles; avoid research and hands-on engineering IC roles. Small, uncertain outlook."
+
+- name: Wayve
+  ats: greenhouse
+  slug: wayve
+  domain: frontier_ai
+  fit_hypothesis: low
+  action: keep
+  notes: "Watch for SA/partner/applied AI roles; avoid research and hands-on engineering IC roles. Autonomous driving — very technical, niche domain."
+
+- name: Multiverse
+  ats: ashby
+  slug: multiverse
+  domain: enterprise_software
+  fit_hypothesis: medium
+  action: keep
+  notes: "AI apprenticeships/learning — SA roles possible."
+
+# strategic_ai_delivery
+- name: Palantir
+  ats: lever
+  slug: palantir
+  domain: strategic_ai_delivery
+  fit_hypothesis: high
+  action: keep
+  notes: "Enterprise AI delivery — confirmed strong fit."
+
+- name: Thoughtworks
+  ats: greenhouse
+  slug: thoughtworks
+  domain: strategic_ai_delivery
+  fit_hypothesis: medium
+  action: keep
+  notes: "AI consulting/delivery — SA/architect roles, delivery-heavy."
+
+# ══ MANUAL WATCH (not on standard ATS boards) ════════════════════════════════
+
+- name: Jack & Jill AI
+  ats: manual
+  slug: null
+  domain: ai_application_platform
+  fit_hypothesis: high
+  action: investigate_ats
+  notes: "AI recruitment platform, London-based. Job Radar work directly relevant — AI-powered job search is their core product. Not on standard ATS boards — apply directly via jackandjill.ai/careers. Speculative but strong narrative fit."

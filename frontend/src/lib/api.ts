@@ -5,6 +5,10 @@
 
 const BASE = "/api";
 
+// Read-only report download (job_radar_SPEC §11.1). Same-origin /api so the browser
+// streams the text/plain attachment straight to disk — no fetch/JSON round-trip needed.
+export const YIELD_REPORT_URL = `${BASE}/report/yield`;
+
 // Raised when an HTTP call fails; carries the status so callers can branch (401/403/404).
 export class ApiError extends Error {
   status: number;

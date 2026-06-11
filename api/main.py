@@ -13,7 +13,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import annotations, auth, index, workflow
+from api.routers import annotations, auth, index, reports, workflow
 
 app = FastAPI(
     title="job-radar",
@@ -39,3 +39,4 @@ app.include_router(index.router)
 app.include_router(auth.router)
 app.include_router(workflow.router)
 app.include_router(annotations.router)
+app.include_router(reports.router)

@@ -2183,11 +2183,41 @@ companies by strong/blocked count, est. cost/job from `stats.json`); **status** 
 lane counts, review/shortlist/apply rates, stale-application list); **companies** (per-company
 jobs/strong/blocked/reviewed/shortlisted, shortlist-rate ranking, "zero-shortlist despite a
 real sample"); **gaps** (top blocking constraints across blocked roles + top requirement gaps
-across all and within strong-fit roles, plus rejection reasons section when data exists).
-`--report all` runs all four, header-separated. This is the foundation for the company
-yield-tracking backlog (`docs/BACKLOG_YIELD_TRACKING.md`): once company metadata is seeded
-the companies report gains domain rollups + a `--yield` flag and a `--output FILE` for the
-UI download button — not built now.
+across all and within strong-fit roles, plus rejection reasons section when data exists);
+and **yield** (the company yield report — see below). `--report all` runs all five,
+header-separated.
+
+### Company metadata + yield tracking ✅ built 2026-06-11
+
+**Company metadata.** Each `company_seeds.yaml` entry carries four optional v2 fields —
+`domain` (company-level editorial classification), `fit_hypothesis`
+(`high|medium|low|watch_only`), `action`
+(`keep|promote|downgrade|pause|remove|investigate_ats|review_manually`), and free-text
+`notes`. `cli.collect.load_companies` accepts **either** a bare top-level list (v2) or a
+`{companies: [...]}` mapping (v1.1); all four fields are optional (existing seeds without
+them still collect). `action` is **advisory in v1**: `pause` logs a skip notice but still
+collects (auto-skip is a future enhancement); `investigate_ats` is surfaced only in the
+yield report. `ats: manual` + `slug: null` watch entries (e.g. Jack & Jill) are logged and
+skipped by `collect()` — never an error.
+
+**Yield report** (`docs/BACKLOG_YIELD_TRACKING.md`). `python -m cli.analyse --report yield`
+joins the seeds (name + metadata) against the scored corpus ⨝ workflow projection ⨝
+validated JDs ⨝ rejection annotations, producing one row per company plus `domain`/`ats`
+rollups — all derived at report time, **no new corpus file**. Per-company metrics:
+`jobs_collected/jobs_scored/reviewed/shortlisted/applied/rejected/archived`,
+`high_score_rejected` (scored ≥7 then rejected — the scorer-false-positive proxy), and
+`estimated_cost_usd` (= `jobs_scored × COST_PER_JOB`, where `COST_PER_JOB = total labelling
+cost / total jobs labelled` from `stats.json`). Derived rates
+(shortlist/apply/rejection/false-positive, cost-per-shortlist/application) are **suppressed
+below 5 scored jobs**. Sections: best performers, high-volume noise, high false-positive
+rate, no-live-jobs (seeded but zero validated), actions-flagged (with notes), domain rollup,
+ATS rollup. **`GET /api/report/yield`** (read-only, no auth) returns the *same* report as a
+`text/plain` attachment via the same pure functions; a "Yield report" download button sits
+in the React sidebar. The join is **by exact company name**, so the seed `name` values are
+kept aligned to the corpus' company strings (e.g. `Mistral`, not `Mistral AI`); the only
+rows that fall under domain `(unknown)` are one-off **manual/calibration** records (JP Morgan
+Chase, AI Consultancy, Fin (Intercom), Outreach, Zendesk) that were never part of the
+monitored ATS universe — correct, not an error.
 
 ### Rejection reasons ✅ built
 
@@ -2228,20 +2258,15 @@ Intel, Broadcom, Darktrace, Tessl, Accenture, Slalom, EPAM, Publicis Sapient, Se
 mParticle, Tealium, Arm, Groq, SambaNova, SiFive, Checkout.com, Rapyd, Wise, Revolut,
 Klarna, Starling Bank.
 
-### Company metadata (post-deployment — after 2–4 weeks usage)
+### Company metadata (post-deployment) ✅ built — see "Company metadata + yield tracking" above
 
-Add three editorial fields per company to `company_seeds.yaml`:
-
-```yaml
-domain: ai_application_platform   # primary company domain — editorial
-fit_hypothesis: high               # high | medium | low | watch_only
-notes: "..."                       # free text
-```
-
-`domain` vocabulary (company-level): `frontier_ai` · `ai_application_platform`
-· `ai_data_platform` · `ai_infrastructure` · `developer_tooling` ·
-`fintech_infrastructure` · `identity_security` · `enterprise_software` ·
-`adtech_martech` · `semiconductor_ai_compute` · `strategic_ai_delivery`
+Built 2026-06-11 with the yield report (the v2 seeds added a fourth field, `action`, beyond
+the original `domain`/`fit_hypothesis`/`notes`). `domain` vocabulary (company-level), as
+shipped in `company_seeds.yaml`: `frontier_ai` · `ai_application_platform` ·
+`ai_data_platform` · `ai_infrastructure` · `developer_tooling` · `fintech_infrastructure` ·
+`fintech_platform` · `adtech_martech` · `identity_security` · `enterprise_software` ·
+`semiconductor_ai_compute` · `strategic_ai_delivery` · `retail_media_data` ·
+`customer_data_martech`.
 
 ### cv-tailor integration signal (post-deployment design decision)
 

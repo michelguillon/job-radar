@@ -1883,5 +1883,62 @@ assumptions the new value breaks (here, `field` non-null). +8 tests (400 total);
 
 ---
 
+### Company metadata + yield tracking (§11.1 / BACKLOG_YIELD_TRACKING) — built 2026-06-11
+
+Added per-company v2 metadata (`domain`/`fit_hypothesis`/`action`/`notes`) and a fifth
+analyse report, `--report yield`, plus a read-only `GET /api/report/yield` download and a
+React sidebar button. The yield report joins company seeds ⨝ scored corpus ⨝ workflow ⨝
+validated JDs ⨝ rejection annotations into per-company rows + domain/ATS rollups — all
+derived at report time, no new corpus file.
+
+- **The join is by exact company name — fixed at the data layer, not with an alias map.**
+  First live run put ~22 of 53 scored jobs under domain `(unknown)`: corpus values like
+  "Mistral" didn't match the seed name "Mistral AI", and Perplexity had been dropped from the
+  seeds entirely. Rather than add a fuzzy/alias matcher (which would *hide* drift it should
+  expose), the fix was to **align the seed `name` to the corpus string** (rename "Mistral AI"
+  → "Mistral") and **reinstate the dropped seed** (Perplexity, which already had scored roles).
+  The only rows left under `(unknown)` are genuine one-off manual/calibration records (JP
+  Morgan Chase, AI Consultancy, Fin (Intercom), Outreach, Zendesk) that were never part of the
+  monitored ATS universe — correctly *not* invented as seeds. Lesson: when a join key drifts,
+  fix the key at the source of truth; don't paper over it in the consumer. (A side find: the
+  v2 seed file's own header said "73 companies" but it actually held 80 — the count was never
+  asserted anywhere, so it silently rotted. Now 81, with the breakdown in the header.)
+- **Editorial `action` is advisory in v1 — wiring it to behaviour was explicitly resisted.**
+  `pause` logs a skip notice but still collects; `investigate_ats`/`manual` only surface in
+  the report. The backlog spec (§8) is emphatic: don't automate collection changes before the
+  yield data is trustworthy. So the field is captured and reported, and the collection-skip is
+  a named future step — evidence first, automation later.
+- **`ats: manual` + `slug: null` fell out cleanly because collection already fails soft.**
+  A manual watch entry hits `registry.get("manual") → None` and is logged+skipped, exactly
+  like an unregistered ATS — no special case needed in `collect()`. The only real fix was
+  guarding `select()`'s `c["slug"].lower()` against `None` (a `--company` filter would have
+  crashed). Watch entries appear under "no live jobs" with a manual tag.
+- **Two seed-file shapes, one loader.** v1.1 shipped wrapped (`companies:`); v2 ships as a
+  bare list. Rather than re-indent 73 entries, `load_companies` accepts both
+  (`data["companies"] if isinstance(data, dict) else data`). The generator can emit either.
+- **Reused the pure functions across CLI and API, verbatim.** `GET /api/report/yield` imports
+  `build_yield_report` + `format_yield` from `cli.analyse` and returns their output as a
+  `text/plain` attachment — the endpoint is ~15 lines of IO. Same discipline as the rest of
+  the thin API layer: the CLI and the HTTP route are two front-ends over one aggregation.
+- **`cost_per_job=None` must not crash the report.** Missing/empty `stats.json` → no cost
+  columns rather than a `TypeError`; every cost cell renders `—` and the header says
+  `COST_PER_JOB n/a`. Cost is informational, never load-bearing (same rule as the existing
+  score-distribution cost line).
+- **Settings grew two fields with defaults to avoid breaking existing construction.**
+  `seeds_path`/`stats_path` default to the CLI constants, so the API test fixtures that build
+  `Settings(...)` positionally keep working untouched.
+
+#### Reusable pattern
+
+When a report needs a *new input file*, thread it through the same settings/loader plumbing
+the corpus files already use and default it to the canonical constant — then the new path is
+test-injectable and the API/CLI share one resolution. And when a join key is dirty (names,
+here), have the report *show* the mismatch (`(unknown)` bucket) rather than fuzzy-match it —
+then fix the real ones by aligning the source of truth (seed names) to the data, leaving only
+the genuinely-unmonitored records visible. The visible gap is the diagnostic; the alias map is
+the trap. +20 tests (412 total); full suite green; live `--report yield` produces all sections.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

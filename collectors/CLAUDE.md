@@ -29,6 +29,32 @@ each collector is then just an endpoint URL + a field mapping.
   (preferred) or `descriptionPlain` fallback. `workplaceType`/`isRemote` are
   first-class; `country` comes from the postal address (full name).
 
+## Company seeds — schema (`company_seeds.yaml`)
+
+`cli.collect.load_companies` accepts **either** a bare top-level list (the v2
+metadata format) **or** a `{companies: [...]}` mapping (v1.1) — both are valid.
+Each entry is `{name, ats, slug}` plus optional **v2 metadata** (all default to
+absent / a sensible value in consumers — existing seeds without them still work):
+
+```yaml
+- name: Writer
+  ats: ashby                  # greenhouse | lever | ashby | manual
+  slug: writer                # null for a manual watch entry
+  domain: ai_application_platform   # company-level editorial classification
+  fit_hypothesis: high        # high | medium | low | watch_only
+  action: keep                # keep | promote | downgrade | pause | remove |
+                              # investigate_ats | review_manually
+  notes: "free text"
+```
+
+`domain`, `fit_hypothesis`, `action`, `notes` feed the **yield report**
+(`cli.analyse --report yield`, `GET /api/report/yield`) — they are **not** scorer
+input. `action` is **advisory in v1** (BACKLOG_YIELD_TRACKING §8): `pause` logs a
+skip notice but still collects (auto-skip is a future enhancement);
+`investigate_ats` is surfaced only in the yield report. `ats: manual` + `slug:
+null` watch entries (e.g. Jack & Jill) are logged and skipped by `collect()` —
+never an error.
+
 ## Incremental collection — capability matrix
 
 The **public board APIs expose no server-side date filter** (Greenhouse's

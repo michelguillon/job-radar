@@ -199,6 +199,111 @@ def test_gaps_report_omits_rejection_section_when_none():
     assert "REQUIREMENT GAPS & BLOCKERS" in text
 
 
+# --- company yield (BACKLOG_YIELD_TRACKING) -----------------------------------
+
+def _seed(name, *, ats="ashby", slug=None, domain="frontier_ai", fit="high", action="keep", notes=""):
+    return {"name": name, "ats": ats, "slug": slug or name.lower(), "domain": domain,
+            "fit_hypothesis": fit, "action": action, "notes": notes}
+
+
+def _yield_scenario():
+    """A small corpus: Mistral (6 scored, reviewed mix) + Hebbia (2 scored, tiny sample)."""
+    scores, jds, workflow = {}, {}, {}
+    # Mistral: 6 scored — 2 shortlisted, 1 applied, 1 high-score rejected, 1 review, 1 new
+    layout = [("shortlisted", 8), ("shortlisted", 9), ("applied", 7), ("rejected", 8),
+              ("review", 6), ("new", 5)]
+    for i, (status, fit) in enumerate(layout):
+        jid = f"m{i}"
+        scores[jid] = _score(jid, fit=fit)
+        jds[jid] = make_record(id=jid, company="Mistral AI")
+        workflow[jid] = _state(status)
+    # Hebbia: 2 scored, 1 shortlisted — below the 5-job rate guard
+    for i, status in enumerate(["shortlisted", "review"]):
+        jid = f"h{i}"
+        scores[jid] = _score(jid, fit=6)
+        jds[jid] = make_record(id=jid, company="Hebbia")
+        workflow[jid] = _state(status)
+    return scores, jds, workflow
+
+
+def test_yield_report_basic():
+    scores, jds, workflow = _yield_scenario()
+    seeds = [_seed("Mistral AI", ats="lever", domain="frontier_ai"),
+             _seed("Hebbia", ats="ashby", domain="ai_application_platform"),
+             _seed("Quiet Co", ats="greenhouse", domain="frontier_ai")]  # seeded, no corpus
+    data = analyse.build_yield_report(seeds, scores, jds, workflow, {}, cost_per_job=0.03)
+    rows = {r["company"]: r for r in data["companies"]}
+
+    assert rows["Mistral AI"]["jobs_scored"] == 6
+    assert rows["Mistral AI"]["shortlisted"] == 2 and rows["Mistral AI"]["applied"] == 1
+    assert rows["Mistral AI"]["high_score_rejected"] == 1   # fit 8 + rejected
+    assert rows["Mistral AI"]["shortlist_rate"] is not None  # 6 ≥ 5 → derived
+    assert rows["Mistral AI"]["estimated_cost_usd"] == 6 * 0.03
+
+    text = analyse.format_yield(data, today="2026-06-11")
+    assert "COMPANY YIELD REPORT — 2026-06-11" in text
+    for section in ("Best performers", "High-volume noise", "High false-positive rate",
+                    "No live jobs", "Actions flagged", "Domain rollup", "ATS rollup"):
+        assert section in text, section
+    assert "Quiet Co" in text  # seeded company with zero validated records is surfaced
+
+
+def test_yield_min_sample_guard():
+    scores, jds, workflow = _yield_scenario()
+    data = analyse.build_yield_report([_seed("Hebbia")], scores, jds, workflow, {}, cost_per_job=0.03)
+    hebbia = next(r for r in data["companies"] if r["company"] == "Hebbia")
+    assert hebbia["jobs_scored"] == 2
+    assert hebbia["shortlist_rate"] is None  # < 5 scored → suppressed
+    # and it renders as an em dash in the main table row
+    text = analyse.format_yield(data, today="2026-06-11")
+    hebbia_line = next(l for l in text.splitlines() if l.startswith("Hebbia"))
+    assert "—" in hebbia_line
+
+
+def test_yield_action_flagged():
+    scores, jds, workflow = _yield_scenario()
+    seeds = [_seed("Mistral AI", action="keep"),
+             _seed("Hebbia", action="pause", notes="quiet board")]
+    data = analyse.build_yield_report(seeds, scores, jds, workflow, {}, cost_per_job=0.03)
+    text = analyse.format_yield(data, today="2026-06-11")
+    actions = text.split("Actions flagged")[1]
+    assert "Hebbia" in actions and "pause" in actions and "quiet board" in actions
+    assert "Mistral AI" not in actions  # action=keep is not flagged
+
+
+def test_yield_domain_rollup():
+    scores, jds, workflow = _yield_scenario()
+    seeds = [_seed("Mistral AI", domain="frontier_ai"),
+             _seed("Hebbia", domain="ai_application_platform")]
+    data = analyse.build_yield_report(seeds, scores, jds, workflow, {}, cost_per_job=0.03)
+    rollup = {g["key"]: g for g in data["domain_rollup"]}
+    assert rollup["frontier_ai"]["jobs_scored"] == 6 and rollup["frontier_ai"]["companies"] == 1
+    assert rollup["ai_application_platform"]["jobs_scored"] == 2
+    # est cost sums per domain
+    assert rollup["frontier_ai"]["estimated_cost_usd"] == 6 * 0.03
+
+
+def test_yield_manual_ats_no_error():
+    scores, jds, workflow = _yield_scenario()
+    seeds = [_seed("Jack & Jill AI", ats="manual", slug=None, action="investigate_ats",
+                   notes="apply directly")]
+    # A manual watch entry (slug: null, no corpus rows) must not raise.
+    data = analyse.build_yield_report(seeds, scores, jds, workflow, {}, cost_per_job=0.03)
+    text = analyse.format_yield(data, today="2026-06-11")
+    assert "Jack & Jill AI" in text
+    assert "manual watch" in text  # surfaced under No live jobs with the manual tag
+
+
+def test_yield_cost_per_job_none_degrades():
+    """Missing stats (cost_per_job=None) → no cost columns crash; rows still build."""
+    scores, jds, workflow = _yield_scenario()
+    data = analyse.build_yield_report([_seed("Mistral AI")], scores, jds, workflow, {}, cost_per_job=None)
+    mistral = next(r for r in data["companies"] if r["company"] == "Mistral AI")
+    assert mistral["estimated_cost_usd"] is None
+    text = analyse.format_yield(data, today="2026-06-11")
+    assert "COST_PER_JOB n/a" in text
+
+
 # --- cost ----------------------------------------------------------------------
 
 def test_load_cost_and_jobs(tmp_path):
@@ -234,4 +339,5 @@ def test_all_reports_run_against_real_corpus(capsys):
     assert "APPLICATION STATUS REPORT" in out
     assert "COMPANY REPORT" in out
     assert "REQUIREMENT GAPS & BLOCKERS" in out
+    assert "COMPANY YIELD REPORT" in out   # yield is the fifth report in --report all
     assert len(out.strip()) > 0

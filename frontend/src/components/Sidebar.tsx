@@ -1,4 +1,5 @@
-import type { Job } from "@/lib/api";
+import { Download } from "lucide-react";
+import { YIELD_REPORT_URL, type Job } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { fitBadgeClass } from "@/lib/ui";
 import { effectiveStatus, FIT_LABELS, LABEL_TEXT, STATUS_ORDER, type Filters } from "@/lib/jobs";
@@ -149,6 +150,14 @@ export function Sidebar({
       <button onClick={onReset} className="mt-1 w-full rounded-md border border-line bg-white py-[7px] text-[12.5px] text-ink-soft hover:bg-line-soft">
         Reset filters
       </button>
+
+      {/* Read-only company yield report (BACKLOG_YIELD_TRACKING) — public download, no unlock. */}
+      <a
+        href={YIELD_REPORT_URL} download
+        className="mt-[10px] flex w-full items-center justify-center gap-[6px] rounded-md border border-line bg-white py-[7px] text-[12.5px] text-ink-soft hover:bg-line-soft"
+      >
+        <Download className="h-3.5 w-3.5" /> Yield report
+      </a>
     </aside>
   );
 }

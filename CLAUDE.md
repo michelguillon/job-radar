@@ -258,6 +258,25 @@ Kept in full: everything below — active operational guards Claude Code must kn
     record + POST body carry no notes destination — the structured `reason` is the payload).
     (d) `cli.analyse --report gaps` shows the rejection section only when ≥1 is recorded.
 
+40. *(→ SPEC §11.1 + BACKLOG_YIELD_TRACKING)* Company metadata + yield tracking. `company_seeds.yaml`
+    is now the **v2 format**: a bare top-level list (no `companies:` wrapper) with optional
+    `domain`/`fit_hypothesis`/`action`/`notes` per entry. `load_companies` accepts **both** shapes
+    (`data["companies"] if isinstance(data, dict) else data`). New report `cli.analyse --report yield`
+    (+ `GET /api/report/yield` read-only download + React sidebar button) joins seeds ⨝ scored ⨝
+    workflow ⨝ validated ⨝ annotations. Notable points: (a) the join is **by exact company name**,
+    so seed `name` values are kept aligned to the corpus strings (seed renamed "Mistral AI" →
+    "Mistral"); only one-off **manual/calibration** records (JP Morgan Chase, AI Consultancy, Fin
+    (Intercom), Outreach, Zendesk — never in the monitored ATS universe) fall under domain
+    `(unknown)`. (b) `action` is **advisory in v1** —
+    `pause` logs but still collects; `manual`/`slug: null` entries are logged+skipped, never an error.
+    (c) `COST_PER_JOB` is derived at report time from `stats.json`; `cost_per_job=None` (missing stats)
+    degrades gracefully. (d) Volume metric is `jobs_scored` (cost = `jobs_scored × COST_PER_JOB`);
+    rates suppressed below 5 scored jobs. (e) Settings gained `seeds_path`/`stats_path`
+    (`JR_SEEDS_PATH`/`JR_STATS_PATH`), defaulted so existing `Settings(...)` construction keeps working.
+    (f) Seed file is **81 companies** (greenhouse 49 / ashby 27 / lever 4 / manual 1) — the v2 header's
+    "73" was inaccurate. Perplexity is **kept** (carried from v1, has scored roles); Jack & Jill is the
+    `manual` watch entry.
+
 
 ## Schema summary
 

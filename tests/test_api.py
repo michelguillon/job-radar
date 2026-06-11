@@ -391,6 +391,39 @@ def test_index_overlays_title_override(client, monkeypatch):
     assert rec["title"] == "Brand New Title"
 
 
+# --- report: yield download ----------------------------------------------------
+
+def test_yield_report_downloads(client, tmp_path, monkeypatch):
+    """GET /api/report/yield is public, returns text/plain, and attaches as a .txt."""
+    from dataclasses import replace
+    from models.record import JDRecord
+    from tests.factories import base_envelope
+
+    # Validated JD for the scored job (company joins to a seed below).
+    validated = tmp_path / "validated_20260609.jsonl"
+    env = base_envelope()
+    env.update(id="sha256:j1", company="Mistral AI")
+    validated.write_text(JDRecord.from_dict(env).to_jsonl() + "\n", encoding="utf-8")
+
+    seeds = tmp_path / "seeds.yaml"
+    seeds.write_text("- {name: Mistral AI, ats: lever, slug: mistral, domain: frontier_ai, "
+                     "fit_hypothesis: high, action: keep}\n", encoding="utf-8")
+    stats = tmp_path / "stats.json"
+    stats.write_text('[{"step": "label", "labelled": 10, "cost_usd": 0.3}]', encoding="utf-8")
+
+    base = client.settings
+    full = replace(base, validated_glob=str(validated), seeds_path=str(seeds), stats_path=str(stats))
+    app.dependency_overrides[get_settings] = lambda: full
+
+    res = client.get("/api/report/yield")
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/plain")
+    assert "attachment" in res.headers["content-disposition"]
+    assert res.headers["content-disposition"].endswith('.txt"')
+    assert "COMPANY YIELD REPORT" in res.text
+    assert "Mistral AI" in res.text
+
+
 # --- health --------------------------------------------------------------------
 
 def test_health(client):

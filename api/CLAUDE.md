@@ -26,6 +26,15 @@ write path over the same JSONL the CLI appends to** — never a second source of
   `annotations.jsonl`). `outcome` validates against `OUTCOME`; the UI pairs it with a
   `/api/status` call to move the workflow lane (the two are orthogonal under model C).
 
+## Read-only report downloads
+
+`GET /api/report/yield` (reports.py) returns the company yield report
+(BACKLOG_YIELD_TRACKING) as a `text/plain` attachment. **No auth** (read-only, like
+`/api/index`). It imports and calls the *same* `cli.analyse` pure functions the CLI uses
+(`build_yield_report` + `format_yield`) — never a reimplementation — over the
+settings-resolved corpus paths. New settings: `seeds_path` (`JR_SEEDS_PATH`) + `stats_path`
+(`JR_STATS_PATH`), defaulted to the CLI constants.
+
 ## Live overlay (the one non-obvious read)
 
 `GET /api/index` serves the pre-built `corpus/index.json` (the heavy scoring+extraction
