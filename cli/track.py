@@ -15,7 +15,7 @@ outcomes, *without* the scorer ever owning mutable human state.
     python track.py list --status shortlisted
     python track.py list --min-fit 7 --location-workable yes
 
-State model C (job_radar_TRACKER_PLAN.md, locked): workflow state lives in an
+State model C (job_radar_SPEC.md §7.4 + §11.2 register item B, locked): workflow state lives in an
 append-only event log ``corpus/activity_log.jsonl`` — the single source of truth
 for status / notes / outcome / application_date. ``track.py`` only ever *appends*;
 it never edits a scored file and never touches the scorer. A job's live state is

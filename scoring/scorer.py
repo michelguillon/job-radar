@@ -2,7 +2,7 @@
 
 Consumes a ``JDRecord``'s **extraction** fields + a ``Profile`` and produces one
 ``ApplicationRecord``. The scorer never reads or writes JDRecord's legacy
-annotation stub (Option A, ``docs/job_radar_PHASE2_PLAN.md``).
+annotation stub (Option A, ``docs/job_radar_SPEC.md §6.9``).
 
   Stage 1 — Structural fit  → ``fit_score`` (1–10)
             Signal vs gates (see "Stage 1 model" below).
@@ -69,7 +69,7 @@ UNMET_REQUIRED_THRESHOLD = 3
 NEGATIVE_SIGNAL_CEILING = 5
 
 # company_stage values treated as early-stage for the priority urgency nudge.
-# (PHASE2_PLAN wrote "startup", but that is a company_size_signal value — the
+# (job_radar_SPEC.md §6.9: "startup" is a company_size_signal value — the
 # COMPANY_STAGE equivalent is "seed".)
 EARLY_STAGE = frozenset({"seed", "series_a", "series_b"})
 

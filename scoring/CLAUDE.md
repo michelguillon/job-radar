@@ -1,8 +1,8 @@
 # scoring/ — conventions (Phase 2 Scoring Engine)
 
 Rule-based scorer. Consumes a `JDRecord`'s **extraction** fields + a `Profile`
-and emits one `ApplicationRecord` per JD. See `docs/job_radar_PHASE2_PLAN.md`
-(authoritative) and `docs/job_radar_SPEC.md §6`.
+and emits one `ApplicationRecord` per JD. See `docs/job_radar_SPEC.md §6`
+(and the §11.2 review register for the consolidated scoring decisions).
 
 ## Hard rules
 
@@ -105,7 +105,7 @@ A pure quota-carrying sales role can't be a strong fit however the enums line up
   (≥8, no blocker) → good_fit (≥6, no blocker) → stretch (≥5, incl. 6–7 with a
   blocker) → interview_practice (≥3) → income_bridge (≤2).
 - `priority_score` = `fit_score`, `+1` if `company_stage` in `{seed, series_a,
-  series_b}` (PHASE2_PLAN wrote "startup", but that is a `company_size_signal`
+  series_b}` (SPEC §6.9: "startup" is a `company_size_signal`
   value — `seed` is the `company_stage` equivalent), `-2` if any blocker, `+1` to
   low-fit (≤4) in `broad` mode, clamped 1–10.
 - `fit_label_reason` is one templated sentence — the three signal phrases, any
@@ -146,12 +146,9 @@ which labels are *shown* — that filter lives in `score.py` (`is_shown`, `_HIDD
 filter on top. The scored file always contains **every** record — filtering never
 drops rows from the durable artifact.
 
-## Deferred: Option D — career-pattern scoring (do NOT build yet)
+## Deferred scoring work
 
-A richer scoring model that weighs **career pattern / trajectory** (not just the
-current `role + domain + depth + blockers` dimensions) is **deferred**. Trigger to
-revisit: only once **production data shows that role + domain + depth + blockers
-cannot explain observed scoring errors** — i.e. the current dimensions are demonstrably
-insufficient, not merely imperfect. Until then it stays unbuilt (avoid speculative
-complexity in a locked scorer). Pairs with the "scorer locked until the 100+-scored-job
-review" guard (CLAUDE.md deviation 21). *(Migrated here from the retired Phase 3 plan.)*
+Career-pattern / trajectory scoring (**"Option D"**) is **deferred** — don't build it until
+production data shows `role + domain + depth + blockers` can't explain observed scoring errors.
+Full statement + trigger in **SPEC §11.1 (backlog)** and the **§11.2 review register (item C)**;
+pairs with the "scorer locked until the 100+-scored-job review" guard (CLAUDE.md deviation 21).

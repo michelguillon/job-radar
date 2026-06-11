@@ -58,8 +58,8 @@ thing tests actually run against.
   `CORPUS_FINDINGS.md`, `job_radar_ARCHITECTURE.*`, `RETROSPECTIVE`, `README`). Before
   discarding a plan, **migrate any durable decision/deferral into SPEC / LEARNINGS / the
   nearest `CLAUDE.md`** — never let the plan become the only home for a decision (the
-  anti-pattern that left `PHASE2_PLAN`/`TRACKER_PLAN` cited as "authoritative" in code +
-  source docs, so they can't be deleted). Prompt scratch follows the same rule
+  anti-pattern that once left retired phase plans cited as "authoritative" in code + source
+  docs; those decisions now live in SPEC §6.9/§7.4/§11.2). Prompt scratch follows the same rule
   (`docs/*PROMPT*` is gitignored as a transitional measure).
 - **Definition of done (EVERY task)** — a change is not complete until the
   docs are current. This is not optional and not an afterthought:

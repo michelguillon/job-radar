@@ -1036,8 +1036,8 @@ python -m cli.score --input corpus/labelled/validated_*.jsonl --mode active
 
 > **As-built note:** the default input is `corpus/validated/validated_*.jsonl`
 > (Step 8 writes there, not `corpus/labelled/`), and the scoring model below
-> (§6.9) refines the flat §6.5 model. `docs/job_radar_PHASE2_PLAN.md` and
-> `scoring/CLAUDE.md` are authoritative for the implementation.
+> (§6.9) refines the flat §6.5 model. Locked decisions from the Phase 2 build
+> are consolidated in §11.2 (review register) with detail in §6.9 and §13.
 
 ### 6.9 — Scoring model refinement: gates vs signal, and calibration
 
@@ -1063,6 +1063,52 @@ are unmet by the candidate's proficient skills, the scorer emits a
 `blocking_constraint` that demotes the label (e.g. `good_fit` → `blocked_fit`).
 This is what makes requirement assessment dominate a misleadingly high structural
 score, not merely annotate it.
+
+#### Three-tier role model (deviates from §6.5 flat lookup)
+
+*(Listed in §11.2 review register — item A3)*
+
+The role dimension uses a three-tier structure, not a flat target_roles lookup:
+
+| Tier | Score | When |
+|---|---|---|
+| `primary` | 2.0 | `role_type ∈ target_roles.primary` |
+| `conditional_primary` | 2.0 if qualifies, else 1.0 | Role is `Product` AND (JD domain ∈ conditional domains OR strong_signal + weak_signal present in JD text) |
+| `secondary` | 1.0 | Role in `target_roles.secondary` but not qualifying for conditional_primary |
+| no match | 0.0 | — |
+
+`conditional_primary` was introduced because Product is only a strong fit for
+Michel in specific domain+signal contexts (AdTech, identity, AI Platform,
+commercialisation). A maritime PM or consumer mobile PM should not score as a
+primary role match; a Product Manager for Ad Targeting & Identity should. The
+conditional domains are deliberately narrow — broad catch-alls like Enterprise
+Software were removed after they gave a maritime PM the full Product boost.
+
+#### Option A — ApplicationRecord as scorer output (locked schema decision)
+
+*(Listed in §11.2 review register — item A1)*
+
+`SCHEMA_VERSION = "1.3"` tags `ApplicationRecord`. `JDRECORD_SCHEMA_VERSION =
+"1.2"` stays frozen — the JD corpus is not migrated (append-only convention).
+A v1.2 line is a JDRecord; a v1.3 line is an ApplicationRecord. The scorer
+populates `ApplicationRecord` exclusively and never reads or writes JDRecord's
+legacy annotation stub. `JobPosting` (the third schema layer) is deferred until
+scoring is proven.
+
+#### Profile tie-break rule
+
+*(Listed in §11.2 review register — item A2)*
+
+When prose documentation and the executable profile/scorer disagree, the
+**executable artifact wins**. The `candidate_profile.yaml` structure is
+authoritative over the §6.4 example. The scorer's enum-bound field reads are
+authoritative over the §6.5 dimension table.
+
+One known prose-vs-artifact discrepancy to note explicitly: the `priority_score`
+`+1` bonus applies when `company_stage ∈ {seed, series_a, series_b}` — `"seed"`
+is the correct `company_stage` enum value. The word `"startup"` that appears in
+§6.5 is a `company_size_signal` value, not a `company_stage` value, and does not
+trigger the bonus.
 
 #### Design principle — the negative-calibration corpus
 
@@ -1147,8 +1193,9 @@ scratch on each run — the scorer is pure and always emits
 record would be wiped by the next collection→label→score cycle.
 
 **Resolution — model C (append-only event log as source of truth)**
-(forks resolved in `job_radar_TRACKER_PLAN.md`; superseded the earlier "updates
-ApplicationRecord in corpus/scored/" sketch — see CLAUDE.md deviation 23):
+(forks resolved before implementation; superseded the earlier "updates
+ApplicationRecord in corpus/scored/" sketch — see §11.2 review register item B
+and CLAUDE.md deviation 23):
 
 - `corpus/activity_log.jsonl` is the **single source of truth** for workflow
   state. `track.py` only ever **appends** events; it never edits a scored file,
@@ -1888,6 +1935,193 @@ CLAUDE.md deviations 32–34.
 
 ---
 
+---
+
+### 10.11 — Workflow enhancements (backlog — next to build)
+
+Two usability gaps identified during daily use. Both follow existing patterns
+— event log append, read-model join, no scorer or schema changes.
+
+---
+
+#### Feature 1 — Manual Fit Override
+
+**Problem:** The scorer may label a role `strong_fit` but the owner's
+assessment differs after reading the full JD. There is no way to reflect
+that decision in the UI without mutating scorer output.
+
+**Decision:** Add a `fit_override` event type to `ACTIVITY_EVENT`. Append
+to `activity_log.jsonl` — same pattern as status, note, and title events.
+Scorer output is never mutated. Both values are preserved.
+
+**Event format:**
+```json
+{
+  "v": 1,
+  "ts": "2026-06-10T12:00:00Z",
+  "job_id": "sha256:abc123",
+  "event": "fit_override",
+  "value": "good_fit",
+  "notes": "Strong role/domain fit, but meaningful AI product depth gap."
+}
+```
+
+`value` must be a valid `fit_label` enum value:
+`strong_fit | good_fit | stretch | blocked_fit | interview_practice | income_bridge`
+
+`notes` is optional but strongly encouraged. `priority_score` override is
+also supported as a second event field if needed — defer until evidence shows
+it's required.
+
+**`ACTIVITY_EVENT` update** (`models/record.py` — constants only, no schema bump):
+```python
+ACTIVITY_EVENT = frozenset({
+    "status", "outcome", "note", "title",
+    "fit_override",    # new
+})
+```
+
+**Read model — `stats.py --export-index`:**
+
+Resolve the latest `fit_override` event per `job_id` and expose both scorer
+and user values in `corpus/index.json`:
+
+```json
+{
+  "scorer_fit_label":     "strong_fit",
+  "scorer_fit_score":     10,
+  "scorer_priority_score": 10,
+  "user_fit_label":       "good_fit",
+  "user_fit_reason":      "Strong role/domain fit, but meaningful AI product depth gap.",
+  "display_fit_label":    "good_fit",
+  "display_priority_score": 10,
+  "has_fit_override":     true
+}
+```
+
+If no override: `display_fit_label = scorer_fit_label`, `has_fit_override = false`.
+
+UI sorts and filters use `display_fit_label` / `display_priority_score`.
+Detail panel shows both scorer assessment and override side by side.
+
+**New API endpoint** (requires capability cookie):
+```
+POST /api/fit-override    {job_id, fit_label, reason?}
+```
+
+**UI — detail panel additions:**
+
+When no override:
+```
+Scorer assessment
+fit_label: strong_fit  fit_score: 10  priority: 10
+
+[Override fit label ▾]  [reason text]  [Save override]
+```
+
+When override active:
+```
+Scorer assessment
+fit_label: strong_fit  fit_score: 10  priority: 10
+
+Manual override active  ⚠ Overridden by Michel
+good_fit  —  "Strong role/domain fit, but meaningful AI product depth gap."
+[Clear override]  [Edit override]
+```
+
+**What this is not:** An edit to the scorer output. The override is a
+workflow decision — "for my current job search, treat this role as X."
+The scorer value is preserved for corpus quality analysis and future
+fine-tuning. An override does not propagate to `ApplicationRecord` or
+affect the extraction schema.
+
+---
+
+#### Feature 2 — Annotation Visibility + Duplicate Prevention
+
+**Problem:** Annotations append silently. The detail panel shows the
+submission form but not existing annotations, making it easy to flag
+the same issue multiple times without feedback.
+
+**Read model — `stats.py --export-index`:**
+
+Include existing annotations per `job_id` in `corpus/index.json`:
+
+```json
+{
+  "annotations": [
+    {
+      "ts": "2026-06-10T12:10:00Z",
+      "annotation_type": "fit_score_disagree",
+      "field": "fit_score",
+      "observed": "strong_fit / 10",
+      "expected": "good_fit / 7",
+      "reason": "AI product depth gap is underweighted.",
+      "scorer_label": "strong_fit",
+      "scorer_fit_score": 10
+    }
+  ],
+  "annotation_count": 1,
+  "has_annotations": true
+}
+```
+
+**UI — detail panel additions:**
+
+Show existing annotations above the submission form:
+
+```
+Scoring flags (2)
+
+[fit_score_disagree]
+AI product depth gap is underweighted.
+2026-06-10
+
+[domain_incorrect]
+Enterprise Software looks like a generic over-tag.
+2026-06-10
+
+─────────────────────────────────
+Flag a new scoring issue
+Type: [dropdown ▾]  ...
+```
+
+A small `⚠` badge on the detail panel trigger shows `annotation_count > 0`
+at a glance in the Browse table.
+
+**Duplicate prevention:**
+
+An exact duplicate is defined as: same `job_id` + `annotation_type` + `field`
++ `reason` matching an existing annotation.
+
+- **API:** `POST /api/annotations` returns `409 Conflict` for exact duplicates.
+- **UI:** Before submission, check existing annotations client-side. If exact
+  match found, show inline warning: "This flag already exists. Submit anyway?"
+  with confirm/cancel.
+
+**Important boundary:**
+
+| | Manual fit override | Annotation |
+|---|---|---|
+| Purpose | Current workflow decision | Future system improvement |
+| Means | "Treat this role as X today" | "Review this later — system may be wrong" |
+| Affects | UI display, sorting, filtering | Nothing immediately |
+| Consumer | Owner's daily review | Future scorer calibration, fine-tuning |
+
+Both can exist for the same job simultaneously and serve different purposes.
+
+**Definition of Done (both features):**
+
+1. `ACTIVITY_EVENT` updated in `models/record.py` to include `fit_override`
+2. `POST /api/fit-override` endpoint appends to `activity_log.jsonl`, validated
+3. `stats.py --export-index` resolves latest override per job, embeds annotations
+   per job in `index.json`
+4. UI detail panel shows override controls (Feature 1) and existing annotations
+   (Feature 2)
+5. `POST /api/annotations` returns 409 for exact duplicates; UI shows warning
+6. All existing 362 tests pass — no scorer, schema, or pipeline changes
+7. Append learning entry to `docs/job_radar_LEARNINGS.md`
+
 ## 11. Phase 7 — Fine-Tuned Analyser (Future Enhancement)
 
 This phase is **explicitly deferred**. It becomes Project 5 when the
@@ -1922,143 +2156,93 @@ Full spec: `docs/BACKLOG_COMPANY_UNIVERSE.md`
 
 ### Production Company Universe v1
 
-The initial production seed list. **Merged into `company_seeds.yaml` on 2026-06-10**
-as Tier 2 (UNVERIFIED), alongside the original 17 verified seeds → 102 companies total
-(greenhouse 95 / lever 4 / ashby 3). ATS slugs are best-guess defaults — verify each with
-`python -m cli.collect --dry-run --source greenhouse --company <slug>`
-before a full run. A 404 means the slug is wrong or the company isn't on that ATS
-(hyperscalers/large incumbents mostly use Workday/internal, not public boards) — fix or
-delete the entry. Collection silently skips a 404, so unverified entries cost nothing
-until their slug resolves.
+The initial production seed list. **Updated 2026-06-11 with verified ATS slugs**
+from `find_ats_slugs.py` probe run — 62 companies confirmed across Greenhouse (29),
+Ashby (28), and Lever (5). Unresolvable companies (Workday/custom portals) excluded.
+
+Key finding: most AI-native companies use **Ashby**, not Greenhouse. The original
+best-guess slugs were wrong for ~60% of companies.
 
 ```yaml
-# Production Company Universe v1 — 2026-06-10
-# ATS slugs are best-guess — verify before running
+# Production Company Universe — verified 2026-06-11
+# All slugs probe-confirmed via find_ats_slugs.py
 
-foundation_models:
-  - {name: OpenAI,           ats: greenhouse, slug: openai}
-  - {name: Anthropic,        ats: greenhouse, slug: anthropic}
-  - {name: Mistral AI,       ats: lever,      slug: mistral}
-  - {name: Cohere,           ats: lever,      slug: cohere}
-  - {name: Google DeepMind,  ats: greenhouse, slug: google}
-  - {name: Aleph Alpha,      ats: greenhouse, slug: aleph-alpha}
-  - {name: xAI,              ats: greenhouse, slug: xai}
+# Already in pipeline (original verified seeds)
+- {name: Anthropic,        ats: greenhouse, slug: anthropic}
+- {name: Databricks,       ats: greenhouse, slug: databricks}
+- {name: Stripe,           ats: greenhouse, slug: stripe}
+- {name: Adyen,            ats: greenhouse, slug: adyen}
+- {name: Figma,            ats: greenhouse, slug: figma}
+- {name: The Trade Desk,   ats: greenhouse, slug: thetradedesk}
+- {name: xAI,              ats: greenhouse, slug: xai}
+- {name: Intercom,         ats: greenhouse, slug: intercom}
+- {name: Cresta,           ats: greenhouse, slug: cresta}
+- {name: PolyAI,           ats: greenhouse, slug: polyai}
+- {name: Forethought,      ats: greenhouse, slug: forethought}
+- {name: CoreWeave,        ats: greenhouse, slug: coreweave}
+- {name: Cloudflare,       ats: greenhouse, slug: cloudflare}
+- {name: MongoDB,          ats: greenhouse, slug: mongodb}
+- {name: Elastic,          ats: greenhouse, slug: elastic}
+- {name: Datadog,          ats: greenhouse, slug: datadog}
+- {name: Marqeta,          ats: greenhouse, slug: marqeta}
+- {name: Monzo,            ats: greenhouse, slug: monzo}
+- {name: Okta,             ats: greenhouse, slug: okta}
+- {name: Fractile,         ats: greenhouse, slug: fractile}
+- {name: Tenstorrent,      ats: greenhouse, slug: tenstorrent}
+- {name: Graphcore,        ats: greenhouse, slug: graphcore}
+- {name: PhysicsX,         ats: greenhouse, slug: physicsx}
+- {name: Wayve,            ats: greenhouse, slug: wayve}
+- {name: Thoughtworks,     ats: greenhouse, slug: thoughtworks}
+- {name: Baya Systems,     ats: greenhouse, slug: bayasystems}
+- {name: Glean,            ats: greenhouse, slug: gleanwork}
+- {name: Scale AI,         ats: greenhouse, slug: scaleai}
+- {name: Together AI,      ats: greenhouse, slug: togetherai}
+- {name: Grafana Labs,     ats: greenhouse, slug: grafanalabs}
+- {name: Ping Identity,    ats: greenhouse, slug: pingidentity}
+- {name: Stability AI,     ats: greenhouse, slug: stabilityai}
+- {name: Google DeepMind,  ats: greenhouse, slug: deepmind}
+- {name: Mistral AI,       ats: lever,      slug: mistral}
+- {name: Palantir,         ats: lever,      slug: palantir}
+- {name: Perplexity,       ats: ashby,      slug: perplexity}
+- {name: Anyscale,         ats: ashby,      slug: anyscale}
+- {name: Modal,            ats: ashby,      slug: modal}
 
-ai_application_platforms:
-  - {name: Writer,       ats: greenhouse, slug: writer}
-  - {name: Intercom,     ats: greenhouse, slug: intercom}
-  - {name: Glean,        ats: greenhouse, slug: glean}
-  - {name: Harvey,       ats: greenhouse, slug: harvey}
-  - {name: Sierra,       ats: greenhouse, slug: sierra}
-  - {name: Decagon,      ats: greenhouse, slug: decagon}
-  - {name: Hebbia,       ats: greenhouse, slug: hebbia}
-  - {name: Cresta,       ats: greenhouse, slug: cresta}
-  - {name: PolyAI,       ats: greenhouse, slug: polyai}
-  - {name: Cognigy,      ats: greenhouse, slug: cognigy}
-  - {name: Forethought,  ats: greenhouse, slug: forethought}
-  - {name: Rasa,         ats: greenhouse, slug: rasa}
+# New — confirmed 2026-06-11
+- {name: OpenAI,           ats: ashby,      slug: openai}
+- {name: Aleph Alpha,      ats: ashby,      slug: alephalpha}
+- {name: Cohere,           ats: ashby,      slug: cohere}
+- {name: Writer,           ats: ashby,      slug: writer}
+- {name: Harvey,           ats: ashby,      slug: harvey}
+- {name: Sierra,           ats: ashby,      slug: sierra}
+- {name: Decagon,          ats: ashby,      slug: decagon}
+- {name: Hebbia,           ats: ashby,      slug: hebbia-ai}
+- {name: Rasa,             ats: ashby,      slug: rasa}
+- {name: Snowflake,        ats: ashby,      slug: snowflake}
+- {name: Pinecone,         ats: ashby,      slug: pinecone}
+- {name: Weaviate,         ats: ashby,      slug: weaviate}
+- {name: LangChain,        ats: ashby,      slug: langchain}
+- {name: Baseten,          ats: ashby,      slug: baseten}
+- {name: Confluent,        ats: ashby,      slug: confluent}
+- {name: Airwallex,        ats: ashby,      slug: airwallex}
+- {name: Plaid,            ats: ashby,      slug: plaid}
+- {name: Notion,           ats: ashby,      slug: notion}
+- {name: Cerebras,         ats: ashby,      slug: cerebras}
+- {name: Faculty,          ats: ashby,      slug: faculty}
+- {name: Quantexa,         ats: ashby,      slug: quantexa}
+- {name: Synthesia,        ats: ashby,      slug: synthesia}
+- {name: ElevenLabs,       ats: ashby,      slug: elevenlabs}
+- {name: Multiverse,       ats: ashby,      slug: multiverse}
 
-ai_data_infrastructure:
-  - {name: Databricks,   ats: greenhouse, slug: databricks}
-  - {name: Snowflake,    ats: greenhouse, slug: snowflake}
-  - {name: Scale AI,     ats: greenhouse, slug: scaleai}
-  - {name: CoreWeave,    ats: greenhouse, slug: coreweave}
-  - {name: Together AI,  ats: greenhouse, slug: together}
-  - {name: Modal,        ats: ashby,      slug: modal}
-  - {name: Pinecone,     ats: greenhouse, slug: pinecone}
-  - {name: Weaviate,     ats: greenhouse, slug: weaviate}
-  - {name: Hugging Face, ats: lever,      slug: huggingface}
-  - {name: LangChain,    ats: greenhouse, slug: langchain}
-  - {name: Anyscale,     ats: ashby,      slug: anyscale}
-  - {name: Baseten,      ats: greenhouse, slug: baseten}
-
-platform_and_infrastructure:
-  - {name: Cloudflare,   ats: greenhouse, slug: cloudflare}
-  - {name: Confluent,    ats: greenhouse, slug: confluent}
-  - {name: MongoDB,      ats: greenhouse, slug: mongodb}
-  - {name: Elastic,      ats: greenhouse, slug: elastic}
-  - {name: Grafana Labs, ats: greenhouse, slug: grafana}
-  - {name: Datadog,      ats: greenhouse, slug: datadog}
-  - {name: HashiCorp,    ats: greenhouse, slug: hashicorp}
-  - {name: NVIDIA,       ats: greenhouse, slug: nvidia}
-
-cloud_platforms:
-  - {name: Microsoft,           ats: greenhouse, slug: microsoft}
-  - {name: Amazon Web Services, ats: greenhouse, slug: amazon}
-  - {name: Google Cloud,        ats: greenhouse, slug: google-cloud}
-  - {name: Oracle Cloud,        ats: greenhouse, slug: oracle}
-
-fintech_infrastructure:
-  - {name: Stripe,       ats: greenhouse, slug: stripe}
-  - {name: Adyen,        ats: greenhouse, slug: adyen}
-  - {name: Airwallex,    ats: greenhouse, slug: airwallex}
-  - {name: Plaid,        ats: greenhouse, slug: plaid}
-  - {name: Checkout.com, ats: greenhouse, slug: checkout}
-  - {name: Rapyd,        ats: greenhouse, slug: rapyd}
-  - {name: Marqeta,      ats: greenhouse, slug: marqeta}
-
-fintech_platforms:
-  - {name: Wise,         ats: greenhouse, slug: wise}
-  - {name: Revolut,      ats: greenhouse, slug: revolut}
-  - {name: Klarna,       ats: greenhouse, slug: klarna}
-  - {name: Monzo,        ats: greenhouse, slug: monzo}
-  - {name: Starling Bank,ats: greenhouse, slug: starlingbank}
-
-financial_data_and_market_infrastructure:
-  - {name: Bloomberg,  ats: greenhouse, slug: bloomberg}
-  - {name: LSEG,       ats: greenhouse, slug: lseg}
-  - {name: FactSet,    ats: greenhouse, slug: factset}
-  - {name: S&P Global, ats: greenhouse, slug: spglobal}
-
-identity_platforms:
-  - {name: Okta,          ats: greenhouse, slug: okta}
-  - {name: Auth0,         ats: greenhouse, slug: auth0}
-  - {name: Ping Identity, ats: greenhouse, slug: ping}
-  - {name: SailPoint,     ats: greenhouse, slug: sailpoint}
-
-enterprise_platforms:
-  - {name: Figma,      ats: greenhouse, slug: figma}
-  - {name: Atlassian,  ats: greenhouse, slug: atlassian}
-  - {name: Notion,     ats: greenhouse, slug: notion}
-  - {name: Miro,       ats: greenhouse, slug: miro}
-  - {name: HubSpot,    ats: greenhouse, slug: hubspot}
-  - {name: ServiceNow, ats: greenhouse, slug: servicenow}
-  - {name: Monday.com, ats: greenhouse, slug: mondaydotcom}
-
-semiconductor_and_ai_compute:
-  - {name: Arm,         ats: greenhouse, slug: arm}
-  - {name: Baya Systems,ats: greenhouse, slug: baya-systems}
-  - {name: Fractile,    ats: greenhouse, slug: fractile}
-  - {name: Groq,        ats: greenhouse, slug: groq}
-  - {name: Cerebras,    ats: greenhouse, slug: cerebras}
-  - {name: Tenstorrent, ats: greenhouse, slug: tenstorrent}
-  - {name: SambaNova,   ats: greenhouse, slug: sambanova}
-  - {name: Graphcore,   ats: greenhouse, slug: graphcore}
-  - {name: SiFive,      ats: greenhouse, slug: sifive}
-  - {name: AMD,         ats: greenhouse, slug: amd}
-  - {name: Qualcomm,    ats: greenhouse, slug: qualcomm}
-  - {name: Intel,       ats: greenhouse, slug: intel}
-  - {name: Broadcom,    ats: greenhouse, slug: broadcom}
-
-uk_european_scaleups:
-  - {name: Faculty,      ats: greenhouse, slug: faculty}
-  - {name: Quantexa,     ats: greenhouse, slug: quantexa}
-  - {name: PhysicsX,     ats: greenhouse, slug: physicsx}
-  - {name: Synthesia,    ats: greenhouse, slug: synthesia}
-  - {name: ElevenLabs,   ats: greenhouse, slug: elevenlabs}
-  - {name: Stability AI, ats: greenhouse, slug: stability-ai}
-  - {name: Wayve,        ats: greenhouse, slug: wayve}
-  - {name: Darktrace,    ats: greenhouse, slug: darktrace}
-  - {name: Tessl,        ats: greenhouse, slug: tessl}
-  - {name: Multiverse,   ats: greenhouse, slug: multiverse}
-
-strategic_ai_delivery:
-  - {name: Palantir,          ats: greenhouse, slug: palantir}
-  - {name: Accenture,         ats: greenhouse, slug: accenture}
-  - {name: Slalom,            ats: greenhouse, slug: slalom}
-  - {name: Thoughtworks,      ats: greenhouse, slug: thoughtworks}
-  - {name: EPAM,              ats: greenhouse, slug: epam}
-  - {name: Publicis Sapient,  ats: greenhouse, slug: publicis-sapient}
+# Not collectable — excluded
+# Hugging Face    — not on Greenhouse/Lever/Ashby (custom careers page)
+# Cognigy, HashiCorp, NVIDIA — not found
+# Microsoft, AWS, Google Cloud, Oracle — Workday
+# Bloomberg, LSEG, FactSet, S&P Global — Workday
+# Atlassian, ServiceNow, AMD, Intel, Qualcomm, Broadcom — Workday
+# Checkout.com, Rapyd, Wise, Revolut, Klarna, Starling Bank — not found
+# Groq, SambaNova, SiFive, Arm — not found
+# Accenture, Slalom, EPAM, Publicis Sapient — not found
+# Auth0 — acquired by Okta (already in list)
 ```
 
 ### Company metadata (post-deployment — after 2–4 weeks usage)
@@ -2093,6 +2277,24 @@ Both correct — different questions. Integration design deferred until
 Phase 6 stable and 5+ roles through both systems. See
 `docs/BACKLOG_COMPANY_UNIVERSE.md §6`.
 
+### Option D — career-pattern scoring (deferred)
+
+*(Listed in §11.2 review register — item C)*
+
+A richer scoring model that weighs career pattern and trajectory (not just
+the current `role + domain + depth + blockers` dimensions) is **explicitly
+deferred**.
+
+**Trigger to revisit:** only once production data shows that
+`role + domain + depth + blockers` cannot explain observed scoring errors
+— i.e. the current dimensions are demonstrably insufficient, not merely
+imperfect. Until then it stays unbuilt.
+
+**Pairs with:** the "scorer locked until the 100+-scored-job review" guard
+(CLAUDE.md deviation 21). The calibration corpus and production annotations
+are building the evidence base. Do not build speculative scoring complexity
+before the evidence justifies it.
+
 ### Corpus migration and git pull safety (before first deployment)
 
 See `docs/BACKLOG_COMPANY_UNIVERSE.md §7` for full scp commands.
@@ -2108,6 +2310,102 @@ Pattern: `git fetch` → `git diff HEAD origin/main` → pull only when no
 tracked file will clobber production state. `activity_log.jsonl` and
 `annotations.jsonl` are written by the deployed FastAPI — never overwrite
 them during a dev→server sync.
+
+---
+
+## 11.2 — Decisions consolidated from retired plans (review register)
+
+**Purpose:** This register makes load-bearing decisions — previously split
+across the two retired Phase 2 and Phase 3 plan files and `scoring/CLAUDE.md`
+— visible for explicit review. Each item states the decision in one line and
+points to where the detail lives in this SPEC.
+
+**This register is temporary scaffolding.** Once each item is confirmed
+in place and the plan files are deleted, this section can be retired.
+
+**Cleanup steps (after review):**
+1. Delete the two retired plan docs (Phase 2 scoring plan and Phase 3 tracker plan) from `docs/`
+2. Repoint code comments in `scoring/profile.py`, `scoring/scorer.py`,
+   `models/record.py`, `cli/track.py` to cite the SPEC sections below
+3. Update `docs/CORPUS_FINDINGS.md` to cite §6.9 instead of the retired Phase 2 plan
+4. Remove the Option D block from `scoring/CLAUDE.md` (now in §11.1 above)
+
+---
+
+### Item A1 — Option A: ApplicationRecord as scorer output (locked)
+
+**Decision:** The scorer's output is `ApplicationRecord` (SCHEMA_VERSION 1.3),
+written to `corpus/scored/`. `JDRecord` annotation stubs are not read or written
+by the scorer. `JobPosting` (the third schema layer) is deferred until scoring is
+proven.
+
+**Detail:** §6.9 ("Option A — ApplicationRecord as scorer output")
+
+**Cited by:** `scoring/scorer.py`, `models/record.py`, `docs/CORPUS_FINDINGS.md`
+
+**Status:** ✅ Implemented and locked. Schema v1.3 live in production.
+
+---
+
+### Item A2 — Profile tie-break rule + company_stage enum clarification (locked)
+
+**Decision:** When prose documentation and the executable profile/scorer disagree,
+the executable artifact wins. `company_stage` uses `"seed"` (not `"startup"` —
+`"startup"` is a `company_size_signal` value and does not trigger the priority bonus).
+
+**Detail:** §6.9 ("Profile tie-break rule")
+
+**Cited by:** `scoring/profile.py`, `scoring/scorer.py`
+
+**Status:** ✅ Implemented and locked. Scorer correctly uses `seed`/`series_a`/`series_b`.
+
+---
+
+### Item A3 — Three-tier role model: primary / conditional_primary / secondary (locked)
+
+**Decision:** The role scoring dimension uses three tiers, not a flat target_roles
+lookup. `conditional_primary` (Product) scores as primary only when domain or
+signal conditions are met — preventing broad catch-alls from inflating unrelated
+Product roles.
+
+**Detail:** §6.9 ("Three-tier role model")
+
+**Cited by:** `scoring/scorer.py`, `candidate_profile.yaml`
+
+**Status:** ✅ Implemented and locked. Calibrated against 23-record corpus.
+
+---
+
+### Item B — Model C: append-only event log as tracker state (locked)
+
+**Decision:** Workflow state lives only in `corpus/activity_log.jsonl`
+(append-only). `track.py` only appends — it never mutates a scored file.
+`outcome` and `application_date` are derived at read time. Transitions are
+forgiving (warn, never block). Unknown `job_id` is refused unless `--force`.
+Model C superseded the earlier "updates ApplicationRecord in corpus/scored/"
+sketch in SPEC §7.4.
+
+**Detail:** §7.4 ("Implementation — model C")
+
+**Cited by:** `cli/track.py`, `models/record.py`, CLAUDE.md deviation 23
+
+**Status:** ✅ Implemented and locked. Activity log live in production.
+
+---
+
+### Item C — Option D: career-pattern scoring deferred (genuine future work)
+
+**Decision:** Career-pattern scoring (trajectory alignment, delivery-motion
+alignment, customer-to-product translation patterns) is not built until
+production data shows `role + domain + depth + blockers` cannot explain
+observed scoring errors.
+
+**Detail:** §11.1 ("Option D — career-pattern scoring")
+
+**Backlog:** §11.1 (also listed there as a named deferral)
+
+**Status:** 🔲 Deferred. Trigger: 100+-scored-job review shows current
+dimensions insufficient.
 
 ---
 

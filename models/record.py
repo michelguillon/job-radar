@@ -135,7 +135,7 @@ APPLICATION_STATUS = frozenset(
 # The Job Tracker keeps workflow state in an append-only event log
 # (corpus/activity_log.jsonl), NOT on ApplicationRecord, so the pure scorer can
 # regenerate scored records without wiping human state (see CLAUDE.md deviation
-# 23 + job_radar_TRACKER_PLAN.md model C). These are vocabulary constants only —
+# 23 + job_radar_SPEC.md §7.4, model C). These are vocabulary constants only —
 # they do not touch any record dataclass and do not bump SCHEMA_VERSION.
 ACTIVITY_LOG_VERSION = 1
 
@@ -150,7 +150,7 @@ ACTIVITY_LOG_VERSION = 1
 ACTIVITY_EVENT = frozenset({"status", "outcome", "note", "title"})
 
 # Terminal outcomes (job_radar_SPEC §7.3). Derived from the log at read time;
-# never persisted on ApplicationRecord (model C / Log-only — TRACKER_PLAN fork).
+# never persisted on ApplicationRecord (model C / Log-only — job_radar_SPEC.md §7.4).
 OUTCOME = frozenset(
     {
         "rejected_pre_screen",
@@ -477,7 +477,7 @@ def validate(record: JDRecord) -> list[str]:
 # Personal-assessment / workflow-state layer (job_radar_SPEC §3.3, §4.2).
 # Produced by scoring/scorer.py, one per JDRecord, written to corpus/scored/.
 # The scorer reads JDRecord *extraction* fields only — never JDRecord's legacy
-# annotation stub, and never writes back to it (PHASE2_PLAN locked decision).
+# annotation stub, and never writes back to it (Option A — job_radar_SPEC.md §6.9).
 #
 # This record is single-owner, so it serialises as a flat envelope (no
 # extraction/annotation grouping like JDRecord).

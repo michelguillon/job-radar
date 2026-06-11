@@ -6,7 +6,7 @@ this loader validates that up front so the scorer never silently drifts from a
 profile that names a role/domain/seniority the schema doesn't know.
 
 The finalised profile is structurally richer than the spec §6.4 example
-(``docs/job_radar_PHASE2_PLAN.md`` — the artifact wins on tie-break). This loader
+(``docs/job_radar_SPEC.md §6.9`` profile tie-break rule — the executable artifact wins). This loader
 reads THAT structure and exposes only what the scorer consumes as a flat
 ``Profile`` object:
 
@@ -21,7 +21,7 @@ reads THAT structure and exposes only what the scorer consumes as a flat
     profile_version, location_base, relocation
 
 ``target_delivery_motion`` is validated against the enum but is narrative only —
-not a Stage-1 dimension (PHASE2_PLAN).
+not a Stage-1 dimension (job_radar_SPEC.md §6.9).
 """
 
 from __future__ import annotations

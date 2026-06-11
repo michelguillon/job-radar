@@ -119,7 +119,7 @@ Personal-assessment / workflow-state layer. Produced by `scoring/scorer.py`
 (one per `JDRecord`), written to `corpus/scored/scored_{ts}.jsonl`. Single-owner
 record — serialises as a **flat** envelope (no extraction/annotation grouping).
 The scorer reads `JDRecord` *extraction* fields only; it never reads or writes
-`JDRecord`'s legacy annotation stub (Option A, `docs/job_radar_PHASE2_PLAN.md`).
+`JDRecord`'s legacy annotation stub (Option A, `docs/job_radar_SPEC.md §6.9`).
 
 ```python
 @dataclass
