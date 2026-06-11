@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Daily digest — runs weekdays at 07:30.
-# Cron: 30 7 * * 1-5 /home/michel/dev/job-radar/cron/digest_daily.sh
+# Cron: 30 7 * * 1-5 /opt/apps/job-radar/cron/digest_daily.sh
 #
 # Surfaces roles scored since the last digest run (cursor: corpus/.digest_last_run)
 # and writes corpus/digest_{date}.md for the morning review.

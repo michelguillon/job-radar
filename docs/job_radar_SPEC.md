@@ -1344,10 +1344,10 @@ append to `/var/log/job-radar/{collect_weekly,digest_daily}.log`. Tests:
 Cron setup (Ubuntu Server):
 ```bash
 # Weekly collection — Sundays 08:00
-0 8 * * 0 /home/michel/dev/job-radar/cron/collect_weekly.sh
+0 8 * * 0 /opt/apps/job-radar/cron/collect_weekly.sh
 
 # Daily digest — weekdays 07:30
-30 7 * * 1-5 /home/michel/dev/job-radar/cron/digest_daily.sh
+30 7 * * 1-5 /opt/apps/job-radar/cron/digest_daily.sh
 ```
 
 ---

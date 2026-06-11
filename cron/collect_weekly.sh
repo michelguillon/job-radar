@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Weekly collection — runs every Sunday at 08:00.
-# Cron: 0 8 * * 0 /home/michel/dev/job-radar/cron/collect_weekly.sh
+# Cron: 0 8 * * 0 /opt/apps/job-radar/cron/collect_weekly.sh
 #
 # Incremental by default (collect.py reads per-source cursors), so only jobs
 # new/updated since the last run enter the paid downstream pipeline. Each stage

@@ -85,8 +85,8 @@ The latest digest table is also written to `corpus/digest_{YYYYMMDD}.md`.
 The scripts are plain wrappers — run them directly to test end-to-end:
 
 ```bash
-/home/michel/dev/job-radar/cron/digest_daily.sh
-/home/michel/dev/job-radar/cron/collect_weekly.sh
+/opt/apps/job-radar/cron/digest_daily.sh
+/opt/apps/job-radar/cron/collect_weekly.sh
 ```
 
 Or run a single stage without touching the cursor / log:
