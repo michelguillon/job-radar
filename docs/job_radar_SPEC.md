@@ -1543,7 +1543,7 @@ before any scorer change.
 - Public visitors: full read-only browse, no write controls visible
 - Owner (Michel): one-time key unlock → signed HttpOnly capability cookie
   → full write access (status, notes, title, annotations)
-- `FULL_MODE_KEY` env var. No key configured = read-only for everyone
+- `JR_WRITE_KEY` env var. No key configured = read-only for everyone
   (fail-closed)
 - `GET /api/capabilities` → `{write_configured, write_unlocked}` drives
   the UI: hide controls (not configured), show unlock prompt (configured,
@@ -1731,7 +1731,7 @@ from cv-tailor — same HMAC + HttpOnly cookie pattern, proven implementation.
 2. If not unlocked: UI shows unlock dialog (password field — never
    persisted in React state, localStorage, or a readable cookie)
 3. UI POSTs key to `POST /api/unlock`
-4. Backend validates against `FULL_MODE_KEY`. Success → signed HttpOnly
+4. Backend validates against `JR_WRITE_KEY`. Success → signed HttpOnly
    cookie. Failure → 401, user stays read-only.
 5. Subsequent writes rely on the cookie; key never re-sent per action.
 6. Unlocked session shows a small "owner" indicator with a lock affordance.
@@ -1744,7 +1744,7 @@ from cv-tailor — same HMAC + HttpOnly cookie pattern, proven implementation.
 | true | false | Write controls visible, click → unlock dialog |
 | true | true | Write controls enabled, owner indicator shown |
 
-**Fail-closed:** no `FULL_MODE_KEY` → all write endpoints 403, public
+**Fail-closed:** no `JR_WRITE_KEY` → all write endpoints 403, public
 deployment is clean read-only (matching Phase 5 experience for visitors).
 
 ---
@@ -1804,7 +1804,7 @@ Build in this order. Each step tested before the next starts.
 1. `models/record.py` — add `ANNOTATION_TYPE` frozenset (constants only,
    no schema bump)
 2. `api/security.py` — copy from cv-tailor, adapt for job-radar
-   (`FULL_MODE_KEY` env var, same HMAC + HttpOnly cookie pattern)
+   (`JR_WRITE_KEY` env var, same HMAC + HttpOnly cookie pattern)
 3. `api/main.py` — FastAPI app, CORS for local dev
 4. `api/routers/index.py` — `GET /api/index`, `GET /api/capabilities`,
    `GET /api/health`
