@@ -22,16 +22,33 @@ from datetime import datetime, timezone
 
 from models.record import JDRecord
 from pipeline import label
+from pipeline.clean import clean_readable
 
 OUT_DIR = "corpus/labelled"
 STATS_PATH = "corpus/stats.json"
 
 
 def load_records(input_glob: str) -> list[JDRecord]:
+    """Load JDRecords to label.
+
+    Prefilter survivors carry only ``raw_html`` (``raw_text=""``), so populate
+    ``raw_text`` from the readable cleaned HTML when it's empty — this is what the
+    extraction prompt reads. ``clean_readable`` keeps line breaks + case (unlike the
+    hash-form ``clean``), so the labelled record's ``raw_text`` is also good for the
+    scorer's first-line title heuristic later. Records that already have ``raw_text``
+    (manual / pre-cleaned inputs) are left untouched, so this stays a no-op on the
+    legacy ``clean_*.jsonl`` path.
+    """
     records: list[JDRecord] = []
     for path in sorted(glob.glob(input_glob)):
         with open(path, encoding="utf-8") as fh:
-            records.extend(JDRecord.from_jsonl(line) for line in fh if line.strip())
+            for line in fh:
+                if not line.strip():
+                    continue
+                r = JDRecord.from_jsonl(line)
+                if not r.raw_text and r.raw_html:
+                    r.raw_text = clean_readable(r.raw_html)
+                records.append(r)
     return records
 
 

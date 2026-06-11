@@ -168,8 +168,13 @@ thing tests actually run against.
     (the hash-form `clean()` lowercases to one line, which breaks the scorer's
     first-line title heuristic). Sidecar `title`/`location` go to the prompt as a
     separate **`[ATS METADATA]`** block (`label.build_user_content`, `label.py
-    --meta`), never merged into `raw_text`. `scripts/build_score_subset.py` builds
-    a representative run subset; `scripts/score_report.py` reports a scoring run.
+    --meta`), never merged into `raw_text`. **As of 2026-06-11 `cli.label.load_records`
+    does this `clean_readable`-on-empty itself**, so the paid stage reads the prefilter
+    survivors directly (`--input corpus/filtered/filtered_{date}.jsonl --meta
+    corpus/raw/meta_{date}.jsonl --tier 4`) — no separate prep stage. `scripts/build_score_subset.py`
+    is the **bespoke** first-run subset builder (Databricks title-buckets + CSM cap,
+    hardcoded 20260609 defaults) — historical, **not** for a general run (it drops
+    Databricks roles beyond its 5 buckets); `scripts/score_report.py` reports a scoring run.
 21. (Phase 3) **Known Limitation F — observed in production, then fixed in the
     extraction prompt** (scorer untouched). `build_system_prompt` gained role/domain
     disambiguation: Product Marketing → `GTM` (not `Product`); post-sales/Customer

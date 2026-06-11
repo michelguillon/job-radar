@@ -272,3 +272,27 @@ def test_estimate_cost_applies_batch_rates():
     # 1M input @ $2.50 + 1M output @ $12.50 = $15.00 (batch rates)
     assert cost["cost_usd"] == pytest.approx(15.0)
     assert cost["tokens"]["input"] == 1_000_000
+
+
+# --- cli.label.load_records: raw_text population for prefilter survivors ---
+
+
+def test_load_records_populates_raw_text_from_html(tmp_path):
+    """Prefilter survivors carry only raw_html; cli.label.load_records must fill raw_text
+    (clean_readable) so the prompt has text — and leave pre-populated raw_text untouched."""
+    import cli.label as label_cli
+
+    html_only = build_raw_record(
+        source_url="https://x/1", source_ats="greenhouse", company="Acme",
+        collected_at="2026-06-09", raw_html="<p>Build the future of AI delivery.</p>",
+    )
+    pre_clean = build_raw_record(
+        source_url="https://x/2", source_ats="greenhouse", company="Acme",
+        collected_at="2026-06-09", raw_text="Already cleaned JD text.",
+    )
+    path = tmp_path / "filtered_20260610.jsonl"
+    path.write_text(html_only.to_jsonl() + "\n" + pre_clean.to_jsonl() + "\n", encoding="utf-8")
+
+    loaded = label_cli.load_records(str(path))
+    assert "AI delivery" in loaded[0].raw_text             # html-only → raw_text filled
+    assert loaded[1].raw_text == "Already cleaned JD text."  # pre-cleaned → left untouched
