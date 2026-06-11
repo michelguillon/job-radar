@@ -224,7 +224,8 @@ def export_index(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Corpus statistics and UI index export.")
-    parser.add_argument("--input", required=True, help="Glob for JSONL JDRecords (recursive ** supported)")
+    parser.add_argument("--input", default=VALIDATED_GLOB,
+                        help=f"Glob for JSONL JDRecords to summarise (default: {VALIDATED_GLOB}; recursive ** supported)")
     parser.add_argument("--export-index", action="store_true", help="Also write corpus/index.json for the UI (joined score+JD+workflow view)")
     parser.add_argument("--scored", default=SCORED_GLOB, help=f"Glob for scored files used by --export-index (default: {SCORED_GLOB})")
     parser.add_argument("--validated", default=VALIDATED_GLOB, help=f"Glob for validated JDs used by --export-index (default: {VALIDATED_GLOB})")

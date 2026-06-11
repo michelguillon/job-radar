@@ -45,3 +45,11 @@ def test_cli_load_lines_treats_bad_lines_as_failures(tmp_path):
 def test_schema_version_constant_is_current():
     # guard: the JDRecord fixture and the model agree on JDRecord's frozen version
     assert base_envelope()["schema_version"] == JDRECORD_SCHEMA_VERSION
+
+
+def test_cli_runs_bare_with_date_default(tmp_path):
+    # No --input: defaults to corpus/labelled/labelled_<date>T*.jsonl. A future date matches
+    # nothing, so validate runs cleanly over zero records and exits 0 (proves bare invocation
+    # works for the weekly cron — argparse no longer requires --input).
+    rc = cli.main(["--date", "20990101", "--out-dir", str(tmp_path)])
+    assert rc == 0

@@ -144,3 +144,12 @@ def test_export_index_shape(tmp_path):
     assert isinstance(data["records"], list) and len(data["records"]) == 1
     # records are denormalised (no nested extraction/annotation envelope)
     assert "extraction" not in data["records"][0]
+
+
+def test_cli_input_defaults_to_validated_glob(tmp_path, monkeypatch):
+    """Bare `cli.stats` (no --input) summarises the validated corpus by default — so the
+    weekly cron's `cli.stats --export-index` runs without erroring on a required --input."""
+    monkeypatch.setattr(stats, "VALIDATED_GLOB", str(tmp_path / "validated_*.jsonl"))
+    (tmp_path / "validated_x.jsonl").write_text("", encoding="utf-8")  # empty but valid glob
+    rc = stats.main([])  # no --input, no --export-index → just the summary over the default
+    assert rc == 0

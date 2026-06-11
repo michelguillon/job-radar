@@ -1714,5 +1714,43 @@ robust precisely because it doesn't depend on a gitignored cursor that never tra
 
 ---
 
+### Phase 4 — the "automated weekly pipeline" had never actually run
+
+**Context:** First real end-to-end run of the discovery pipeline (102-company universe,
+on the deployed server), done stage-by-stage by hand. Three of the six stages errored on
+invocation, each the same way the cron would have.
+
+#### Surprise
+
+`cron/collect_weekly.sh` called every stage bare (`python -m cli.label`, `… cli.validate`,
+`… cli.stats --export-index`), but **all three had `--input` `required=True`** (label also
+`--tier`), so each bare line exits non-zero — and `cli/dedupe.py` is an empty stub, so its
+cron line was a silent no-op. The weekly cron, shipped and documented since Phase 4, could
+never have completed a single run. It was never exercised because the corpus was always
+built by ad-hoc commands during development; the wrapper was written but never run.
+
+#### Fix
+
+Gave the stages bare-invocation defaults keyed to the current UTC day (matching `prefilter`'s
+existing `--date` default and `label`'s UTC output stamp): `label` → today's
+`filtered_<date>.jsonl` + `meta_<date>.jsonl` + `--tier 4`; `validate` → today's
+`labelled_<date>T*.jsonl` (only the day's output, not a whole-corpus re-validate); `stats
+--input` → `VALIDATED_GLOB`. Rewrote the cron to the by-hand-validated sequence, dropped the
+stub `dedupe` line, and baked in a "don't schedule near 00:00 UTC" caveat (the date-keyed
+stages would straddle two stamps). +4 tests.
+
+#### Reusable Pattern
+
+A wrapper script (cron job, Makefile target, CI step) that has **never been executed** is
+documentation, not automation — treat it as unverified until something runs it end-to-end.
+The first real run is the test. And when a recurring automated job spends money (here, the
+Batch labeller), its stages must be invokable *exactly* as the scheduler calls them — bare,
+non-interactive, with safe defaults — not require the args a human happened to pass while
+developing. The required-`--input` guards were reasonable for a money-spending stage, but
+they silently made the headless path impossible; the resolution was day-scoped defaults that
+keep bare runs safe (today's data only) rather than dropping the guard entirely.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

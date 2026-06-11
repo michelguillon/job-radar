@@ -363,6 +363,19 @@ thing tests actually run against.
     body reset — no global component classes, so the collision class is gone for good. UI/UX
     and behaviour unchanged; 354 tests still pass (frontend-only). Convention in
     `frontend/CLAUDE.md`. Verified: table header/cell positions identical (aligned).
+36. (Phase 4 — first real weekly run, 2026-06-11) **The cron pipeline was never runnable;
+    gave the stages bare-invocation defaults + fixed `cron/collect_weekly.sh`.** Surfaced
+    running the first 102-company universe pipeline by hand: `cli.label`, `cli.validate`, and
+    `cli.stats` all had **`--input` (and `--tier`) `required=True`**, so every bare stage line
+    in `collect_weekly.sh` errored, and `cli/dedupe.py` is an empty stub (a no-op). Fix —
+    sensible defaults keyed to the current **UTC** day so the chain runs with no args:
+    `cli.label` `--date`→`corpus/filtered/filtered_<date>.jsonl` + `--meta`→`meta_<date>.jsonl`
+    + `--tier 4`; `cli.validate` `--date`→`corpus/labelled/labelled_<date>T*.jsonl` (today's
+    only — no whole-corpus re-validate); `cli.stats --input` defaults to `VALIDATED_GLOB`.
+    `cron/collect_weekly.sh` rewritten to the validated bare sequence (collect → prefilter →
+    label → validate → score → stats --export-index), `dedupe` line dropped (prefilter dedups).
+    Caveat baked into the script: **don't schedule near 00:00 UTC** — the date-keyed stages
+    would split across two stamps. +4 tests (362). (Manual run cost $3.18 to date / 117 scored.)
 
 ---
 

@@ -21,6 +21,7 @@ from models.record import JDRecord, SchemaVersionError
 from pipeline.validate import validate_records
 
 OUT_DIR = "corpus/validated"
+LABELLED_DIR = "corpus/labelled"
 
 
 def load_lines(input_glob: str) -> tuple[list[JDRecord], list[dict]]:
@@ -52,13 +53,20 @@ def _write_jsonl(path: str, items) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate labelled JSONL against schema v1.2.")
-    parser.add_argument("--input", required=True, help="Glob for labelled JSONL")
+    # Bare invocation validates just *today's* labelled output (matching label's UTC
+    # labelled_<date>T…Z stamp), so the weekly pipeline runs with no args and doesn't
+    # re-validate the whole accumulating corpus each week. Override --input for a backfill.
+    parser.add_argument("--date", default=datetime.now(timezone.utc).strftime("%Y%m%d"),
+                        help="UTC YYYYMMDD; sets the default --input to that day's labelled files")
+    parser.add_argument("--input", default=None,
+                        help="Glob for labelled JSONL (default: corpus/labelled/labelled_<date>T*.jsonl)")
     parser.add_argument("--out-dir", default=OUT_DIR, help=f"Output directory (default: {OUT_DIR})")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
-    records, parse_failures = load_lines(args.input)
+    input_glob = args.input or os.path.join(LABELLED_DIR, f"labelled_{args.date}T*.jsonl")
+    records, parse_failures = load_lines(input_glob)
     passed, failed = validate_records(records)
     failed = parse_failures + failed
 

@@ -1279,8 +1279,11 @@ Done:
     lookback that does **not** advance the cursor.
   - `--min-fit` (default 6); already-tracked roles (workflow status ≠ `new`) are
     excluded unless `--all`; `--export` also writes `corpus/digest_{date}.md`.
-- `cron/collect_weekly.sh` — cron wrapper (calls `python -m cli.collect`; incremental
-  by default) → dedupe → prefilter → label → validate → score → stats --export-index.
+- `cron/collect_weekly.sh` — cron wrapper: `collect` (incremental) → `prefilter` →
+  `label` → `validate` → `score` → `stats --export-index`. Every stage runs **bare** on
+  defaults keyed to the current UTC day (fixed 2026-06-11 — they used to require
+  `--input`/`--tier`, so the chain never ran; the `dedupe` step was a stub and is dropped,
+  prefilter does the dedup). Must not be scheduled near 00:00 UTC (date-keyed stages).
 - `cron/digest_daily.sh` — cron wrapper (calls `python -m cli.digest --min-fit 6 --export`).
 - `cron/README.md` — install / verify / logs / manual-run docs for Ubuntu Server.
 

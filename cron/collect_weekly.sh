@@ -19,8 +19,14 @@ cd "${PROJECT_DIR}"
 exec > >(while IFS= read -r line; do printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${line}"; done | tee -a "${LOG_FILE}") 2>&1
 
 echo "=== collect_weekly start ==="
+# Each stage runs bare on sensible defaults keyed to the current UTC day, so the chain is:
+#   collect (incremental) -> prefilter (screen + drop already-labelled/scored) ->
+#   label (today's survivors, tier 4 -- SPENDS Batch budget) -> validate (today's labelled) ->
+#   score (all validated) -> stats --export-index (writes the UI's corpus/index.json).
+# Do NOT move this schedule near 00:00 UTC: collect/prefilter/label/validate key off the
+# current UTC date, so a run straddling midnight would split across two date stamps.
+# (cli.dedupe is an empty stub and is intentionally omitted -- prefilter does the dedup.)
 docker compose run --rm job-radar python -m cli.collect --source all
-docker compose run --rm job-radar python -m cli.dedupe
 docker compose run --rm job-radar python -m cli.prefilter
 docker compose run --rm job-radar python -m cli.label
 docker compose run --rm job-radar python -m cli.validate

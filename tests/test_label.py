@@ -296,3 +296,14 @@ def test_load_records_populates_raw_text_from_html(tmp_path):
     loaded = label_cli.load_records(str(path))
     assert "AI delivery" in loaded[0].raw_text             # html-only → raw_text filled
     assert loaded[1].raw_text == "Already cleaned JD text."  # pre-cleaned → left untouched
+
+
+def test_cli_runs_bare_with_no_survivors(capsys):
+    """Bare invocation defaults --input to corpus/filtered/filtered_<date>.jsonl and --tier 4.
+    A future date matches nothing → exits 0 before any (paid) batch call — proving the weekly
+    cron's bare `cli.label` no longer errors on missing --input/--tier."""
+    import cli.label as label_cli
+
+    rc = label_cli.main(["--date", "20990101"])
+    assert rc == 0
+    assert "No records to label" in capsys.readouterr().out

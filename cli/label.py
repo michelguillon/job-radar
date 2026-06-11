@@ -25,6 +25,8 @@ from pipeline import label
 from pipeline.clean import clean_readable
 
 OUT_DIR = "corpus/labelled"
+FILTERED_DIR = "corpus/filtered"
+RAW_DIR = "corpus/raw"
 STATS_PATH = "corpus/stats.json"
 
 
@@ -90,23 +92,34 @@ def append_stats(entry: dict, path: str = STATS_PATH) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Label cleaned JDs via the Claude Batch API.")
-    parser.add_argument("--input", required=True, help="Glob for cleaned JSONL (e.g. 'corpus/raw/clean_*.jsonl')")
-    parser.add_argument("--meta", help="Glob for metadata sidecar JSONL (e.g. 'corpus/raw/meta_*.jsonl') — passed to the prompt as separate context")
-    parser.add_argument("--tier", type=int, choices=(3, 4), required=True, help="Tier to assign (3 or 4 — Claude-labelled)")
+    # --date drives the bare-invocation defaults for --input/--meta so the weekly pipeline
+    # (collect → prefilter → label …) runs with no args. UTC to match the labelled_<ts> stamp.
+    parser.add_argument("--date", default=datetime.now(timezone.utc).strftime("%Y%m%d"),
+                        help="UTC YYYYMMDD; sets the default --input/--meta to that day's prefilter survivors")
+    parser.add_argument("--input", default=None,
+                        help="Glob for JDRecords to label (default: corpus/filtered/filtered_<date>.jsonl)")
+    parser.add_argument("--meta", default=None,
+                        help="Glob for metadata sidecar (default: corpus/raw/meta_<date>.jsonl) — prompt context")
+    parser.add_argument("--tier", type=int, choices=(3, 4), default=4,
+                        help="Tier to assign (default: 4 — automated Claude-labelled collection)")
     parser.add_argument("--poll-interval", type=int, default=30, help="Seconds between batch status polls")
     parser.add_argument("--out-dir", default=OUT_DIR, help=f"Output directory (default: {OUT_DIR})")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
-    records = load_records(args.input)
+    input_glob = args.input or os.path.join(FILTERED_DIR, f"filtered_{args.date}.jsonl")
+    meta_glob = args.meta if args.meta is not None else os.path.join(RAW_DIR, f"meta_{args.date}.jsonl")
+
+    records = load_records(input_glob)
     if not records:
-        print("No records to label.")
+        print(f"No records to label (input: {input_glob}).")
         return 0
-    meta_index = load_meta(args.meta)
+    meta_index = load_meta(meta_glob)
     matched = sum(1 for r in records if r.source_url in meta_index)
     print(f"Labelling {len(records)} record(s) at tier {args.tier} via Claude Batch API…")
-    if args.meta:
+    print(f"  input: {input_glob}")
+    if meta_index:
         print(f"  metadata sidecar: {matched}/{len(records)} records matched")
 
     batch_id = label.run_batch(records, meta_index=meta_index)
