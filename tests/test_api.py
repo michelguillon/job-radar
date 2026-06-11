@@ -54,6 +54,7 @@ def settings(tmp_path) -> Settings:
         meta_glob=str(tmp_path / "meta_*.jsonl"),
         index_path=str(index),
         annotations_path=str(tmp_path / "annotations.jsonl"),
+        cv_tailor_links_path=str(tmp_path / "cv_tailor_links.jsonl"),
     )
 
 
@@ -422,6 +423,95 @@ def test_yield_report_downloads(client, tmp_path, monkeypatch):
     assert res.headers["content-disposition"].endswith('.txt"')
     assert "COMPANY YIELD REPORT" in res.text
     assert "Mistral AI" in res.text
+
+
+# --- cv-tailor: POST results (gated) + GET job detail (public) ------------------
+
+def test_cv_tailor_results_post_valid(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    r = client.post("/api/cv-tailor-results", json={
+        "job_id": "sha256:j1", "cv_tailor_run_id": "run_20260611_001",
+        "cv_tailor_score": 0.72, "coverage_score": 0.81, "grounding_score": 0.96,
+        "cvcm_enabled": True, "tailoring_mode": "full",
+        "output_link": "https://cv-tailor.example/runs/run_20260611_001", "notes": "good",
+    })
+    assert r.status_code == 200
+    links = track.load_events(client.settings.cv_tailor_links_path)
+    assert len(links) == 1
+    assert links[0]["cv_tailor_run_id"] == "run_20260611_001"
+    assert links[0]["cv_tailor_score"] == 0.72
+    assert links[0]["source"] == "manual"
+
+
+def test_cv_tailor_results_unknown_job(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    r = client.post("/api/cv-tailor-results", json={"job_id": "sha256:ghost", "cv_tailor_run_id": "run_1"})
+    assert r.status_code == 404
+
+
+def test_cv_tailor_results_score_out_of_range(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    r = client.post("/api/cv-tailor-results", json={
+        "job_id": "sha256:j1", "cv_tailor_run_id": "run_1", "cv_tailor_score": 1.5,
+    })
+    assert r.status_code == 422
+
+
+def test_cv_tailor_results_requires_auth(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)  # configured but this client never unlocks
+    r = client.post("/api/cv-tailor-results", json={"job_id": "sha256:j1", "cv_tailor_run_id": "run_1"})
+    assert r.status_code == 403
+
+
+def _seed_validated_jd(tmp_path, *, company="Elastic", raw_text="Full JD text...") -> str:
+    """Write a validated JDRecord for sha256:j1 and return its glob (for an overridden Settings)."""
+    from models.record import JDRecord
+    from tests.factories import base_envelope
+    validated = tmp_path / "validated_20260611.jsonl"
+    env = base_envelope()
+    env.update(id="sha256:j1", company=company)
+    env["raw_text"] = raw_text
+    validated.write_text(JDRecord.from_dict(env).to_jsonl() + "\n", encoding="utf-8")
+    return str(validated)
+
+
+def test_get_job_detail_found(client, tmp_path):
+    from dataclasses import replace
+    full = replace(client.settings, validated_glob=_seed_validated_jd(tmp_path, raw_text="Principal PM JD body"))
+    app.dependency_overrides[get_settings] = lambda: full
+    r = client.get("/api/jobs/sha256:j1")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["job_id"] == "sha256:j1"
+    assert body["company"] == "Elastic"
+    assert body["raw_text"] == "Principal PM JD body"
+    assert body["fit_label"] == "good_fit" and body["fit_score"] == 7
+
+
+def test_get_job_detail_not_found(client):
+    assert client.get("/api/jobs/sha256:ghost").status_code == 404
+
+
+def test_get_job_detail_no_auth_required(client, monkeypatch):
+    # Public: no JR_WRITE_KEY, no cookie → still 200 (the JD is already public in the UI).
+    monkeypatch.delenv("JR_WRITE_KEY", raising=False)
+    assert client.get("/api/jobs/sha256:j1").status_code == 200
+
+
+def test_index_overlays_live_cv_tailor(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    # the seeded index.json row has no cv_tailor; a freshly recorded link must show on reload
+    client.post("/api/cv-tailor-results", json={
+        "job_id": "sha256:j1", "cv_tailor_run_id": "run_x", "cv_tailor_score": 0.5,
+    })
+    rec = client.get("/api/index").json()["records"][0]
+    assert rec["cv_tailor"]["has_output"] is True
+    assert rec["cv_tailor"]["run_id"] == "run_x"
+    assert rec["cv_tailor"]["cv_score"] == 0.5
 
 
 # --- health --------------------------------------------------------------------

@@ -45,6 +45,9 @@ STATS_PATH = "corpus/stats.json"
 # Field-level scoring flags (Phase 6). Canonical path lives here so the read model
 # (this CLI) and the write path (api/) share one constant; api/settings imports it.
 ANNOTATIONS_PATH = "corpus/annotations.jsonl"
+# cv-tailor run links (cv-tailor integration Phase 1, job_radar_SPEC §11.3). Same pattern:
+# canonical path here, shared by the read model (this CLI) and the write path (api/).
+CV_TAILOR_LINKS_PATH = "corpus/cv_tailor_links.jsonl"
 
 
 def load_records(input_glob: str) -> list[JDRecord]:
@@ -156,7 +159,47 @@ def load_annotations(path: str = ANNOTATIONS_PATH) -> dict[str, list[dict]]:
     return by_job
 
 
-def build_index_rows(scores, jds, metas, workflow, annotations=None) -> list[dict]:
+def load_cv_tailor_links(path: str = CV_TAILOR_LINKS_PATH) -> dict[str, dict]:
+    """Latest cv-tailor link per ``job_id`` from ``corpus/cv_tailor_links.jsonl``.
+
+    Append-only and tolerant (reuses ``cli.track.load_events``); a job_id can recur (Phase 1
+    re-records, Phase 3 callbacks) so the most recent ``ts`` wins (ISO strings compare
+    lexically). Used by the index export (embed the ``cv_tailor`` section) and the live
+    ``GET /api/index`` overlay so a freshly added link shows on reload (job_radar_SPEC §11.3).
+    """
+    latest: dict[str, dict] = {}
+    for event in load_events(path):
+        job_id = event.get("job_id")
+        if not job_id:
+            continue
+        prev = latest.get(job_id)
+        if prev is None or str(event.get("ts", "")) >= str(prev.get("ts", "")):
+            latest[job_id] = event
+    return latest
+
+
+def cv_tailor_view(link: dict | None) -> dict:
+    """Project a cv-tailor link record to the ``cv_tailor`` section embedded on an index row.
+
+    ``{has_output: false}`` when no link exists; otherwise the latest run's snapshot
+    (job_radar_SPEC §11.3 read-model contract)."""
+    if not link:
+        return {"has_output": False}
+    return {
+        "has_output": True,
+        "run_id": link.get("cv_tailor_run_id"),
+        "cv_score": link.get("cv_tailor_score"),
+        "coverage_score": link.get("coverage_score"),
+        "grounding_score": link.get("grounding_score"),
+        "cvcm_enabled": link.get("cvcm_enabled"),
+        "tailoring_mode": link.get("tailoring_mode"),
+        "output_link": link.get("output_link"),
+        "notes": link.get("notes"),
+        "ts": link.get("ts"),
+    }
+
+
+def build_index_rows(scores, jds, metas, workflow, annotations=None, cv_tailor_links=None) -> list[dict]:
     """One denormalised row per scored ``job_id``: scoring + live workflow state +
     JDRecord extraction (filters + detail) + full JD text. Mirrors the tracker's
     join (cli.track.build_rows) but carries the extra extraction/detail the UI needs.
@@ -165,8 +208,10 @@ def build_index_rows(scores, jds, metas, workflow, annotations=None) -> list[dic
     ``fit_override`` (``user_*``), plus the resolved ``display_*`` the UI sorts/filters on.
     The scorer's value is preserved — an override never mutates the ApplicationRecord.
     Feature 2 (§10.11): embeds existing annotations per job for visibility + dup checks.
+    cv-tailor (§11.3): embeds the latest cv-tailor run link per job (``cv_tailor`` section).
     """
     annotations = annotations or {}
+    cv_tailor_links = cv_tailor_links or {}
     rows: list[dict] = []
     for job_id, score in scores.items():
         jd = jds.get(job_id)
@@ -206,6 +251,8 @@ def build_index_rows(scores, jds, metas, workflow, annotations=None) -> list[dic
             "annotations": job_annotations,
             "annotation_count": len(job_annotations),
             "has_annotations": bool(job_annotations),
+            # --- cv-tailor run link (§11.3) ---
+            "cv_tailor": cv_tailor_view(cv_tailor_links.get(job_id)),
             # --- location ---
             "location": _location_for(jd, meta),
             "location_workable": derive_location_workable(meta),
@@ -280,6 +327,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--meta", default=META_GLOB, help=f"Glob for metadata sidecars used by --export-index (default: {META_GLOB})")
     parser.add_argument("--activity-log", default=LOG_PATH, dest="activity_log", help=f"Activity log used by --export-index (default: {LOG_PATH})")
     parser.add_argument("--annotations", default=ANNOTATIONS_PATH, help=f"Scoring-flag log embedded by --export-index (default: {ANNOTATIONS_PATH})")
+    parser.add_argument("--cv-tailor-links", default=CV_TAILOR_LINKS_PATH, dest="cv_tailor_links", help=f"cv-tailor run links embedded by --export-index (default: {CV_TAILOR_LINKS_PATH})")
     parser.add_argument("--stats-file", default=STATS_PATH, dest="stats_file", help=f"Cost ledger for cost-to-date (default: {STATS_PATH})")
     args = parser.parse_args(argv)
 
@@ -294,7 +342,8 @@ def main(argv: list[str] | None = None) -> int:
         metas = load_meta(args.meta)
         workflow = project(load_events(args.activity_log))
         annotations = load_annotations(args.annotations)
-        rows = build_index_rows(scores, jds, metas, workflow, annotations)
+        cv_tailor_links = load_cv_tailor_links(args.cv_tailor_links)
+        rows = build_index_rows(scores, jds, metas, workflow, annotations, cv_tailor_links)
         stats = index_stats(rows, cost_to_date=load_cost_to_date(args.stats_file))
         path = export_index(rows, stats)
         print(f"\nIndex → {path} ({len(rows)} scored job(s), ${stats['cost_to_date_usd']:.2f} to date)")

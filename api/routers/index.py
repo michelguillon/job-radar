@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, Request
 
 from api.security import verify_token, write_configured, WRITE_COOKIE
 from api.settings import Settings, get_settings
-from cli.stats import load_annotations
+from cli.stats import cv_tailor_view, load_annotations, load_cv_tailor_links
 from cli.track import load_events, project
 
 router = APIRouter(prefix="/api", tags=["index"])
@@ -41,18 +41,25 @@ def _read_index(path: str) -> dict:
         return json.load(fh)
 
 
-def overlay_workflow(index: dict, log_path: str, annotations_path: str | None = None) -> dict:
-    """Re-project the live activity log (+ annotations) over the read model so writes show
-    on reload.
+def overlay_workflow(
+    index: dict,
+    log_path: str,
+    annotations_path: str | None = None,
+    cv_tailor_links_path: str | None = None,
+) -> dict:
+    """Re-project the live activity log (+ annotations + cv-tailor links) over the read model
+    so writes show on reload.
 
     Patches each record's status/outcome/application_date/notes by job_id, applies a live
     title override if one was set (mirrors cli.track._title_for's override priority), and
     re-resolves the fit override (display = user override or scorer value — the scorer value
     in ``scorer_fit_label`` is always preserved). When ``annotations_path`` is given, the
-    embedded annotations are refreshed from the live log so a freshly submitted flag shows.
+    embedded annotations are refreshed from the live log so a freshly submitted flag shows;
+    likewise ``cv_tailor_links_path`` refreshes the ``cv_tailor`` section (job_radar_SPEC §11.3).
     """
     states = project(load_events(log_path))
     annotations = load_annotations(annotations_path) if annotations_path else None
+    cv_tailor_links = load_cv_tailor_links(cv_tailor_links_path) if cv_tailor_links_path else None
     for rec in index.get("records", []):
         job_id = rec.get("job_id")
         if annotations is not None:
@@ -60,6 +67,8 @@ def overlay_workflow(index: dict, log_path: str, annotations_path: str | None = 
             rec["annotations"] = ann
             rec["annotation_count"] = len(ann)
             rec["has_annotations"] = bool(ann)
+        if cv_tailor_links is not None:
+            rec["cv_tailor"] = cv_tailor_view(cv_tailor_links.get(job_id))
         state = states.get(job_id)
         if not state:
             continue
@@ -83,8 +92,13 @@ def overlay_workflow(index: dict, log_path: str, annotations_path: str | None = 
 
 @router.get("/index")
 def get_index(settings: Settings = Depends(get_settings)) -> dict:
-    """The joined read model with the live activity log + annotations overlaid (always current)."""
-    return overlay_workflow(_read_index(settings.index_path), settings.log_path, settings.annotations_path)
+    """The joined read model with the live activity log + annotations + cv-tailor links overlaid (always current)."""
+    return overlay_workflow(
+        _read_index(settings.index_path),
+        settings.log_path,
+        settings.annotations_path,
+        settings.cv_tailor_links_path,
+    )
 
 
 @router.get("/capabilities")

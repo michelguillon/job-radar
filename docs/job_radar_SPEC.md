@@ -2419,7 +2419,16 @@ Phase 1 data proves which metrics are worth tracking.
 
 ---
 
-### Phase 1 — Manual cv-tailor metrics in Job Radar
+### Phase 1 — Manual cv-tailor metrics in Job Radar — ✅ BUILT (2026-06-11)
+
+**Status:** Complete. New append-only sink `corpus/cv_tailor_links.jsonl`
+(`CV_TAILOR_LINK_VERSION = 1` + `validate_cv_tailor_link`, no schema bump);
+`cli.stats.load_cv_tailor_links` joins the latest link per `job_id` into the
+`cv_tailor` index section (embedded at export **and** refreshed by the live
+`GET /api/index` overlay, like annotations); `POST /api/cv-tailor-results`
+(owner-gated) + `GET /api/jobs/{job_id}` (public, returns `raw_text` for the
+Phase 2 handoff); React detail-panel CV-Tailor section (read-only for all,
+owner add/edit). 430 tests. See CLAUDE.md deviation 41 + LEARNINGS.
 
 **Trigger:** Unblocked now. Build after rejection reasons and yield tracking
 are stable.

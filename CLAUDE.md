@@ -279,6 +279,24 @@ Kept in full: everything below — active operational guards Claude Code must kn
     "73" was inaccurate. Perplexity is **kept** (carried from v1, has scored roles); Jack & Jill is the
     `manual` watch entry.
 
+41. *(→ SPEC §11.3 Phase 1)* cv-tailor integration Phase 1 — manual cv-tailor metrics.
+    New append-only sink `corpus/cv_tailor_links.jsonl` (`CV_TAILOR_LINK_VERSION = 1` +
+    `validate_cv_tailor_link`; constants only, **no schema bump** — same pattern as OUTCOME /
+    ANNOTATION_TYPE). **Never** mutates JDRecord/ApplicationRecord/any cv-tailor output —
+    a side snapshot keyed by `job_id`. Notable points: (a) The `cv_tailor` index section is
+    embedded at **both** export (`cli.stats.build_index_rows`, via `load_cv_tailor_links` +
+    `cv_tailor_view`) **and** the live `GET /api/index` overlay (so a freshly recorded link
+    shows on reload without a re-export) — identical treatment to annotations (deviation 37);
+    `{has_output: false}` when no link exists. (b) `api/routers/cv_tailor.py` gates **per-route**
+    (`POST /api/cv-tailor-results` carries `Depends(require_unlocked)`) rather than at the router
+    level, because `GET /api/jobs/{job_id}` in the same router is **public** (read-only JD detail
+    incl. `raw_text`, already visible in the UI; built now for the Phase 2 handoff). (c) UI scores
+    are 0–100 in the form, divided by 100 to the 0.0–1.0 floats the API stores; displayed as %.
+    (d) `CvTailorSection` is rendered inside `WriteControls` (above the scoring-flags panel) **and**
+    standalone when `!configured` (read-only-deploy fallback) so the snapshot is visible even where
+    write controls are hidden; Add/Edit affordances gate on `unlocked`. (e) New settings field
+    `cv_tailor_links_path` (`JR_CV_TAILOR_LINKS_PATH`), defaulted to the `cli.stats` constant.
+
 
 ## Schema summary
 

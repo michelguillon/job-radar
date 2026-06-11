@@ -55,6 +55,145 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function Pill({ status }: { status: string }) {
   return <span className={cn("inline-block rounded-[5px] px-2 py-[2px] text-[11px] font-semibold", statusPillClass(status))}>{status}</span>;
 }
+// cv-tailor scores are 0.0–1.0 floats on the wire (job_radar_SPEC §11.3); the UI shows + edits
+// them as 0–100 percentages. Empty input → null (the field is optional, not zero).
+function toPercentStr(v: number | null | undefined): string {
+  return v == null ? "" : String(Math.round(v * 100));
+}
+function pctDisplay(v: number | null | undefined): string {
+  return v == null ? "—" : `${Math.round(v * 100)}%`;
+}
+function toFraction(s: string): number | null {
+  const t = s.trim();
+  if (!t) return null;
+  const n = Number(t);
+  if (isNaN(n)) return null;
+  return Math.max(0, Math.min(1, n / 100));
+}
+
+const CV_TAILOR_MODES = ["full", "targeted", "minimal"];
+
+// CV-Tailor section (job_radar_SPEC §11.3). Read-only for everyone; the Add/Edit form is
+// owner-gated (rendered only when unlocked, first write still goes through requestUnlock()).
+// Records a manual snapshot of a cv-tailor run against this role — never mutates a score.
+function CvTailorSection({ job, onChanged }: { job: Job; onChanged: () => Promise<void> }) {
+  const { unlocked, requestUnlock } = useUnlock();
+  const cv = job.cv_tailor || { has_output: false };
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState<Toast>(null);
+
+  const [runId, setRunId] = useState(cv.run_id || "");
+  const [cvScore, setCvScore] = useState(toPercentStr(cv.cv_score));
+  const [coverage, setCoverage] = useState(toPercentStr(cv.coverage_score));
+  const [grounding, setGrounding] = useState(toPercentStr(cv.grounding_score));
+  const [cvcm, setCvcm] = useState(!!cv.cvcm_enabled);
+  const [mode, setMode] = useState(cv.tailoring_mode || "full");
+  const [link, setLink] = useState(cv.output_link || "");
+  const [notes, setNotes] = useState(cv.notes || "");
+
+  function resetForm() {
+    setRunId(cv.run_id || ""); setCvScore(toPercentStr(cv.cv_score));
+    setCoverage(toPercentStr(cv.coverage_score)); setGrounding(toPercentStr(cv.grounding_score));
+    setCvcm(!!cv.cvcm_enabled); setMode(cv.tailoring_mode || "full");
+    setLink(cv.output_link || ""); setNotes(cv.notes || "");
+  }
+  useEffect(() => { resetForm(); setEditing(false); setToast(null); }, [job.job_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function save() {
+    if (!(await requestUnlock())) return;
+    if (!runId.trim()) { setToast({ kind: "err", text: "Run ID is required" }); return; }
+    setBusy(true);
+    try {
+      await api.recordCvTailorResult({
+        job_id: job.job_id,
+        cv_tailor_run_id: runId.trim(),
+        cv_tailor_score: toFraction(cvScore),
+        coverage_score: toFraction(coverage),
+        grounding_score: toFraction(grounding),
+        cvcm_enabled: cvcm,
+        tailoring_mode: mode,
+        output_link: link.trim() || null,
+        notes: notes.trim() || null,
+      });
+      setEditing(false);
+      setToast({ kind: "ok", text: "CV-Tailor metrics saved" });
+      await onChanged();
+    } catch (e) {
+      setToast({ kind: "err", text: e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-[18px] rounded-lg border border-line bg-[#fbfcfe] p-[14px]">
+      <h3 className="mb-[10px] text-[11px] font-bold uppercase tracking-wide text-brand">CV-Tailor</h3>
+
+      {editing ? (
+        <div className="space-y-2">
+          <div>
+            <label className={LABEL}>Run ID (required)</label>
+            <input className={FIELD_INPUT} value={runId} placeholder="run_20260611_001" disabled={busy} onChange={(e) => setRunId(e.target.value)} />
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div><label className={LABEL}>CV score (0–100)</label><input className={FIELD_INPUT} inputMode="numeric" value={cvScore} disabled={busy} onChange={(e) => setCvScore(e.target.value)} /></div>
+            <div><label className={LABEL}>Coverage (0–100)</label><input className={FIELD_INPUT} inputMode="numeric" value={coverage} disabled={busy} onChange={(e) => setCoverage(e.target.value)} /></div>
+            <div><label className={LABEL}>Grounding (0–100)</label><input className={FIELD_INPUT} inputMode="numeric" value={grounding} disabled={busy} onChange={(e) => setGrounding(e.target.value)} /></div>
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex items-center gap-[6px] text-[12.5px] text-ink">
+              <input type="checkbox" checked={cvcm} disabled={busy} onChange={(e) => setCvcm(e.target.checked)} /> CVCM enabled
+            </label>
+            <div>
+              <label className={LABEL}>Mode</label>
+              <select className={cn(FIELD_INPUT, "w-auto min-w-[120px]")} value={mode} disabled={busy} onChange={(e) => setMode(e.target.value)}>
+                {CV_TAILOR_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+          </div>
+          <div><label className={LABEL}>Output link</label><input className={FIELD_INPUT} value={link} placeholder="https://cv-tailor…/runs/…" disabled={busy} onChange={(e) => setLink(e.target.value)} /></div>
+          <div><label className={LABEL}>Notes</label><textarea className={cn(FIELD_INPUT, "font-sans")} rows={2} value={notes} disabled={busy} onChange={(e) => setNotes(e.target.value)} /></div>
+          <div className="flex gap-2">
+            <button className={BTN_PRIMARY} onClick={save} disabled={busy}>Save</button>
+            <button className={BTN} onClick={() => { resetForm(); setEditing(false); }} disabled={busy}>Cancel</button>
+          </div>
+        </div>
+      ) : cv.has_output ? (
+        <div className="text-[13px] text-ink">
+          <div className="mb-[6px] flex flex-wrap items-center justify-between gap-2">
+            <span><span className="text-ink-soft">Run:</span> <span className="font-semibold">{cv.run_id}</span></span>
+            <span className="text-[11px] text-ink-faint">{fmtDate(cv.ts)}</span>
+          </div>
+          <div className="mb-[4px] flex flex-wrap gap-x-[18px] gap-y-1 tabular-nums">
+            <span><span className="text-ink-soft">CV score:</span> {pctDisplay(cv.cv_score)}</span>
+            <span><span className="text-ink-soft">Coverage:</span> {pctDisplay(cv.coverage_score)}</span>
+            <span><span className="text-ink-soft">Grounding:</span> {pctDisplay(cv.grounding_score)}</span>
+          </div>
+          <div className="mb-[4px] flex flex-wrap gap-x-[18px] text-[12.5px] text-ink-soft">
+            <span>CVCM: {cv.cvcm_enabled ? "enabled" : "disabled"}</span>
+            {cv.tailoring_mode && <span>Mode: {cv.tailoring_mode}</span>}
+          </div>
+          {cv.notes && <p className="mb-[4px] text-[12.5px] text-ink-soft">Notes: {cv.notes}</p>}
+          {cv.output_link && <a className="text-[12px] text-brand hover:underline" href={cv.output_link} target="_blank" rel="noopener">↗ Open output</a>}
+          {unlocked && (
+            <div className="mt-[10px]">
+              <button className={BTN} onClick={() => { resetForm(); setEditing(true); }} disabled={busy}>Edit</button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="text-[13px] text-ink-soft">
+          <p className="mb-[8px]">{unlocked ? "No cv-tailor run recorded yet." : "No cv-tailor run recorded."}</p>
+          {unlocked && <button className={BTN} onClick={() => { resetForm(); setEditing(true); }} disabled={busy}>Add cv-tailor metrics</button>}
+        </div>
+      )}
+
+      {toast && <div className={cn("mt-2 rounded-md px-[9px] py-[6px] text-[12px]", TOAST[toast.kind])}>{toast.text}</div>}
+    </div>
+  );
+}
+
 function AnnotationItem({ a }: { a: Annotation }) {
   const exp = listText(a.expected);
   return (
@@ -305,6 +444,8 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
         </div>
       )}
 
+      <CvTailorSection job={job} onChanged={onChanged} />
+
       <div className="mt-[18px] rounded-lg border border-line bg-[#fbfcfe] p-[14px]">
         <h3 className="mb-[10px] text-[11px] font-bold uppercase tracking-wide text-brand">
           Flag scoring issue{!!(job.annotations || []).length && ` · ${job.annotations.length} existing`}
@@ -365,6 +506,9 @@ export function DetailPanel({ job, onClose, onChanged }: { job: Job; onClose: ()
 
         <div className="mx-auto max-w-[760px] px-6 pb-12 pt-2">
           {configured && <WriteControls job={job} onChanged={onChanged} />}
+          {/* Read-only-deploy fallback (no write key): WriteControls is hidden, but the
+              cv-tailor snapshot should still be visible when present (job_radar_SPEC §11.3). */}
+          {!configured && <CvTailorSection job={job} onChanged={onChanged} />}
 
           {job.fit_label_reason && <Section title="Assessment"><p className="rounded-md bg-line-soft px-[11px] py-[9px] italic text-ink">{job.fit_label_reason}</p></Section>}
           {!!(job.blocking_constraints || []).length && <Section title="Blocking constraints"><Chips items={job.blocking_constraints} tone="block" /></Section>}

@@ -60,6 +60,22 @@ export interface Annotation {
   scorer_fit_score: number | null;
 }
 
+// cv-tailor run snapshot embedded per job (job_radar_SPEC §11.3). The cv-tailor run is the
+// source of truth; scores here are a summary (0.0–1.0, shown as %). {has_output:false} when
+// no run has been recorded; the metric fields are present only when has_output is true.
+export interface CvTailor {
+  has_output: boolean;
+  run_id?: string | null;
+  cv_score?: number | null;
+  coverage_score?: number | null;
+  grounding_score?: number | null;
+  cvcm_enabled?: boolean | null;
+  tailoring_mode?: string | null;
+  output_link?: string | null;
+  notes?: string | null;
+  ts?: string | null;
+}
+
 // One denormalised index row — score ⨝ JDRecord ⨝ sidecar ⨝ activity-log projection
 // (built by cli.stats.build_index_rows; the API overlays live workflow state on read).
 export interface Job {
@@ -89,6 +105,8 @@ export interface Job {
   annotations: Annotation[];
   annotation_count: number;
   has_annotations: boolean;
+  // cv-tailor run link (§11.3)
+  cv_tailor: CvTailor;
   // live workflow state (activity-log projection)
   application_status: string;
   outcome: string | null;
@@ -153,6 +171,20 @@ export interface AnnotationPayload {
   reason: string;
 }
 
+// cv-tailor metrics POST body (job_radar_SPEC §11.3). Scores are 0.0–1.0 floats (the UI
+// divides its 0–100 inputs by 100 before sending); all but run_id are optional.
+export interface CvTailorResultPayload {
+  job_id: string;
+  cv_tailor_run_id: string;
+  cv_tailor_score?: number | null;
+  coverage_score?: number | null;
+  grounding_score?: number | null;
+  cvcm_enabled?: boolean | null;
+  tailoring_mode?: string | null;
+  output_link?: string | null;
+  notes?: string | null;
+}
+
 export const api = {
   index: () => get<IndexResponse>("/index"),
   capabilities: () => get<Capabilities>("/capabilities"),
@@ -172,4 +204,7 @@ export const api = {
     post<{ ok: boolean; fit_label: string | null }>("/fit-override", { job_id, fit_label, reason }),
   flagAnnotation: (payload: AnnotationPayload) =>
     post<{ ok: boolean; annotation_type: string }>("/annotations", payload),
+  // Append a cv-tailor run snapshot for a scored role (owner-gated, §11.3).
+  recordCvTailorResult: (payload: CvTailorResultPayload) =>
+    post<{ job_id: string; cv_tailor_run_id: string }>("/cv-tailor-results", payload),
 };

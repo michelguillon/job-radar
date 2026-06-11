@@ -213,6 +213,51 @@ REJECTION_REASON = frozenset(
 )
 
 
+# --- cv-tailor link vocabulary (cv-tailor integration Phase 1, job_radar_SPEC §11.3) ---
+# A manual (Phase 1) or machine (Phase 3) snapshot of a cv-tailor run's metrics against a
+# Job Radar role. Append-only sink corpus/cv_tailor_links.jsonl — NEVER mutates JDRecord,
+# ApplicationRecord, or any cv-tailor output file. The cv-tailor run ID is the source of
+# truth; the scores here are a summary snapshot tied to cv-tailor's current rubric (which
+# may drift). Constants ONLY — they touch no record dataclass and do NOT bump SCHEMA_VERSION
+# (same pattern as OUTCOME / ANNOTATION_TYPE).
+CV_TAILOR_LINK_VERSION = 1
+
+# Who recorded the link: "manual" (Phase 1, owner via the detail panel) or "cv_tailor_api"
+# (Phase 3, cv-tailor's machine-to-machine callback).
+CV_TAILOR_SOURCE = frozenset({"manual", "cv_tailor_api"})
+
+
+def validate_cv_tailor_link(record: dict) -> list[str]:
+    """Return a list of validation error strings for one cv-tailor link record.
+
+    A vocabulary + required-field guard so a malformed line never enters the append-only
+    ``corpus/cv_tailor_links.jsonl``. ``v``/``ts``/``job_id`` are required; every metric is
+    optional but, when present, must be a normalised 0.0–1.0 float (cvcm a bool, source a
+    known value). The link never mutates an extraction or a score — it is a side snapshot.
+    """
+    errors: list[str] = []
+    for name in ("ts", "job_id"):
+        value = record.get(name)
+        if not isinstance(value, str) or not value:
+            errors.append(f"{name}: must be a non-empty string")
+    for name in ("cv_tailor_score", "coverage_score", "grounding_score"):
+        if name in record and record[name] is not None:
+            value = record[name]
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not (0.0 <= value <= 1.0)
+            ):
+                errors.append(f"{name}: must be a float 0.0-1.0")
+    cvcm = record.get("cvcm_enabled")
+    if cvcm is not None and not isinstance(cvcm, bool):
+        errors.append("cvcm_enabled: must be a boolean")
+    source = record.get("source")
+    if source is not None and source not in CV_TAILOR_SOURCE:
+        errors.append(f"source: {source!r} not in {sorted(CV_TAILOR_SOURCE)}")
+    return errors
+
+
 def validate_activity_event(event: dict) -> list[str]:
     """Return a list of validation error strings for one activity-log event.
 

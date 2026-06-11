@@ -13,7 +13,7 @@ import os
 from dataclasses import dataclass
 
 from cli.collect import SEEDS_PATH
-from cli.stats import ANNOTATIONS_PATH, INDEX_PATH, STATS_PATH
+from cli.stats import ANNOTATIONS_PATH, CV_TAILOR_LINKS_PATH, INDEX_PATH, STATS_PATH
 from cli.track import LOG_PATH, META_GLOB, SCORED_GLOB, VALIDATED_GLOB
 
 # ANNOTATIONS_PATH (field-level scoring flags, separate from the activity log) is the
@@ -33,6 +33,8 @@ class Settings:
     # construction (e.g. the API test fixtures) keeps working without these.
     seeds_path: str = SEEDS_PATH
     stats_path: str = STATS_PATH
+    # cv-tailor run links (job_radar_SPEC §11.3). Defaulted for the same reason.
+    cv_tailor_links_path: str = CV_TAILOR_LINKS_PATH
 
 
 def get_settings() -> Settings:
@@ -46,4 +48,5 @@ def get_settings() -> Settings:
         annotations_path=os.environ.get("JR_ANNOTATIONS_PATH", ANNOTATIONS_PATH),
         seeds_path=os.environ.get("JR_SEEDS_PATH", SEEDS_PATH),
         stats_path=os.environ.get("JR_STATS_PATH", STATS_PATH),
+        cv_tailor_links_path=os.environ.get("JR_CV_TAILOR_LINKS_PATH", CV_TAILOR_LINKS_PATH),
     )

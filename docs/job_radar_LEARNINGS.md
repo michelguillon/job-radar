@@ -1940,5 +1940,55 @@ the trap. +20 tests (412 total); full suite green; live `--report yield` produce
 
 ---
 
+### cv-tailor integration Phase 1 (§11.3) — a fourth append-only sink, same shape — built 2026-06-11
+
+**What was built.** A manual way to record cv-tailor run metrics against a Job Radar role:
+a new append-only file `corpus/cv_tailor_links.jsonl`, an owner-gated `POST /api/cv-tailor-results`,
+a public `GET /api/jobs/{job_id}`, the `cv_tailor` section on every index row, and a CV-Tailor
+panel in the React detail drawer. Zero dependency on cv-tailor being reachable — nothing calls
+it, nothing imports it.
+
+#### What was learned / confirmed
+
+- **The "constants-only sidecar sink" pattern held for a fourth time.** `activity_log.jsonl`
+  (workflow), `annotations.jsonl` (scoring flags + rejection reasons), and now
+  `cv_tailor_links.jsonl` are all the same recipe: a version constant + a `validate_*` vocab
+  guard in `models/record.py`, **no `SCHEMA_VERSION` bump**, an append-only `.jsonl`, a
+  `load_*` latest-per-`job_id` loader, and a join into the read model. The scorer and the two
+  record dataclasses stay frozen. Reaching for this pattern instead of a new field is now the
+  default for "record a fact about a job that the scorer doesn't produce."
+- **Embed at export AND overlay live — or a fresh write looks stale.** The `cv_tailor` section
+  is built into `index.json` by `cli.stats` *and* re-projected by `GET /api/index` (exactly
+  like annotations, deviation 37). Skipping the live overlay would mean a just-recorded run
+  doesn't show until the next re-export — the same trap the activity-log overlay was built to
+  avoid. Any new per-job read-model section must be added in *both* places.
+- **Per-route gating beats router-level gating when one router mixes public + owner routes.**
+  `cv_tailor.py` deliberately does **not** put `Depends(require_unlocked)` on the router (as
+  workflow.py/annotations.py do) because `GET /api/jobs/{job_id}` is public. The POST carries
+  its own per-route dependency. Co-locating the two cv-tailor endpoints in one router is worth
+  the small asymmetry — they're one feature.
+- **`GET /api/jobs/{job_id}` is built now, used later.** It returns `raw_text` for the Phase 2
+  "Open in cv-tailor" handoff that doesn't exist yet. It exposes nothing new (the JD text is
+  already in the public detail panel), so shipping it early costs nothing and means Phase 2 is
+  a pure cv-tailor build with no Job Radar change.
+- **Unit conversion lives at the UI edge.** cv-tailor's metrics are 0.0–1.0 floats (its native
+  rubric scale); humans read percentages. The form takes 0–100 and divides by 100 before POST;
+  the API validates and stores the fraction; display multiplies back. Storing the canonical
+  unit and converting only at the input/render boundary keeps the file faithful to cv-tailor.
+- **Read view for everyone, write affordance for the owner — gate on `unlocked`, not
+  `configured`.** The CV-Tailor panel renders its read state for all visitors; the Add/Edit
+  buttons appear only when `unlocked`. A read-only-deploy fallback also renders the panel when
+  writes aren't `configured` at all, so a recorded snapshot is never hidden behind missing
+  write controls.
+
+#### Reusable pattern
+
+A new "fact about a job the scorer doesn't compute" = a new append-only sidecar sink, never a
+schema change: version constant + `validate_*` + `load_*`-latest-per-job + a read-model section
+embedded **at export and in the live overlay**. Gate writes per-route when the feature's router
+also serves a public read. +12 tests (430 total); full suite green; `tsc -b` clean.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

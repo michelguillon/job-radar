@@ -19,6 +19,10 @@ corpus/**/*
 corpus/.last_collected_*
 corpus/.digest_last_run
 
+# cv-tailor run links (personal corpus data, like activity_log.jsonl; covered by
+# *.jsonl + corpus/**/* above, listed explicitly per job_radar_SPEC §11.3).
+corpus/cv_tailor_links.jsonl
+
 # Personal-data planning doc — real role URLs, job IDs, server paths, corpus
 # migration details. Lives locally + travels by scp like the corpus; never commit
 # (the repo is a public portfolio). The deploy runbook is self-contained and does
