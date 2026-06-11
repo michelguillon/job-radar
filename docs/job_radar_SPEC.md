@@ -2170,6 +2170,24 @@ rule-based scorer's failure modes are well-understood.
 **Trigger for all items:** Deployed + used daily for 2–4 weeks minimum.
 Full spec: `docs/BACKLOG_COMPANY_UNIVERSE.md`
 
+### `cli/analyse.py` — read-only corpus reporting ✅ built
+
+A strictly read-only reporting CLI (`python -m cli.analyse [--report REPORT]`) that
+prints structured terminal reports over the existing corpus — it never writes a corpus
+file, never calls a pipeline stage, and never touches the Anthropic API. It reuses the
+tracker's loaders + join (`cli.track.load_scores`/`load_jdrecords`/`load_meta`/
+`load_events`/`project`) rather than reimplementing the score ⨝ JD ⨝ activity-log join,
+following the cli.track / cli.digest shape (pure aggregation functions + a thin `main()`).
+Four reports: **score-distribution** (default — fit-label + fit-score histograms, top
+companies by strong/blocked count, est. cost/job from `stats.json`); **status** (pipeline
+lane counts, review/shortlist/apply rates, stale-application list); **companies** (per-company
+jobs/strong/blocked/reviewed/shortlisted, shortlist-rate ranking, "zero-shortlist despite a
+real sample"); **gaps** (top blocking constraints across blocked roles + top requirement gaps
+across all and within strong-fit roles). `--report all` runs all four, header-separated. This
+is the foundation for the company yield-tracking backlog (`docs/BACKLOG_YIELD_TRACKING.md`):
+once company metadata is seeded the companies report gains domain rollups + a `--yield` flag
+and a `--output FILE` for the UI download button — not built now.
+
 ### Production Company Universe v1
 
 The initial production seed list. **Updated 2026-06-11 with verified ATS slugs**

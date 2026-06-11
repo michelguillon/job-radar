@@ -1803,5 +1803,46 @@ provenance survives for later analysis; re-running the producer can't wipe the h
 
 ---
 
+### `cli/analyse.py` — reporting is just a third reader over the same join
+
+**Context:** Built a read-only reporting CLI (score-distribution / status / companies /
+gaps) over the existing corpus. The temptation with a "reports" tool is to write fresh
+queries; instead it imports the exact loaders + `project` join that `cli.track` and
+`cli.digest` already use, and adds only *aggregation* on top.
+
+#### Decisions / surprises
+
+- **Three tools, one join.** `track` (review table), `digest` (since-cursor view), and now
+  `analyse` (aggregates) are all the same `load_scores ⨝ load_jdrecords ⨝ project(load_events)`
+  with a different reducer at the end. Reusing the join (not reimplementing it) means a future
+  change to how workflow state is derived propagates to all three for free — the same payoff
+  that made `cli.stats --export-index` reuse the tracker join (deviation 27).
+- **The projection only knows *current* lane, not history.** "Shortlisted" counts roles
+  *parked* at shortlisted right now, not roles that passed through it — a role currently
+  `applied` is no longer counted as shortlisted. So lane-count rates (shortlist/apply) are
+  rough by construction. v1 accepts this (documented in the report); a true funnel would need
+  to fold the *set* of statuses each job has ever held, which the append-only log supports but
+  the current `project` (latest-wins) discards. Worth knowing before anyone reads the apply
+  rate as a true conversion.
+- **A spec example can contradict the spec body — trust the explicit rule.** The build
+  prompt's companies-report *mock-up* showed "minimum 3 scored jobs to appear", but its
+  implementation notes + DoD said show all companies and suppress *rates* below 5 scored.
+  Illustrative output is not a contract; the explicit instruction is. Resolved in favour of
+  the DoD and recorded as deviation 38 rather than silently picking one.
+- **Cost-per-job is derived, never stored.** `est. cost $X.XX ($Y.YY/job avg)` divides
+  `cost_to_date` (summed from `stats.json`) by jobs *labelled* (summed over `step=="label"`
+  runs), and degrades to no cost line if `stats.json` is absent — an informational figure
+  must never be load-bearing.
+
+#### Reusable pattern
+
+A reporting/analytics tool over an existing pipeline should be a **pure reducer over the
+canonical read join**, not a parallel query layer: import the same loaders, keep aggregation
+in pure functions (testable without IO), and put the only IO in a thin `main()`. The
+integration test then just runs every report against the live corpus and asserts non-empty,
+exception-free output (skipping when the gitignored corpus is absent). +11 tests (392 total).
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

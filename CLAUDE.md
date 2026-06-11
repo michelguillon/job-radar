@@ -238,6 +238,14 @@ Kept in full: everything below — active operational guards Claude Code must kn
     re-resolves live fit override **and** refreshes embedded annotations (revises
     deviation 29).
 
+38. *(→ SPEC §11.1)* `cli/analyse.py` — read-only corpus reports (score-distribution /
+    status / companies / gaps; `--report all`). **Strictly read-only** (no corpus write,
+    no pipeline stage, no API). Reuses the tracker loaders + `project` join, not a
+    reimplementation. Diverged from the build prompt's companies-report example header
+    ("minimum 3 scored jobs to appear"): per the prompt's own implementation notes + DoD
+    it shows **all** companies and suppresses *rates* below 5 scored jobs (the shortlist-rate
+    ranking needs ≥5 reviewed) — no "min jobs to appear" filter.
+
 
 ## Schema summary
 
