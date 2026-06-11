@@ -1,118 +1,131 @@
-# company_seeds.yaml — confirmed ATS slugs
+# company_seeds.yaml — Job Radar Company Universe v1.1 (merged)
 # Generated: 2026-06-11 — verified via find_ats_slugs.py
-# All slugs probe-verified. Not-found companies excluded.
+# 73 companies | Greenhouse: 42 | Ashby: 27 | Lever: 4
 #
-# ATS notes:
-#   Ashby dominated — most AI-native companies use Ashby, not Greenhouse
-#   Lever: Mistral confirmed. Others (Hugging Face, Cohere, Scale AI) migrated to Ashby.
-#   Large enterprises (Microsoft, AWS, Atlassian, Intel etc) use Workday — not collectable.
-#   Hugging Face: not found on any of the three APIs — likely custom careers page.
+# Merge note: the curated v1.1 universe (72 companies, tiered A/B/C) is the canonical
+# seed list, carrying over Perplexity from v1 — the only v1 company absent from v1.1, and
+# it already has scored roles in the corpus, so it is kept (under ai_application_platforms).
 #
-# Format note: cli.collect reads `yaml.safe_load(...)["companies"]`, so entries live
-# under the `companies:` key (the find_ats_slugs.py output is a bare list — wrapped here).
-companies:
-  # ── Already in pipeline (verified working) ────────────────────────────────
-  - {name: Anthropic,        ats: greenhouse, slug: anthropic}
-  - {name: Databricks,       ats: greenhouse, slug: databricks}
-  - {name: Stripe,           ats: greenhouse, slug: stripe}
-  - {name: Adyen,            ats: greenhouse, slug: adyen}
-  - {name: Figma,            ats: greenhouse, slug: figma}
-  - {name: The Trade Desk,   ats: greenhouse, slug: thetradedesk}
-  - {name: xAI,              ats: greenhouse, slug: xai}
-  - {name: Intercom,         ats: greenhouse, slug: intercom}
-  - {name: Cresta,           ats: greenhouse, slug: cresta}
-  - {name: PolyAI,           ats: greenhouse, slug: polyai}
-  - {name: Forethought,      ats: greenhouse, slug: forethought}
-  - {name: CoreWeave,        ats: greenhouse, slug: coreweave}
-  - {name: Cloudflare,       ats: greenhouse, slug: cloudflare}
-  - {name: MongoDB,          ats: greenhouse, slug: mongodb}
-  - {name: Elastic,          ats: greenhouse, slug: elastic}
-  - {name: Datadog,          ats: greenhouse, slug: datadog}
-  - {name: Marqeta,          ats: greenhouse, slug: marqeta}
-  - {name: Monzo,            ats: greenhouse, slug: monzo}
-  - {name: Okta,             ats: greenhouse, slug: okta}
-  - {name: Fractile,         ats: greenhouse, slug: fractile}
-  - {name: Tenstorrent,      ats: greenhouse, slug: tenstorrent}
-  - {name: Graphcore,        ats: greenhouse, slug: graphcore}
-  - {name: PhysicsX,         ats: greenhouse, slug: physicsx}
-  - {name: Wayve,            ats: greenhouse, slug: wayve}
-  - {name: Thoughtworks,     ats: greenhouse, slug: thoughtworks}
-  - {name: Mistral AI,       ats: lever,      slug: mistral}
-  - {name: Perplexity,       ats: ashby,      slug: perplexity}
-  - {name: Anyscale,         ats: ashby,      slug: anyscale}
-  - {name: Modal,            ats: ashby,      slug: modal}
-  - {name: Baya Systems,     ats: greenhouse, slug: bayasystems}
-  - {name: Glean,            ats: greenhouse, slug: gleanwork}
-  - {name: Scale AI,         ats: greenhouse, slug: scaleai}
-  - {name: Together AI,      ats: greenhouse, slug: togetherai}
-  - {name: Grafana Labs,     ats: greenhouse, slug: grafanalabs}
-  - {name: Ping Identity,    ats: greenhouse, slug: pingidentity}
-  - {name: Stability AI,     ats: greenhouse, slug: stabilityai}
-  - {name: Palantir,         ats: lever,      slug: palantir}
+# Format note: cli.collect reads `yaml.safe_load(...)["companies"]`, so every entry lives
+# under the `companies:` key. v1.1 shipped as a bare list — wrapped here. Each entry is
+# {name, ats, slug}; ats ∈ {greenhouse, lever, ashby}.
+#
+# Not collectable (Workday / custom portal / not found on any ATS):
+#   Cognigy, Hugging Face, Checkout.com, Rapyd, Wise, Revolut, Klarna,
+#   Starling Bank, Arm, Groq, SambaNova, SiFive, HashiCorp, NVIDIA,
+#   Microsoft, AWS, Google Cloud, Oracle Cloud, Bloomberg, LSEG, FactSet,
+#   S&P Global, Auth0 (acquired by Okta), SailPoint, Atlassian, Miro, ServiceNow,
+#   Monday.com, FreeWheel, Magnite, Index Exchange, Criteo, LiveRamp, Amazon Ads,
+#   Walmart Connect, Tesco Media, CitrusAd, Experian, TransUnion, Nielsen,
+#   Circana, AMD, Qualcomm, Intel, Broadcom, Darktrace, Tessl, Accenture,
+#   Slalom, EPAM, Publicis Sapient, Segment, mParticle, Tealium
 
-  # ── New — confirmed this run ───────────────────────────────────────────────
+companies:
+  # ══ TIER A — Core Targets ══════════════════════════════════════════════════
+
+  # foundation_models
   - {name: OpenAI,           ats: ashby,      slug: openai}
+  - {name: Anthropic,        ats: greenhouse, slug: anthropic}
+  - {name: Mistral AI,       ats: lever,      slug: mistral}
+  - {name: Cohere,           ats: ashby,      slug: cohere}
   - {name: Google DeepMind,  ats: greenhouse, slug: deepmind}
   - {name: Aleph Alpha,      ats: ashby,      slug: alephalpha}
-  - {name: Cohere,           ats: ashby,      slug: cohere}
+
+  # ai_application_platforms
   - {name: Writer,           ats: ashby,      slug: writer}
+  - {name: Intercom,         ats: greenhouse, slug: intercom}
+  - {name: Glean,            ats: greenhouse, slug: gleanwork}
   - {name: Harvey,           ats: ashby,      slug: harvey}
   - {name: Sierra,           ats: ashby,      slug: sierra}
   - {name: Decagon,          ats: ashby,      slug: decagon}
   - {name: Hebbia,           ats: ashby,      slug: hebbia-ai}
+  - {name: Cresta,           ats: greenhouse, slug: cresta}
+  - {name: PolyAI,           ats: greenhouse, slug: polyai}
+  - {name: Forethought,      ats: greenhouse, slug: forethought}
   - {name: Rasa,             ats: ashby,      slug: rasa}
+  - {name: Perplexity,       ats: ashby,      slug: perplexity}   # carried over from v1 (has scored roles)
+
+  # ai_data_infrastructure
+  - {name: Databricks,       ats: greenhouse, slug: databricks}
   - {name: Snowflake,        ats: ashby,      slug: snowflake}
+  - {name: Scale AI,         ats: greenhouse, slug: scaleai}
+  - {name: CoreWeave,        ats: greenhouse, slug: coreweave}
+  - {name: Together AI,      ats: greenhouse, slug: togetherai}
+  - {name: Modal,            ats: ashby,      slug: modal}
   - {name: Pinecone,         ats: ashby,      slug: pinecone}
   - {name: Weaviate,         ats: ashby,      slug: weaviate}
   - {name: LangChain,        ats: ashby,      slug: langchain}
+  - {name: Anyscale,         ats: ashby,      slug: anyscale}
   - {name: Baseten,          ats: ashby,      slug: baseten}
-  - {name: Confluent,        ats: ashby,      slug: confluent}
+
+  # fintech_infrastructure
+  - {name: Stripe,           ats: greenhouse, slug: stripe}
+  - {name: Adyen,            ats: greenhouse, slug: adyen}
   - {name: Airwallex,        ats: ashby,      slug: airwallex}
   - {name: Plaid,            ats: ashby,      slug: plaid}
-  - {name: Notion,           ats: ashby,      slug: notion}
+  - {name: Marqeta,          ats: greenhouse, slug: marqeta}
+
+  # fintech_platforms
+  - {name: Monzo,            ats: greenhouse, slug: monzo}
+
+  # semiconductor_and_ai_compute
+  - {name: Baya Systems,     ats: greenhouse, slug: bayasystems}
+  - {name: Fractile,         ats: greenhouse, slug: fractile}
   - {name: Cerebras,         ats: ashby,      slug: cerebras}
+  - {name: Tenstorrent,      ats: greenhouse, slug: tenstorrent}
+  - {name: Graphcore,        ats: greenhouse, slug: graphcore}
+
+  # ══ TIER B — Strong Monitoring ═════════════════════════════════════════════
+
+  # platform_and_infrastructure
+  - {name: Cloudflare,       ats: greenhouse, slug: cloudflare}
+  - {name: Confluent,        ats: ashby,      slug: confluent}
+  - {name: MongoDB,          ats: greenhouse, slug: mongodb}
+  - {name: Elastic,          ats: greenhouse, slug: elastic}
+  - {name: Grafana Labs,     ats: greenhouse, slug: grafanalabs}
+  - {name: Datadog,          ats: greenhouse, slug: datadog}
+
+  # identity_platforms
+  - {name: Okta,             ats: greenhouse, slug: okta}
+  - {name: Ping Identity,    ats: greenhouse, slug: pingidentity}
+
+  # enterprise_platforms
+  - {name: Figma,            ats: greenhouse, slug: figma}
+  - {name: Notion,           ats: ashby,      slug: notion}
+  - {name: HubSpot,          ats: greenhouse, slug: hubspot}
+
+  # adtech_and_media_platforms
+  - {name: The Trade Desk,   ats: greenhouse, slug: thetradedesk}
+  - {name: Equativ,          ats: lever,      slug: equativ}
+  - {name: PubMatic,         ats: greenhouse, slug: pubmatic}
+  - {name: NextRoll,         ats: greenhouse, slug: nextroll}
+
+  # retail_media_and_data
+  - {name: Dunnhumby,        ats: greenhouse, slug: dunnhumby}
+
+  # customer_data_and_martech
+  - {name: Twilio,           ats: greenhouse, slug: twilio}
+  - {name: Braze,            ats: greenhouse, slug: braze}
+  - {name: Klaviyo,          ats: greenhouse, slug: klaviyo}
+  - {name: Iterable,         ats: greenhouse, slug: iterable}
+  - {name: Amplitude,        ats: greenhouse, slug: amplitude}
+  - {name: Contentsquare,    ats: lever,      slug: contentsquare}
+
+  # ══ TIER C — Exploration / Watch Carefully ═════════════════════════════════
+
+  # frontier_watchlist
+  - {name: xAI,              ats: greenhouse, slug: xai}
+
+  # uk_european_scaleups
   - {name: Faculty,          ats: ashby,      slug: faculty}
   - {name: Quantexa,         ats: ashby,      slug: quantexa}
+  - {name: PhysicsX,         ats: greenhouse, slug: physicsx}
   - {name: Synthesia,        ats: ashby,      slug: synthesia}
   - {name: ElevenLabs,       ats: ashby,      slug: elevenlabs}
+  - {name: Stability AI,     ats: greenhouse, slug: stabilityai}
+  - {name: Wayve,            ats: greenhouse, slug: wayve}
   - {name: Multiverse,       ats: ashby,      slug: multiverse}
 
-# ── Not found — excluded ──────────────────────────────────────────────────
-# Hugging Face    — not on Greenhouse/Lever/Ashby (custom careers page)
-# Cognigy         — not found
-# HashiCorp       — likely Workday
-# NVIDIA          — likely Workday
-# Microsoft       — Workday
-# Amazon AWS      — Workday
-# Google Cloud    — Workday
-# Oracle Cloud    — Workday
-# Checkout.com    — not found
-# Rapyd           — not found
-# Wise            — not found
-# Revolut         — not found
-# Klarna          — not found
-# Starling Bank   — not found
-# Bloomberg       — likely Workday
-# LSEG            — likely Workday
-# FactSet         — likely Workday
-# S&P Global      — likely Workday
-# Auth0           — acquired by Okta (already in list)
-# SailPoint       — not found
-# Atlassian       — Workday
-# Miro            — not found
-# ServiceNow      — Workday
-# Monday.com      — not found
-# Arm             — not found
-# Groq            — not found
-# SambaNova       — not found
-# SiFive          — not found
-# AMD             — Workday
-# Qualcomm        — Workday
-# Intel           — Workday
-# Broadcom        — Workday
-# Darktrace       — not found
-# Tessl           — not found
-# Accenture       — Workday
-# Slalom          — not found
-# EPAM            — not found
-# Publicis Sapient — not found
+  # strategic_ai_delivery
+  - {name: Thoughtworks,     ats: greenhouse, slug: thoughtworks}
+  - {name: Palantir,         ats: lever,      slug: palantir}

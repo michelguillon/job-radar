@@ -6,9 +6,9 @@
 
 **Project:** 4 — Job Radar
 **Repository:** job-radar (renamed from jd-refinery)
-**Status:** Phases 1–6 complete — 392 tests. **Deployed + operational** at
+**Status:** Phases 1–6 complete — 400 tests. **Deployed + operational** at
 job-radar.michel-portfolio.co.uk (Caddy + Cloudflare, SPEC §10.9). Discovery now runs the
-**102-company universe** (§11.1) via a working weekly cron; first real server run: 5,498
+**73-company universe v1.1** (§11.1) via a working weekly cron; first real server run: 5,498
 collected → 65 new survivors → **117 scored, $3.18** labelling to date.
 **Last updated:** 2026-06-11
 **Deployment target:** M720q home server, Ubuntu Server 24.04, Docker + Caddy + Cloudflare
@@ -2183,101 +2183,50 @@ companies by strong/blocked count, est. cost/job from `stats.json`); **status** 
 lane counts, review/shortlist/apply rates, stale-application list); **companies** (per-company
 jobs/strong/blocked/reviewed/shortlisted, shortlist-rate ranking, "zero-shortlist despite a
 real sample"); **gaps** (top blocking constraints across blocked roles + top requirement gaps
-across all and within strong-fit roles). `--report all` runs all four, header-separated. This
-is the foundation for the company yield-tracking backlog (`docs/BACKLOG_YIELD_TRACKING.md`):
-once company metadata is seeded the companies report gains domain rollups + a `--yield` flag
-and a `--output FILE` for the UI download button — not built now.
+across all and within strong-fit roles, plus rejection reasons section when data exists).
+`--report all` runs all four, header-separated. This is the foundation for the company
+yield-tracking backlog (`docs/BACKLOG_YIELD_TRACKING.md`): once company metadata is seeded
+the companies report gains domain rollups + a `--yield` flag and a `--output FILE` for the
+UI download button — not built now.
 
-### Production Company Universe v1
+### Rejection reasons ✅ built
 
-The initial production seed list. **Updated 2026-06-11 with verified ATS slugs**
-from `find_ats_slugs.py` probe run — 62 companies confirmed across Greenhouse (29),
-Ashby (28), and Lever (5). Unresolvable companies (Workday/custom portals) excluded.
+A new use of the existing annotations system — no new endpoint, no new file, no schema bump.
+`rejection_reason` added to `ANNOTATION_TYPE`; new `REJECTION_REASON` frozenset (10 values:
+`wrong_level`, `wrong_function`, `too_salesy`, `too_research_heavy`, `too_delivery_consulting`,
+`domain_not_interesting`, `company_not_fit`, `seniority_mismatch`, `location_mismatch`,
+`other`). `AnnotationRequest.field` relaxed to `str | None` (a rejection is about the whole
+role → `field: null`). API validates `reason` against `REJECTION_REASON` for this type (422
+if invalid); existing 409-duplicate behaviour unchanged. Frontend shows the control when
+`effectiveStatus === 'rejected'` or immediately after clicking Rejected; posts to
+`/api/annotations` with `field: null` + `observed: [scorer_label, scorer_score]`; shows
+"Already recorded: X → Edit" when one exists. `--report gaps` grows a rejection-reasons
+section (reason frequency + most-rejected companies with breakdown), shown only when ≥1
+exists. Deviation 39: the UI mock showed an optional free-text notes field but the annotation
+record has no destination for it — omitted to avoid silently dropping input.
 
-Key finding: most AI-native companies use **Ashby**, not Greenhouse. The original
-best-guess slugs were wrong for ~60% of companies.
+### Production Company Universe v1.1 ✅ committed 2026-06-11
 
-```yaml
-# Production Company Universe — verified 2026-06-11
-# All slugs probe-confirmed via find_ats_slugs.py
+**73 companies confirmed** across Greenhouse (42), Ashby (27), Lever (4) — the curated v1.1
+universe (72, tiered A/B/C) plus Perplexity carried over from v1 (the only v1 company absent
+from v1.1, and it already has scored roles). Updated from v1 (62 companies) with 11 new
+additions from the AdTech, retail media, and customer data sectors. Verified via
+`find_ats_slugs.py` probe run. Supersedes the v1 list below.
 
-# Already in pipeline (original verified seeds)
-- {name: Anthropic,        ats: greenhouse, slug: anthropic}
-- {name: Databricks,       ats: greenhouse, slug: databricks}
-- {name: Stripe,           ats: greenhouse, slug: stripe}
-- {name: Adyen,            ats: greenhouse, slug: adyen}
-- {name: Figma,            ats: greenhouse, slug: figma}
-- {name: The Trade Desk,   ats: greenhouse, slug: thetradedesk}
-- {name: xAI,              ats: greenhouse, slug: xai}
-- {name: Intercom,         ats: greenhouse, slug: intercom}
-- {name: Cresta,           ats: greenhouse, slug: cresta}
-- {name: PolyAI,           ats: greenhouse, slug: polyai}
-- {name: Forethought,      ats: greenhouse, slug: forethought}
-- {name: CoreWeave,        ats: greenhouse, slug: coreweave}
-- {name: Cloudflare,       ats: greenhouse, slug: cloudflare}
-- {name: MongoDB,          ats: greenhouse, slug: mongodb}
-- {name: Elastic,          ats: greenhouse, slug: elastic}
-- {name: Datadog,          ats: greenhouse, slug: datadog}
-- {name: Marqeta,          ats: greenhouse, slug: marqeta}
-- {name: Monzo,            ats: greenhouse, slug: monzo}
-- {name: Okta,             ats: greenhouse, slug: okta}
-- {name: Fractile,         ats: greenhouse, slug: fractile}
-- {name: Tenstorrent,      ats: greenhouse, slug: tenstorrent}
-- {name: Graphcore,        ats: greenhouse, slug: graphcore}
-- {name: PhysicsX,         ats: greenhouse, slug: physicsx}
-- {name: Wayve,            ats: greenhouse, slug: wayve}
-- {name: Thoughtworks,     ats: greenhouse, slug: thoughtworks}
-- {name: Baya Systems,     ats: greenhouse, slug: bayasystems}
-- {name: Glean,            ats: greenhouse, slug: gleanwork}
-- {name: Scale AI,         ats: greenhouse, slug: scaleai}
-- {name: Together AI,      ats: greenhouse, slug: togetherai}
-- {name: Grafana Labs,     ats: greenhouse, slug: grafanalabs}
-- {name: Ping Identity,    ats: greenhouse, slug: pingidentity}
-- {name: Stability AI,     ats: greenhouse, slug: stabilityai}
-- {name: Google DeepMind,  ats: greenhouse, slug: deepmind}
-- {name: Mistral AI,       ats: lever,      slug: mistral}
-- {name: Palantir,         ats: lever,      slug: palantir}
-- {name: Perplexity,       ats: ashby,      slug: perplexity}
-- {name: Anyscale,         ats: ashby,      slug: anyscale}
-- {name: Modal,            ats: ashby,      slug: modal}
+New in v1.1: HubSpot, PubMatic, NextRoll, Dunnhumby, Twilio, Braze, Klaviyo, Iterable,
+Amplitude (all Greenhouse), Equativ + Contentsquare (Lever).
 
-# New — confirmed 2026-06-11
-- {name: OpenAI,           ats: ashby,      slug: openai}
-- {name: Aleph Alpha,      ats: ashby,      slug: alephalpha}
-- {name: Cohere,           ats: ashby,      slug: cohere}
-- {name: Writer,           ats: ashby,      slug: writer}
-- {name: Harvey,           ats: ashby,      slug: harvey}
-- {name: Sierra,           ats: ashby,      slug: sierra}
-- {name: Decagon,          ats: ashby,      slug: decagon}
-- {name: Hebbia,           ats: ashby,      slug: hebbia-ai}
-- {name: Rasa,             ats: ashby,      slug: rasa}
-- {name: Snowflake,        ats: ashby,      slug: snowflake}
-- {name: Pinecone,         ats: ashby,      slug: pinecone}
-- {name: Weaviate,         ats: ashby,      slug: weaviate}
-- {name: LangChain,        ats: ashby,      slug: langchain}
-- {name: Baseten,          ats: ashby,      slug: baseten}
-- {name: Confluent,        ats: ashby,      slug: confluent}
-- {name: Airwallex,        ats: ashby,      slug: airwallex}
-- {name: Plaid,            ats: ashby,      slug: plaid}
-- {name: Notion,           ats: ashby,      slug: notion}
-- {name: Cerebras,         ats: ashby,      slug: cerebras}
-- {name: Faculty,          ats: ashby,      slug: faculty}
-- {name: Quantexa,         ats: ashby,      slug: quantexa}
-- {name: Synthesia,        ats: ashby,      slug: synthesia}
-- {name: ElevenLabs,       ats: ashby,      slug: elevenlabs}
-- {name: Multiverse,       ats: ashby,      slug: multiverse}
+Full verified list lives in `company_seeds.yaml` (tracked in git — see
+`docs/BACKLOG_COMPANY_UNIVERSE.md §7` for the scp commands to migrate to the server).
 
-# Not collectable — excluded
-# Hugging Face    — not on Greenhouse/Lever/Ashby (custom careers page)
-# Cognigy, HashiCorp, NVIDIA — not found
-# Microsoft, AWS, Google Cloud, Oracle — Workday
-# Bloomberg, LSEG, FactSet, S&P Global — Workday
-# Atlassian, ServiceNow, AMD, Intel, Qualcomm, Broadcom — Workday
-# Checkout.com, Rapyd, Wise, Revolut, Klarna, Starling Bank — not found
-# Groq, SambaNova, SiFive, Arm — not found
-# Accenture, Slalom, EPAM, Publicis Sapient — not found
-# Auth0 — acquired by Okta (already in list)
-```
+Not collectable (Workday / custom portal / not found on any ATS):
+Hugging Face, Cognigy, HashiCorp, NVIDIA, Microsoft, AWS, Google Cloud, Oracle Cloud,
+Bloomberg, LSEG, FactSet, S&P Global, Auth0, SailPoint, Atlassian, Miro, ServiceNow,
+Monday.com, FreeWheel, Magnite, Index Exchange, Criteo, LiveRamp, Amazon Ads, Walmart
+Connect, Tesco Media, CitrusAd, Experian, TransUnion, Nielsen, Circana, AMD, Qualcomm,
+Intel, Broadcom, Darktrace, Tessl, Accenture, Slalom, EPAM, Publicis Sapient, Segment,
+mParticle, Tealium, Arm, Groq, SambaNova, SiFive, Checkout.com, Rapyd, Wise, Revolut,
+Klarna, Starling Bank.
 
 ### Company metadata (post-deployment — after 2–4 weeks usage)
 
@@ -2293,19 +2242,6 @@ notes: "..."                       # free text
 · `ai_data_platform` · `ai_infrastructure` · `developer_tooling` ·
 `fintech_infrastructure` · `identity_security` · `enterprise_software` ·
 `adtech_martech` · `semiconductor_ai_compute` · `strategic_ai_delivery`
-
-### Rejection reasons ✅ built
-
-`rejection_reason` is now an `ANNOTATION_TYPE` (constants only, no schema bump) whose
-structured `reason` is a `REJECTION_REASON` value — `wrong_level` · `wrong_function` ·
-`too_salesy` · `too_research_heavy` · `too_delivery_consulting` · `domain_not_interesting` ·
-`company_not_fit` · `seniority_mismatch` · `location_mismatch` · `other` — recording *why a
-role wasn't pursued despite its score*. It reuses the existing `POST /api/annotations`
-endpoint and `annotations.jsonl` sink (no new endpoint/file); the API validates the value for
-this type only (others keep free-text `reason`), a `rejection_reason` carries `field: null`,
-the detail panel surfaces a reason dropdown when a role is `rejected`, and `cli.analyse
---report gaps` shows a rejection-reasons section (frequency + most-rejected companies) only
-when ≥1 is recorded. See CLAUDE.md deviation 39.
 
 ### cv-tailor integration signal (post-deployment design decision)
 
