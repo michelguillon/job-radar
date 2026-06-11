@@ -6,7 +6,7 @@
 
 **Project:** 4 — Job Radar
 **Repository:** job-radar (renamed from jd-refinery)
-**Status:** Phases 1–6 complete — 362 tests. **Deployed + operational** at
+**Status:** Phases 1–6 complete — 381 tests. **Deployed + operational** at
 job-radar.michel-portfolio.co.uk (Caddy + Cloudflare, SPEC §10.9). Discovery now runs the
 **102-company universe** (§11.1) via a working weekly cron; first real server run: 5,498
 collected → 65 new survivors → **117 scored, $3.18** labelling to date.
@@ -55,7 +55,7 @@ cv-tailor workflow
 | 3 | Job Tracker | ✅ Complete — track.py (model C), 263 tests, extraction quality fixed, real corpus build underway | Application workflow state |
 | 4 | Discovery Layer | ✅ Complete — incremental collection + `cli/digest.py` + cron wrappers, 313 tests | Continuous role ingestion |
 | 5 | Static UI | ✅ Complete — `ui/` static SPA, joined `index.json`, 318 tests | Read-only browse + filter interface |
-| 6 | Interactive UI | ✅ Complete — FastAPI backend + React/Vite frontend, owner-unlock writes, 351 tests | Full job search interface |
+| 6 | Interactive UI | ✅ Complete — FastAPI backend + React/Vite frontend, owner-unlock writes, 381 tests | Full job search interface |
 | 7 | Fine-Tuned Analyser | Future enhancement — Project 5 | Replace rule-based scoring |
 
 Phases are sequential. Each phase is a working system before the next
@@ -1949,8 +1949,6 @@ CLAUDE.md deviations 32–34.
    `409` by `POST /api/annotations` with a client-side "submit anyway?" warning. Both the
    live override and the live annotations are overlaid by `GET /api/index` so a write shows
    on reload without a re-export.
-
----
 
 ---
 

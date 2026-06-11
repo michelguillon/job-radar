@@ -106,311 +106,138 @@ thing tests actually run against.
 
 ---
 
-## Known deviations from spec (captured from build)
+## Known deviations from spec (active guards and gotchas)
 
-1. `SCHEMA_VERSION = "1.2"` (spec Step 1 text said 1.1 — typo, 1.2 is correct)
-2. Records stored as compact single-line JSONL (not pretty-printed)
-3. `.gitignore` uses `corpus/**/*` + negations to track skeleton, ignore data
-4. Added: `models/__init__.py`, root `conftest.py`, `tests/factories.py`,
-   `.gitattributes`, this `CLAUDE.md`, `collectors/base.py`, `scripts/`
-5. `docker-compose.yml` marks `env_file` as `required: false`
-6. SHA-256 backfill on 10 manual records run in Step 3 (deferred from Step 2)
-7. `collectors/base.py` added — shared `fetch_json` retry/backoff +
-   `build_raw_record`; each collector is URL + field mapping only
-8. `scripts/` package for one-off corpus maintenance
-9. `docker-compose.yml` service renamed `jd-refinery` → `job-radar`
-10. Greenhouse `?content=true` returns HTML entity-escaped content —
-    `html.unescape()` run on response body before storing `raw_html`
-11. Lever returns bare JSON array + split description fields (not `{"jobs":[...]}`)
-12. `pipeline/merge_results` seeds neutral annotation defaults after labelling
-    so whole-record validation passes before human annotates
-13. Prompt closed-vocabulary section generated from `models.record` enums —
-    not hand-listed; prompt caching active on system prefix
-14. (Phase 2) Schema versioned **per record type**: `SCHEMA_VERSION="1.3"`
-    (ApplicationRecord) + `JDRECORD_SCHEMA_VERSION="1.2"` (frozen). The three
-    sites that hard-coded `SCHEMA_VERSION` for a JDRecord envelope (`factories`,
-    `test_record`, `stats.export_index`) were repointed at `JDRECORD_SCHEMA_VERSION`.
-15. (Phase 2 scorer) The `role` dimension is **no longer a flat `target_roles`
-    lookup** (deviates from SPEC §6.5). It is three-tier — primary (2.0) /
-    `conditional_primary` (Product: 2.0 if a relevant domain or strong+weak signal,
-    else 1.0) / secondary (1.0) / no match (0). Profile gained
-    `conditional_primary` + `secondary` under `target_roles`.
-16. (Phase 2 scorer, **known limitation — F, deferred**) Tier-4 automated
-    extraction is generous on `role_type` mapping and defaults to `Enterprise
-    Software` as a catch-all `domain`. Because `Enterprise Software` is a *strong*
-    domain, this inflates some off-target roles; scorer gates/blockers partially
-    recover. Full fix = extraction-prompt/corpus maintenance, deferred to a later
-    phase.
-17. **Calibration corpus** lives in `corpus/calibration/` (13 deliberately
-    negative / conditional JDs) and is **excluded from train/eval/fine-tune
-    exports** (`export.py` skips any `calibration` path). It is a **permanent
-    scorer regression set** — re-run `python -m scripts.report_calibration --full`
-    whenever the scorer changes, and re-validate the spread before locking a change.
-18. (Phase 3) **Collectors now return `CollectedJob` (record + metadata)**, not a
-    bare `JDRecord`. The ATS APIs expose `title` + structured location that the
-    schema-locked `JDRecord` has no field for; rather than overload `raw_text`
-    (which stays **employer JD text only**), `collect.py` writes a parallel
-    **metadata sidecar** `corpus/raw/meta_{date}.jsonl` (`base.META_FIELDS`,
-    keyed by `source_url`). Used by the pre-label filter now and passed to the
-    extraction prompt as separate context later — never injected into `raw_text`.
-19. (Phase 3) **Pre-label filter** = `pipeline/prefilter.py` (pure location + role
-    screens, generous by design) + `prefilter.py` CLI (clean+dedupe → screen →
-    **near-dedupe** → `corpus/filtered/filtered_{date}.jsonl` + survivor-distribution
-    report). Runs **before** any Batch labelling spend. Screens read the sidecar
-    only (no model, no scoring). `collapse_near_duplicates` merges survivors that
-    share `(company, language-stripped title)` — the same role posted to many
-    locations / language variants that exact-body dedupe can't catch — keeping the
-    single best-located representative (UK first); specialisation parentheticals
-    are preserved so distinct roles aren't merged. The survivors file is JDRecords
-    only; the sidecar remains the join source for the later labelling step.
-    **Cross-run dedupe (2026-06-11):** prefilter now seeds the `dedupe` `seen` set
-    from `load_processed_hashes()` — the content hash of every already-**labelled**
-    (`labelled_*.jsonl` `id`) or **scored** (`scored_*.jsonl` `job_id`) job — and drops
-    matches as *already-processed* before screening, so a `--full`/new-environment
-    re-collect can't re-pay to label jobs already seen. `--include-processed` opts out.
-    (Found in the first 102-company universe run: ~half of 99 survivors were already
-    scored because `dedupe(records, set())` only deduped within the batch. `cli/dedupe.py`
-    is an empty stub, so prefilter is the *only* dedup in the running pipeline.)
-20. (Phase 3) **Labelling collected survivors.** Survivors have `raw_text=""`
-    (only `raw_html`). `pipeline.clean.clean_readable` populates `raw_text` for
-    labelling/scoring — HTML/boilerplate stripped but **line breaks + case kept**
-    (the hash-form `clean()` lowercases to one line, which breaks the scorer's
-    first-line title heuristic). Sidecar `title`/`location` go to the prompt as a
-    separate **`[ATS METADATA]`** block (`label.build_user_content`, `label.py
-    --meta`), never merged into `raw_text`. **As of 2026-06-11 `cli.label.load_records`
-    does this `clean_readable`-on-empty itself**, so the paid stage reads the prefilter
-    survivors directly (`--input corpus/filtered/filtered_{date}.jsonl --meta
-    corpus/raw/meta_{date}.jsonl --tier 4`) — no separate prep stage. `scripts/build_score_subset.py`
-    is the **bespoke** first-run subset builder (Databricks title-buckets + CSM cap,
-    hardcoded 20260609 defaults) — historical, **not** for a general run (it drops
-    Databricks roles beyond its 5 buckets); `scripts/score_report.py` reports a scoring run.
-21. (Phase 3) **Known Limitation F — observed in production, then fixed in the
-    extraction prompt** (scorer untouched). `build_system_prompt` gained role/domain
-    disambiguation: Product Marketing → `GTM` (not `Product`); post-sales/Customer
-    Success is not `AI Delivery`; **no "Enterprise Software" default** (`domain: []`
-    when nothing applies — `domain` is a list, no `not_stated`). Re-label + diff
-    through the unchanged scorer: Enterprise Software in `domain` 27→10 (prod) / 6→1
-    (calibration), Product-Marketing roles left `strong_fit`, OneOcean de-inflated,
-    **no calibration negative flipped positive**. Calibration baseline kept locked
-    (re-labels → new comparison files). Scorer stays locked until the 100+-job review.
-22. (Phase 3) **GTM/partner observation watchlist** (SPEC §5.10) — `prefilter.py`
-    diverts location-workable GTM/partner-class roles (`watchlist_signal` + role
-    bucket `gtm_partner`/`off_target`) out of the labelling/scoring stream into an
-    append-only log `corpus/watchlist/watchlist_{date}.jsonl`. **Observation only:
-    never labelled, scored, or made into an ApplicationRecord; zero Batch cost.**
-    Gathers evidence on whether `GTM` should become a `target_role` *before* any
-    profile/scorer change — `GTM` deliberately stays out of `target_roles` for now.
-23. (Phase 3) **Job Tracker `track.py` — model C + Log-only** (supersedes SPEC
-    §7.4's earlier "updates ApplicationRecord in corpus/scored/" sketch, which was
-    in tension with the pure scorer). Workflow state lives **only** in the
-    append-only event log `corpus/activity_log.jsonl` (`{v, ts, job_id, event,
-    value, notes}`; `event ∈ {status, outcome, note, title}`). `track.py` **only
-    appends** — it never mutates a scored file and never touches the scorer, so a
-    re-score (which regenerates every `ApplicationRecord` with
-    `application_status="new"`) can't wipe human state. **Live state = latest
-    score joined with a projection folded from the log by `job_id`** (latest
-    status/outcome, earliest-`applied` date, latest non-empty note). `outcome` and
-    `application_date` are **derived at read time — never persisted on
-    `ApplicationRecord`** (no schema bump; `SCHEMA_VERSION` stays 1.3). Vocab only
-    added to `models/record.py`: `OUTCOME`, `ACTIVITY_EVENT`, `ACTIVITY_LOG_VERSION`,
-    `validate_activity_event`. Transitions are **forgiving** (warn, never block);
-    unknown `job_id` is refused unless `--force`. `list` sorts by `priority_score`
-    desc and shows all labels; `--location-workable` is a **coarse, sidecar-derived
-    read-only** signal (no scoring change). **Title resolution**: human override
-    (`--title` → a `title` event) → sidecar title → `raw_text` first line →
-    `job_id` (the schema-locked JDRecord has no title field and the sidecar
-    collides on legacy `source_url="unknown"`; the override is the per-`job_id`
-    escape hatch — presentation only, never scored). `corpus/activity_log.jsonl` is **git-
-    ignored** like other corpus data (mutable personal state). Stable join key
-    caveat: a JD text change → new content hash → new `job_id` → workflow does not
-    carry to the new revision (accepted, not a bug).
-24. (Phase 4) **Incremental collection is client-side, not server-side.** The
-    public ATS **board** APIs expose **no `updated_after`/date-filter param**
-    (Greenhouse's `updated_after` is **Harvest API only**; Lever/Ashby boards take
-    none — verified against the authoritative docs). So `collect.py` fetches the
-    (single, cheap) full list per company and filters **client-side** on each job's
-    own timestamp via `collectors.base.passes_cursor`. The cost saved is the
-    **downstream Batch-labelling** spend (≈O(new) records enter the paid pipeline),
-    not the bulk GET. Per-source **cursor** `corpus/.last_collected_{source}`
-    (gitignored) = **start** timestamp of the last successful run (start-not-finish,
-    so a mid-run update is re-caught). Capability differs per source: greenhouse
-    `updated_at` (new+edited), ashby `publishedAt` (**new only** — no `updatedAt` on
-    the feed; `--full` reconciles edits), **lever none → always full**.
-    `INCREMENTAL_SOURCES` derives from each collector's `SUPPORTS_INCREMENTAL`.
-    `--full` re-fetches everything (schema change/debug) then re-baselines.
-    Cursors advance **only** on a full-source run (no `--company`) that returned ≥1
-    job; a missing/unparseable per-job timestamp is **kept** (never silently drop a
-    posting). Matrix + rationale: `collectors/CLAUDE.md`; mechanics: `SPEC §8.2`.
-25. (Housekeeping) **Stage CLIs moved from repo root into the `cli/` package**
-    (`git mv`, history preserved): `collect, dedupe, export, label, prefilter,
-    score, stats, tier2_review, track, validate`. Invocation changed from
-    `python <stage>.py` to **`python -m cli.<stage>`** — a script run by path
-    (`python cli/score.py`) puts `cli/` on `sys.path` and can't import the
-    repo-root packages, whereas `-m` from the repo root keeps the root importable
-    and CWD-relative corpus paths intact (same pattern as the existing
-    `scripts/` package). No code logic changed; test imports became
-    `import cli.<stage>`; `conftest.py` stays at root. Root now holds only
-    `conftest.py`.
-26. (Phase 4) **Daily digest `cli/digest.py` is a view over tracker state, not a
-    pipeline stage.** It reuses `cli.track`'s loaders + `project` + `_title_for` +
-    `sort_rows` to join the latest score per `job_id` with the JD/sidecar and the
-    activity-log projection, then shows roles whose `scored_at` ≥ a window start
-    (columns: company | role | fit_label | fit_score | location | source_url, sorted
-    by `priority_score` desc). **Since-cursor** `corpus/.digest_last_run` (gitignored)
-    holds the **start** timestamp of the last *default* run (start-not-finish, same
-    reasoning as the collect cursor); no cursor → last 24h. `--since` (ISO
-    date/datetime / `yesterday` / `today`) overrides the window and is a one-off
-    lookback that does **not** advance the cursor (mirrors collect's "`--company`
-    subset doesn't advance"). `--min-fit` default 6; roles already tracked (workflow
-    status ≠ `new`) are excluded unless `--all`; `--export` writes
-    `corpus/digest_{date}.md`. Caveat: a full manual re-score restamps every
-    `scored_at` and would resurface the whole corpus — incremental collection keeps
-    the normal (cron) digest bounded to genuinely-new postings. `cron/` holds the
-    two bash wrappers (`collect_weekly.sh`, `digest_daily.sh`) + `README.md`; both
-    run each stage in Docker and timestamp-log to `/var/log/job-radar/`.
-27. (Phase 5) **`corpus/index.json` is a join, not a JDRecord array** (revises the
-    SPEC §9.4 "flat denormalised array of validated records" sketch). The UI needs
-    scoring + **live workflow status**, which a JDRecord doesn't carry, so
-    `cli.stats --export-index` now emits the **same join the tracker does**
-    (deviation 23): it imports `cli.track`'s loaders + `project` + `_title_for` +
-    `derive_location_workable`, joins latest `ApplicationRecord` per `job_id` ⨝
-    `JDRecord` extraction ⨝ sidecar ⨝ activity-log projection, one denormalised row
-    per **scored** job. Output is an **object** `{schema_version,
-    jdrecord_schema_version, generated_at, stats, records}` (not a bare array — the
-    old `test_export_index_is_flat_array` was replaced). `stats` (counts +
-    `fit_score_distribution` + `cost_to_date_usd`, summed from `corpus/stats.json`)
-    is **embedded** so the single mounted file is self-contained — the UI container
-    mounts only `index.json`, never `stats.json` or the corpus. The UI
-    (`ui/{index.html,app.js,style.css}`, vanilla JS, no framework/build/CDN) fetches
-    it at `data/index.json` and is **strictly read-only** (no POST/write/CLI). Docker
-    `ui` service is profile-gated (`profiles: ["ui"]`) so it never starts with the
-    default `docker compose up`; the `ui/` mount is **not** `:ro` (Docker must create
-    the nested `data/` mountpoint inside it — only the `index.json` file mount is
-    `:ro`). `index.json` stays gitignored corpus data. Title fallbacks inherit the
-    tracker's `_title_for` chain, so JDs whose sidecar title is missing show the
-    `raw_text` first line (cosmetic, same known limit as the tracker).
-28. (Phase 6, M1) **Capability cookie is stdlib HMAC, not `itsdangerous`** (supersedes
-    SPEC §10.8 step 8). `api/security.py` is copied/adapted from cv-tailor's proven,
-    zero-dep `hmac`+`hashlib` module — cookie `jr_write` (HttpOnly, SameSite=lax, Secure
-    via `COOKIE_SECURE`, path `/api`), owner key env `JR_WRITE_KEY`, `require_unlocked`
-    FastAPI dependency on every write router. **Fail-closed**: no `JR_WRITE_KEY` → all
-    writes 403 (clean public read-only). The backend is the source of truth; UI hiding is
-    convenience only. `itsdangerous` is **not** a dependency.
-29. (Phase 6, M1) **`GET /api/index` re-projects the live activity log over `index.json`**
-    (clarifies SPEC §13.4). Workflow writes land in `activity_log.jsonl` *after* the last
-    `cli.stats --export-index`, so a naive file-serve looks stale right after a write.
-    `api/routers/index.py` serves the heavy pre-built join **and** overlays
-    `project(load_events(LOG_PATH))` (cheap) — status/outcome/application_date/notes/title
-    are always live without a re-score. Annotations don't affect the read model.
-30. (Phase 6, M1) **The `api` compose service reuses the `job-radar` image** (it already
-    `pip install`s `requirements.txt`, now incl. fastapi/uvicorn/httpx) rather than a
-    separate `Dockerfile.api` as SPEC §10.4 sketched — the service just runs `uvicorn
-    api.main:app …`. Profile-gated (`profiles:["ui"]`, port 8000). Only the M2 frontend
-    gets its own Dockerfiles. The **thin-layer rule** (import `cli.track` + `models.record`,
-    never the scorer/labeller/pipeline; gate every write; fail-closed) lives in `api/CLAUDE.md`.
-31. (Phase 6, M2) **The `frontend` compose service runs the Vite dev server**
-    (`frontend/Dockerfile.dev`, `npm run dev` on :3000, mapped `8080:3000`), which proxies
-    `/api` → `api:8000` (same-origin, so the `jr_write` cookie rides along). The multi-stage
-    `Dockerfile.prod` (node build → nginx serve) + `frontend/nginx.conf` exist for the
-    **deferred §10.9 deployment**, not the local profile. **Image-tag-collision gotcha:** a
-    manual `docker build -t job-radar-frontend` collides with the compose-assigned image name
-    `<project>-frontend` → `docker compose up` silently **reuses the stale image** instead of
-    building `Dockerfile.dev`. Always `docker compose --profile ui up -d --build frontend`.
-    The Phase 5 static `ui/{index.html,app.js,style.css,.gitignore,CLAUDE.md}` was deleted
-    (git history preserves it); conventions live in `frontend/CLAUDE.md`. The React write
-    controls reuse the M1 endpoints — no new write logic client-side; `credentials:"include"`
-    on every fetch carries the capability cookie.
-32. (Phase 6, post-M2 — from use) **Outcome recording + application staleness.** The
-    `OUTCOME` vocab and the CLI's `--outcome` already existed (deviation 23), but the
-    API/UI never exposed terminal outcomes, so a role couldn't be marked rejected from the
-    browser. Added `POST /api/outcome {job_id, outcome, notes?}` (gated; `build_event`
-    validates against `OUTCOME`). The detail panel shows an **Outcome** control once a role
-    has been applied; the **rejection stage is auto-derived from the current workflow
-    status** (`applied→rejected_post_screen`, `interviewing→rejected_interview`,
-    `offer→rejected_final`) but stays editable, and recording also POSTs `/api/status` to
-    move the lane (`rejected_*→rejected`, `withdrew`/`offer_declined→archived`). The
-    applied date (already derived from the earliest `applied` event by `project`) is now
-    surfaced with **age-since-applied + a "stale" flag past 21 days** (`STALE_DAYS`),
-    shown in the detail panel and as a dot on `applied` rows in Browse. No schema/scorer
-    change — still log events folded by `project`; the live `/api/index` overlay already
-    carried `outcome`/`application_date`. +3 tests (354 total).
-33. (Phase 6, post-M2 — UX from use) **Detail/pipeline/button refinements** (SPEC §10.10
-    items 1–3, no backend change): (a) the detail view is a **centred modal** (80vw × 80vh,
-    max 1040px) over a dimmed backdrop, not the original 560px right rail — same ×/Esc/
-    backdrop-click close, body capped at a ~760px reading column; (b) Pipeline lanes use
-    **`PIPELINE_ORDER`** (`offer→interviewing→applied→shortlisted→review→new→rejected→
-    archived`) so active stages sit above the big `new` backlog — the funnel `STATUS_ORDER`
-    (stats bar + filters) is unchanged; (c) Save/Override/**Submit Flag** were mis-classed
-    (flex-container class, not button styling) and rendered faint — now a proper `.wc-btn`
-    style (Submit Flag = primary), and the flag form gets its **own in-panel toast** separate
-    from the workflow toast.
-34. (Phase 6, post-M2 — UX from use) **`rejected` as a first-class, default-hidden state**
-    (SPEC §10.10 item 5, frontend-only — `rejected` was already a valid `APPLICATION_STATUS`):
-    (a) detail status buttons are the full ladder (`review·shortlist·apply·interviewing·
-    offer·rejected·archived`), not only 4; (b) terminal lanes (`rejected`,`archived`) are
-    **hidden from the default Browse + Pipeline** (`TERMINAL_STATUSES`) and shown by ticking
-    them in the Status filter — `applyFilters` treats an empty status set as "all except
-    terminal", a non-empty set as exactly-those; (c) **`effectiveStatus(job)`** derives the
-    displayed/filtered/grouped status from the **outcome** when present
-    (`rejected_*→rejected`, `withdrew`/`offer_declined→archived`, `offer_accepted→offer`),
-    so a role with a rejection outcome never shows as `applied` even if its logged lane
-    wasn't moved (e.g. a CLI `--outcome` write) — a read-time derivation, log untouched.
-    Routed through Browse/Pipeline/Sidebar/DetailPanel; `isStaleApplied` uses it too. No
-    backend change.
-35. (Phase 6, post-M2 — styling rearchitecture) **Frontend styling is Tailwind utilities +
-    shadcn primitives + JS class maps; the ported global semantic CSS was deleted.** Root
-    cause of a recurring class of bugs: M2 ported the Phase 5 hand-written global
-    `ui/style.css` (`.grid`/`.pill`/`.badge`/`.drawer`/…) into a Tailwind app, so global
-    class names collided silently with Tailwind utilities — `.grid` = Tailwind's
-    `display:grid` turned the Browse `<table>` into a grid container and detached the header
-    row from the body columns (headers bunched left). Fixed at the architecture level: every
-    view (`App`/`StatBar`/`Sidebar`/`BrowseView`/`PipelineView`/`DetailPanel`) restyled with
-    Tailwind utility classes; dynamic value→colour styling moved to JS maps in
-    `frontend/src/lib/ui.ts` (`fitBadgeClass`/`statusPillClass`/`CHIP`/`TOAST`); brand palette
-    added to `tailwind.config.js`; new shadcn `components/ui/table.tsx` (`table-fixed` +
-    `<colgroup>` pins columns). `src/index.css` now holds **only** `@tailwind` + tokens + a
-    body reset — no global component classes, so the collision class is gone for good. UI/UX
-    and behaviour unchanged; 354 tests still pass (frontend-only). Convention in
-    `frontend/CLAUDE.md`. Verified: table header/cell positions identical (aligned).
-36. (Phase 4 — first real weekly run, 2026-06-11) **The cron pipeline was never runnable;
-    gave the stages bare-invocation defaults + fixed `cron/collect_weekly.sh`.** Surfaced
-    running the first 102-company universe pipeline by hand: `cli.label`, `cli.validate`, and
-    `cli.stats` all had **`--input` (and `--tier`) `required=True`**, so every bare stage line
-    in `collect_weekly.sh` errored, and `cli/dedupe.py` is an empty stub (a no-op). Fix —
-    sensible defaults keyed to the current **UTC** day so the chain runs with no args:
-    `cli.label` `--date`→`corpus/filtered/filtered_<date>.jsonl` + `--meta`→`meta_<date>.jsonl`
-    + `--tier 4`; `cli.validate` `--date`→`corpus/labelled/labelled_<date>T*.jsonl` (today's
-    only — no whole-corpus re-validate); `cli.stats --input` defaults to `VALIDATED_GLOB`.
-    `cron/collect_weekly.sh` rewritten to the validated bare sequence (collect → prefilter →
-    label → validate → score → stats --export-index), `dedupe` line dropped (prefilter dedups).
-    Caveat baked into the script: **don't schedule near 00:00 UTC** — the date-keyed stages
-    would split across two stamps. +4 tests (362). (Manual run cost $3.18 to date / 117 scored.)
-37. (Phase 6 — §10.11 workflow enhancements, built) **Manual fit override + annotation
-    visibility** — two event-log-append + read-model-join features, **no scorer/schema/
-    pipeline change** (`SCHEMA_VERSION` stays 1.3; constants + read-model only, same pattern
-    as deviations 23/32). **Feature 1 (fit override):** added `"fit_override"` to
-    `ACTIVITY_EVENT` (`models/record.py`; `validate_activity_event` requires `value ∈
-    FIT_LABEL`, or `null` to clear). `cli.track.project` folds the latest override into
-    `fit_override`/`fit_override_reason` — the override's `notes` is its **reason**, folded
-    separately so it never clobbers the workflow `notes`. `cli.stats.build_index_rows` emits
-    `scorer_*` (preserved) + `user_fit_label`/`user_fit_reason` + `display_*` +
-    `has_fit_override`, and sets `fit_label`/`priority_score` to the **display** value so the
-    existing UI (sort/filter/badge) reflects the override with no churn. `POST
-    /api/fit-override {job_id, fit_label, reason?}` (gated; 404 unknown job; 422 bad label;
-    `fit_label:null` clears). **Feature 2 (annotation visibility):** `cli.stats.load_annotations`
-    groups `corpus/annotations.jsonl` by `job_id`; `build_index_rows` embeds
-    `annotations`/`annotation_count`/`has_annotations`. `POST /api/annotations` returns **409**
-    on an exact duplicate (`job_id` + `annotation_type` + `field` + `reason`); the React flag
-    form warns client-side ("submit anyway?") from the embedded list. **`GET /api/index`
-    overlay extended** (`overlay_workflow`) to re-resolve the live fit override (display
-    recomputed from the preserved `scorer_fit_label`) **and** refresh embedded annotations from
-    the live log — both show on reload without a re-export (revises deviation 29's "annotations
-    don't affect the read model"). `ANNOTATIONS_PATH` moved to the canonical `cli.stats`
-    (re-exported by `api.settings`). Frontend: detail-panel "Fit assessment" card (scorer vs
-    override, Save/Edit/Clear) + existing-annotations list above the flag form; Browse `⚠`/`ovr`
-    row badges. +19 tests (381); `tsc -b` clean.
+Deleted: 1–9, 12 (build logistics / scaffold decisions — done, irreversible, no ongoing value).
+Reduced to spec pointer: 13–16, 22–23, 25, 27, 33–35, 37 (fully covered in SPEC — see pointer).
+Kept in full: everything below — active operational guards Claude Code must know.
 
 ---
+
+10. **Greenhouse HTML entity-escaping.** `?content=true` returns HTML entity-escaped
+    content — `html.unescape()` must run on the response body before storing `raw_html`.
+    Forgetting this breaks extraction silently (escaped entities in the text).
+
+11. **Lever returns a bare JSON array**, not `{"jobs":[...]}`. Split description fields.
+    The collector handles this; don't assume Greenhouse's response shape.
+
+13. *(→ SPEC §5.7)* Prompt closed-vocabulary section generated from `models.record` enums —
+    not hand-listed. Prompt caching active on the system prefix.
+
+14. *(→ SPEC §6.9 + schema summary)* Schema versioned **per record type**:
+    `SCHEMA_VERSION="1.3"` (ApplicationRecord) + `JDRECORD_SCHEMA_VERSION="1.2"` (frozen).
+    Don't collapse these two constants.
+
+15. *(→ SPEC §6.9)* Three-tier role model (primary / conditional_primary / secondary)
+    deviates from SPEC §6.5's flat lookup. Profile has `conditional_primary` + `secondary`
+    under `target_roles`.
+
+16. *(→ superseded by 21)* Known Limitation F (extraction generosity) — fixed in
+    production via extraction prompt (deviation 21). Scorer untouched.
+
+17. **Calibration corpus excluded from exports.** `corpus/calibration/` (13 negative/
+    conditional JDs) is a **permanent scorer regression set** — `export.py` skips any
+    `calibration` path. Re-run `python -m scripts.report_calibration --full` whenever
+    the scorer changes and re-validate the spread before locking a change.
+
+18. **CollectedJob + metadata sidecar.** Collectors return `CollectedJob` (record +
+    metadata), not a bare `JDRecord`. ATS title + location go to a parallel sidecar
+    `corpus/raw/meta_{date}.jsonl` (keyed by `source_url`) — **never injected into
+    `raw_text`**, which stays employer JD text only.
+
+19. **Pre-label filter is the only dedup in the running pipeline.** `cli/dedupe.py` is
+    an empty stub. `pipeline/prefilter.py` runs before any Batch spend and seeds its
+    `seen` set from `load_processed_hashes()` (every already-labelled or scored job_id)
+    so a `--full`/new-environment re-collect can't re-pay to label seen jobs.
+    `--include-processed` opts out. `collapse_near_duplicates` merges survivors sharing
+    `(company, language-stripped title)` — same role, many locations — keeping the
+    best-located representative (UK first).
+
+20. **`clean_readable` is required before labelling.** Collected survivors have
+    `raw_text=""` (only `raw_html`). `pipeline.clean.clean_readable` populates
+    `raw_text` — HTML stripped, **line breaks + case kept** (the hash-form `clean()`
+    lowercases to one line, breaking the scorer's first-line title heuristic).
+    `cli.label.load_records` does this automatically on empty `raw_text`; no separate
+    prep stage needed. Sidecar title/location go to the prompt as a separate
+    `[ATS METADATA]` block — never merged into `raw_text`.
+
+21. **Known Limitation F — fixed in extraction prompt, scorer untouched.**
+    `build_system_prompt` disambiguates: Product Marketing → `GTM` (not `Product`);
+    post-sales/CS is not `AI Delivery`; no `Enterprise Software` default (`domain: []`
+    when nothing applies). Scorer stays locked until the 100+-job review.
+
+22. *(→ SPEC §5.10)* GTM/partner observation watchlist — `prefilter.py` diverts
+    GTM/partner roles to `corpus/watchlist/` (never labelled, scored, or costed).
+    `GTM` deliberately stays out of `target_roles` until the watchlist justifies it.
+
+23. *(→ SPEC §7.4)* Job Tracker model C + Log-only — fully described in SPEC §7.4.
+    Key invariant: `track.py` **only appends**, never mutates a scored file.
+
+24. **Incremental collection is client-side, not server-side.** ATS board APIs expose
+    no `updated_after` param (Greenhouse's `updated_after` is Harvest API only; Lever/
+    Ashby boards take none — verified). `collect.py` fetches the full list and filters
+    client-side via `passes_cursor`. Cost saved is downstream Batch spend, not the GET.
+    Cursor = **start** timestamp of last successful run. Lever has no timestamp →
+    always full-fetch. Details: `collectors/CLAUDE.md`; mechanics: SPEC §8.2.
+
+25. *(→ build conventions above)* Stage CLIs live in `cli/` and run as
+    `python -m cli.<stage>` — never `python cli/<stage>.py` (path-based import breaks
+    repo-root package imports).
+
+26. **`cli/digest.py` is a view over tracker state, not a pipeline stage.** It reuses
+    `cli.track` loaders + `project`. Since-cursor `corpus/.digest_last_run` = **start**
+    timestamp (same reasoning as collect cursor). A full manual re-score restamps
+    `scored_at` and would resurface the whole corpus in the next digest — incremental
+    collection keeps the cron digest bounded to genuinely-new postings.
+
+27. *(→ SPEC §9.4)* `corpus/index.json` is a join (ApplicationRecord ⨝ JDRecord ⨝
+    sidecar ⨝ activity-log projection), not a flat JDRecord array. Superseded by the
+    live overlay in deviation 29.
+
+28. **Capability cookie is stdlib HMAC, not `itsdangerous`** (supersedes SPEC §10.8
+    step 8). Cookie `jr_write` (HttpOnly, SameSite=lax, Secure via `COOKIE_SECURE`,
+    path `/api`). Fail-closed: no `JR_WRITE_KEY` → all writes 403. `itsdangerous` is
+    **not** a dependency.
+
+29. **`GET /api/index` overlays the live activity log + annotations over `index.json`.**
+    `api/routers/index.py` serves the pre-built join **and** re-projects
+    `project(load_events())` + refreshes embedded annotations (deviation 37 extended
+    this). Both live without a re-export. *(Revision: annotations now affect the read
+    model — deviation 37 supersedes the original "annotations don't affect" note.)*
+
+30. **`api` compose service reuses the `job-radar` image** — runs `uvicorn api.main:app`
+    rather than a separate `Dockerfile.api`. Only the M2 frontend gets its own
+    Dockerfiles. Thin-layer rule lives in `api/CLAUDE.md`.
+
+31. **Frontend image-tag-collision gotcha.** A manual `docker build -t job-radar-frontend`
+    collides with the compose-assigned image name → `docker compose up` silently reuses
+    the stale image. Always `docker compose --profile ui up -d --build frontend`.
+
+32. **Outcome recording + application staleness** (SPEC §10.10 item 4). `POST
+    /api/outcome {job_id, outcome, notes?}`. Rejection stage auto-derives from workflow
+    status (`applied→post_screen`, `interviewing→interview`, `offer→final`). Applied
+    date surfaced with age + stale flag past `STALE_DAYS` (21). No schema/scorer change.
+
+33. *(→ SPEC §10.10 items 1–3)* Detail modal, pipeline lane order, button styling fixes.
+
+34. *(→ SPEC §10.10 item 5)* `rejected` as first-class default-hidden state;
+    `effectiveStatus()` derives display status from outcome at read time.
+
+35. *(→ SPEC §10.10 item 6 + `frontend/CLAUDE.md`)* Tailwind + shadcn rearchitecture;
+    global CSS deleted. Don't reintroduce global semantic class names — they collide
+    with Tailwind utilities silently.
+
+36. **Cron pipeline defaults + UTC midnight caveat.** Stages previously had
+    `--input required=True` — every bare cron line errored. Now have sensible UTC-date
+    defaults. `cli/dedupe.py` is an empty stub (prefilter deduplicates). **Don't
+    schedule cron near 00:00 UTC** — date-keyed stages would split across two timestamps.
+
+37. *(→ SPEC §10.10 item 7 + §10.11)* Manual fit override + annotation visibility.
+    Key invariant: `fit_override` reason lives in event `notes`, folded separately from
+    workflow notes so they never clobber each other. `GET /api/index` overlay now
+    re-resolves live fit override **and** refreshes embedded annotations (revises
+    deviation 29).
+
 
 ## Schema summary
 
