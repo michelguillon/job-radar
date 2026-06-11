@@ -176,7 +176,10 @@ OUTCOME = frozenset(
 # and do NOT bump SCHEMA_VERSION (same pattern as OUTCOME).
 ANNOTATION_LOG_VERSION = 1
 
-# What a flag asserts is wrong (job_radar_SPEC §10.2 table).
+# What a flag asserts is wrong (job_radar_SPEC §10.2 table). ``rejection_reason`` is a
+# parallel use of the same sink (job_radar_SPEC §11.1 / BACKLOG §2): not a scorer
+# disagreement but *why the owner didn't pursue a role despite the score* — the
+# structured reason travels in the annotation's ``reason`` field (a REJECTION_REASON value).
 ANNOTATION_TYPE = frozenset(
     {
         "role_type_incorrect",
@@ -187,6 +190,25 @@ ANNOTATION_TYPE = frozenset(
         "should_be_blocked",
         "false_block",
         "extraction_other",
+        "rejection_reason",  # why I didn't pursue despite the score
+    }
+)
+
+# Structured reasons for a ``rejection_reason`` annotation (BACKLOG §2). Used for
+# client-side UI validation and cli.analyse reporting; the API validates it for the
+# rejection_reason type only (otherwise ``reason`` stays free text).
+REJECTION_REASON = frozenset(
+    {
+        "wrong_level",
+        "wrong_function",
+        "too_salesy",
+        "too_research_heavy",
+        "too_delivery_consulting",
+        "domain_not_interesting",
+        "company_not_fit",
+        "seniority_mismatch",
+        "location_mismatch",
+        "other",
     }
 )
 
@@ -244,8 +266,11 @@ def validate_annotation_event(event: dict) -> list[str]:
     atype = event.get("annotation_type")
     if atype not in ANNOTATION_TYPE:
         errors.append(f"annotation_type: {atype!r} not in {sorted(ANNOTATION_TYPE)}")
-    if not isinstance(event.get("field"), str):
-        errors.append("field: must be a string")
+    # field is the extraction field a flag is about; a rejection_reason is about the whole
+    # role, not a field, so it carries null. Allow str or None (a wrong *type* still fails).
+    field = event.get("field")
+    if field is not None and not isinstance(field, str):
+        errors.append("field: must be a string or null")
     for name in ("observed", "expected"):
         if name not in event:
             errors.append(f"{name}: required")

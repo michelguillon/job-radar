@@ -1844,5 +1844,44 @@ exception-free output (skipping when the gitignored corpus is absent). +11 tests
 
 ---
 
+### Rejection reasons — a second use of one sink, not a second sink
+
+**Context:** Recording *why a role wasn't pursued despite its score* ("scores strong_fit 9
+but it's too salesy"). The instinct is a new endpoint/file/schema; instead it is a new
+`ANNOTATION_TYPE` (`rejection_reason`) flowing through the existing `POST /api/annotations`
++ `annotations.jsonl`, with a `REJECTION_REASON` vocabulary in the structured `reason` field.
+
+#### Decisions / surprises
+
+- **One sink, two meanings, kept apart by `annotation_type`.** A scoring annotation says
+  "the system is wrong about a field"; a rejection_reason says "the system is right but I'm
+  out for this reason". They share storage and the dedup rule (`job_id`+`type`+`field`+
+  `reason`) but stay distinguishable by type — so the analyse report can scope to one without
+  a schema split. Adding a use case to an existing append-only log beat inventing a parallel
+  one, the same way the activity log carries status/outcome/note/title/fit_override.
+- **`field: null` forced a validator relaxation.** A rejection is about the *whole role*, not
+  a field, so it carries `field: null` — but `validate_annotation_event` required `field` to
+  be a string and `AnnotationRequest.field` was `str` (Pydantic would 422 a null before the
+  handler). Relaxed both to `str | None`, keeping the "wrong *type* still fails" guard (a
+  numeric field still errors). A new value in a shared structure surfaces assumptions the
+  original callers never exercised.
+- **Type-specific validation, by design only here.** The API validates `reason` against the
+  vocab *only* for `rejection_reason`; every other annotation type keeps `reason` free text.
+  Structured-where-it-matters beats forcing a closed vocab on the free-form flags.
+- **A layout mock is not a data contract.** The build prompt's UI sketch showed an optional
+  free-text notes field on the rejection control, but neither the annotation record nor the
+  POST body has a destination for it — including the input would silently drop user text. I
+  omitted it (structured `reason` is the payload) and recorded the divergence (deviation 39)
+  rather than add a field that goes nowhere.
+
+#### Reusable pattern
+
+Before adding an endpoint/file/schema for a "new" kind of record, ask whether it is the same
+*shape* as an existing append-only log with a different *meaning* — if so, add a type/enum
+value and let the consumer scope by it. The cost is auditing the shared validators for
+assumptions the new value breaks (here, `field` non-null). +8 tests (400 total); `tsc -b` clean.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

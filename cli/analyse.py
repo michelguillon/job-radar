@@ -29,7 +29,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 
-from cli.stats import STATS_PATH, load_cost_to_date
+from cli.stats import ANNOTATIONS_PATH, STATS_PATH, load_annotations, load_cost_to_date
 from cli.track import (
     LOG_PATH,
     META_GLOB,
@@ -190,6 +190,35 @@ def company_report(scores: dict, by_job: dict[str, str], workflow: dict) -> list
     return sorted(rows.values(), key=lambda r: (-r["jobs"], r["company"].lower()))
 
 
+def rejection_report(annotations: dict[str, list[dict]], by_job: dict[str, str]) -> dict:
+    """Aggregate ``rejection_reason`` annotations: total recorded, distinct rejected
+    roles, reason frequency, and per-company counts + reason breakdown.
+
+    ``annotations`` is the load_annotations projection (job_id → list of annotation
+    dicts); only ``annotation_type == "rejection_reason"`` entries are counted."""
+    reasons = Counter()
+    roles: set[str] = set()
+    company_counts = Counter()
+    company_reasons: dict[str, Counter] = {}
+    for job_id, anns in annotations.items():
+        for a in anns:
+            if a.get("annotation_type") != "rejection_reason":
+                continue
+            reason = a.get("reason")
+            reasons[reason] += 1
+            roles.add(job_id)
+            company = by_job.get(job_id, "(unknown)")
+            company_counts[company] += 1
+            company_reasons.setdefault(company, Counter())[reason] += 1
+    return {
+        "total": sum(reasons.values()),
+        "role_count": len(roles),
+        "reasons": reasons,
+        "company_counts": company_counts,
+        "company_reasons": company_reasons,
+    }
+
+
 def gaps_report(scores: dict) -> dict:
     """Blocking-constraint + requirement-gap frequency, scoped per the report."""
     blocked = [s for s in scores.values() if s.fit_label == "blocked_fit"]
@@ -317,7 +346,7 @@ def format_companies(scores, by_job, workflow, *, today: str) -> str:
     return "\n".join(lines)
 
 
-def format_gaps(scores, *, today: str) -> str:
+def format_gaps(scores, *, today: str, annotations=None, by_job=None) -> str:
     g = gaps_report(scores)
     lines = [
         f"REQUIREMENT GAPS & BLOCKERS — {today}",
@@ -329,6 +358,20 @@ def format_gaps(scores, *, today: str) -> str:
     lines += _counter_block(g["requirement_gaps"], top=10)
     lines += ["", f"Gaps appearing in strong_fit roles ({g['strong_role_count']} roles — worth addressing):"]
     lines += _counter_block(g["strong_fit_gaps"], top=10)
+
+    # Rejection reasons (BACKLOG §2) — only when at least one is recorded (no zero-noise).
+    rej = rejection_report(annotations or {}, by_job or {})
+    if rej["total"]:
+        lines += ["", f"REJECTION REASONS — {rej['total']} recorded across {rej['role_count']} rejected roles", ""]
+        rwidth = max(len(str(r)) for r, _ in rej["reasons"].most_common())
+        for reason, count in rej["reasons"].most_common():
+            lines.append(f"  {str(reason):<{rwidth}}  {count:>3}   ({_pct(count, rej['total']):>2}%)")
+        lines += ["", "Most-rejected companies:"]
+        ranked = rej["company_counts"].most_common(10)
+        cwidth = max(len(c) for c, _ in ranked)
+        for company, count in ranked:
+            breakdown = ", ".join(f"{r} ×{n}" for r, n in rej["company_reasons"][company].most_common())
+            lines.append(f"  {company:<{cwidth}}  {count}  ({breakdown})")
     return "\n".join(lines)
 
 
@@ -357,14 +400,14 @@ def load_cost_and_jobs(stats_path: str = STATS_PATH) -> tuple[float | None, int]
 
 
 def build_reports(report: str, scores, jds, metas, workflow, *, today: str, now: datetime,
-                  cost: float | None, cost_per_job: float | None) -> list[str]:
+                  cost: float | None, cost_per_job: float | None, annotations=None) -> list[str]:
     """Return the requested report(s) as a list of rendered blocks."""
     by_job = companies_by_job(scores, jds)
     blocks: dict[str, str] = {
         "score-distribution": lambda: format_score_distribution(scores, by_job, today=today, cost=cost, cost_per_job=cost_per_job),
         "status": lambda: format_status(scores, jds, metas, workflow, today=today, now=now),
         "companies": lambda: format_companies(scores, by_job, workflow, today=today),
-        "gaps": lambda: format_gaps(scores, today=today),
+        "gaps": lambda: format_gaps(scores, today=today, annotations=annotations, by_job=by_job),
     }
     order = ["score-distribution", "status", "companies", "gaps"] if report == "all" else [report]
     return [blocks[name]() for name in order]
@@ -378,6 +421,7 @@ def cmd_analyse(argv: list[str], *, now=_now, out=print) -> int:
     parser.add_argument("--validated", default=VALIDATED_GLOB, help=f"Glob for validated JDs (default: {VALIDATED_GLOB})")
     parser.add_argument("--meta", default=META_GLOB, help=f"Glob for metadata sidecars (default: {META_GLOB})")
     parser.add_argument("--log", default=LOG_PATH, help=f"Activity log path (default: {LOG_PATH})")
+    parser.add_argument("--annotations", default=ANNOTATIONS_PATH, help=f"Annotations log (default: {ANNOTATIONS_PATH})")
     parser.add_argument("--stats-file", default=STATS_PATH, dest="stats_file", help=f"Cost ledger (default: {STATS_PATH})")
     args = parser.parse_args(argv)
 
@@ -385,6 +429,7 @@ def cmd_analyse(argv: list[str], *, now=_now, out=print) -> int:
     jds = load_jdrecords(args.validated)
     metas = load_meta(args.meta)
     workflow = project(load_events(args.log))
+    annotations = load_annotations(args.annotations)
 
     if not scores:
         out("(no scored jobs found — run the pipeline first)")
@@ -396,7 +441,8 @@ def cmd_analyse(argv: list[str], *, now=_now, out=print) -> int:
     now_dt = now()
     today = now_dt.strftime("%Y-%m-%d")
     blocks = build_reports(args.report, scores, jds, metas, workflow,
-                           today=today, now=now_dt, cost=cost, cost_per_job=cost_per_job)
+                           today=today, now=now_dt, cost=cost, cost_per_job=cost_per_job,
+                           annotations=annotations)
     out(("\n\n" + "=" * 72 + "\n\n").join(blocks))
     return 0
 

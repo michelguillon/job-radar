@@ -143,7 +143,7 @@ export interface Capabilities {
 export interface AnnotationPayload {
   job_id: string;
   annotation_type: string;
-  field: string;
+  field: string | null;   // null for a rejection_reason (about the role, not a field)
   observed: unknown;
   expected: unknown;
   reason: string;

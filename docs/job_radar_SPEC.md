@@ -2294,13 +2294,18 @@ notes: "..."                       # free text
 `fintech_infrastructure` · `identity_security` · `enterprise_software` ·
 `adtech_martech` · `semiconductor_ai_compute` · `strategic_ai_delivery`
 
-### Rejection reasons (post-deployment)
+### Rejection reasons ✅ built
 
-Add `rejection_reason` to `ANNOTATION_TYPE` in `models/record.py` (constants
-only, no schema bump). Vocabulary: `wrong_level` · `wrong_function` ·
-`too_salesy` · `too_research_heavy` · `too_delivery_consulting` ·
-`domain_not_interesting` · `company_not_fit` · `seniority_mismatch` ·
-`location_mismatch` · `other`.
+`rejection_reason` is now an `ANNOTATION_TYPE` (constants only, no schema bump) whose
+structured `reason` is a `REJECTION_REASON` value — `wrong_level` · `wrong_function` ·
+`too_salesy` · `too_research_heavy` · `too_delivery_consulting` · `domain_not_interesting` ·
+`company_not_fit` · `seniority_mismatch` · `location_mismatch` · `other` — recording *why a
+role wasn't pursued despite its score*. It reuses the existing `POST /api/annotations`
+endpoint and `annotations.jsonl` sink (no new endpoint/file); the API validates the value for
+this type only (others keep free-text `reason`), a `rejection_reason` carries `field: null`,
+the detail panel surfaces a reason dropdown when a role is `rejected`, and `cli.analyse
+--report gaps` shows a rejection-reasons section (frequency + most-rejected companies) only
+when ≥1 is recorded. See CLAUDE.md deviation 39.
 
 ### cv-tailor integration signal (post-deployment design decision)
 

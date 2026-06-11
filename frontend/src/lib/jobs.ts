@@ -141,6 +141,22 @@ export function rejectionStageFor(status: string): string {
   }
 }
 
+// Structured rejection reasons (models/record.py REJECTION_REASON) — why a role wasn't
+// pursued despite its score. Recorded as a rejection_reason annotation (BACKLOG §2);
+// label → value, value validated server-side for the rejection_reason type.
+export const REJECTION_REASONS: Array<{ label: string; value: string }> = [
+  { label: "Wrong level", value: "wrong_level" },
+  { label: "Wrong function", value: "wrong_function" },
+  { label: "Too sales-focused", value: "too_salesy" },
+  { label: "Too research-heavy", value: "too_research_heavy" },
+  { label: "Too delivery/consulting", value: "too_delivery_consulting" },
+  { label: "Domain not interesting", value: "domain_not_interesting" },
+  { label: "Company not a fit", value: "company_not_fit" },
+  { label: "Seniority mismatch", value: "seniority_mismatch" },
+  { label: "Location mismatch", value: "location_mismatch" },
+  { label: "Other", value: "other" },
+];
+
 // When an outcome is recorded, the workflow lane it implies (model C keeps them separate,
 // but the UI moves the lane too so the pipeline reflects reality). null = leave lane as-is.
 export function statusForOutcome(outcome: string): string | null {

@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { CHIP, fitBadgeClass, statusPillClass, TOAST } from "@/lib/ui";
 import {
   daysSince, effectiveStatus, FIT_LABELS, fmtDate, isStaleApplied, LABEL_TEXT, listText,
-  OUTCOMES, rejectionStageFor, statusForOutcome,
+  OUTCOMES, REJECTION_REASONS, rejectionStageFor, statusForOutcome,
 } from "@/lib/jobs";
 import { useUnlock } from "@/components/UnlockProvider";
 
@@ -85,12 +85,22 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
   const [fitReason, setFitReason] = useState(job.user_fit_reason || "");
   const [editingOverride, setEditingOverride] = useState(false);
 
+  // Latest recorded rejection reason for this role (annotations are append-only, so the
+  // most recent rejection_reason entry is the current one).
+  const rejectionAnns = (job.annotations || []).filter((a) => a.annotation_type === "rejection_reason");
+  const recordedReason = rejectionAnns.length ? String(rejectionAnns[rejectionAnns.length - 1].reason) : null;
+  const [rejToast, setRejToast] = useState<Toast>(null);
+  const [rejReason, setRejReason] = useState(recordedReason || "");
+  const [showReject, setShowReject] = useState(false);     // revealed after clicking Rejected
+  const [editingReject, setEditingReject] = useState(false);
+
   useEffect(() => {
     setNoteText(job.notes || ""); setTitleText(job.title || "");
     setFlagType(ANNOTATION_TYPES[0]); setExpected(""); setReason("");
     setOutcomeSel(rejectionStageFor(job.application_status)); setOutcomeNotes("");
     setFitSel(job.user_fit_label || job.scorer_fit_label); setFitReason(job.user_fit_reason || "");
     setEditingOverride(false);
+    setRejReason(recordedReason || ""); setShowReject(false); setEditingReject(false); setRejToast(null);
     setToast(null); setFlagToast(null);
   }, [job.job_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -139,6 +149,15 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
     setEditingOverride(false);
     return { kind: "ok", text: "Override cleared" };
   });
+  const recordRejection = () => guarded(async () => {
+    if (!rejReason) return { kind: "err", text: "Select a reason" };
+    await api.flagAnnotation({
+      job_id: job.job_id, annotation_type: "rejection_reason", field: null,
+      observed: [job.scorer_fit_label, String(job.scorer_fit_score)], expected: [], reason: rejReason,
+    });
+    setEditingReject(false);
+    return { kind: "ok", text: `Rejection reason recorded: ${rejReason.replace(/_/g, " ")}` };
+  }, setRejToast);
   const submitFlag = () => guarded(async () => {
     if (!reason.trim()) return { kind: "err", text: "Reason is required" };
     const { field, observed } = observedFor(flagType, job);
@@ -210,7 +229,7 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
           <span className={wcLabel}>Status</span>
           <div className="flex flex-wrap gap-[6px]">
             {STATUS_BTNS.map((b) => (
-              <button key={b.value} disabled={busy} onClick={() => setStatus(b.value)}
+              <button key={b.value} disabled={busy} onClick={() => { setStatus(b.value); if (b.value === "rejected") setShowReject(true); }}
                 className={cn(
                   "rounded-md border px-[11px] py-[5px] text-[12.5px] font-semibold disabled:opacity-50",
                   eff === b.value ? "border-brand bg-brand text-white"
@@ -259,6 +278,32 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
 
         {toast && <div className={cn("mt-2 rounded-md px-[9px] py-[6px] text-[12px]", TOAST[toast.kind])}>{toast.text}</div>}
       </div>
+
+      {(eff === "rejected" || showReject) && (
+        <div className="mt-[18px] rounded-lg border border-line bg-[#fbfcfe] p-[14px]">
+          <h3 className="mb-[8px] text-[11px] font-bold uppercase tracking-wide text-brand">Rejection reason</h3>
+          {recordedReason && !editingReject ? (
+            <div className="flex flex-wrap items-center gap-2 text-[13px]">
+              <span className="text-ink-soft">Already recorded:</span>
+              <span className="rounded-[5px] bg-[#f3e9e9] px-2 py-px text-[12px] font-semibold text-[#9a5252]">{recordedReason.replace(/_/g, " ")}</span>
+              <button className={BTN} onClick={() => setEditingReject(true)} disabled={busy}>Edit</button>
+            </div>
+          ) : (
+            <>
+              <p className="mb-[8px] text-[12.5px] text-ink-soft">Why didn't you pursue this?</p>
+              <div className="flex flex-wrap items-end gap-2">
+                <select className={cn(FIELD_INPUT, "w-auto min-w-[200px]")} value={rejReason} disabled={busy} onChange={(e) => setRejReason(e.target.value)}>
+                  <option value="">— select reason —</option>
+                  {REJECTION_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+                <button className={BTN_PRIMARY} onClick={recordRejection} disabled={busy}>Record reason</button>
+                {editingReject && <button className={BTN} onClick={() => setEditingReject(false)} disabled={busy}>Cancel</button>}
+              </div>
+            </>
+          )}
+          {rejToast && <div className={cn("mt-2 rounded-md px-[9px] py-[6px] text-[12px]", TOAST[rejToast.kind])}>{rejToast.text}</div>}
+        </div>
+      )}
 
       <div className="mt-[18px] rounded-lg border border-line bg-[#fbfcfe] p-[14px]">
         <h3 className="mb-[10px] text-[11px] font-bold uppercase tracking-wide text-brand">

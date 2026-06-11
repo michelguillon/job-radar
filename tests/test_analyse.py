@@ -160,6 +160,45 @@ def test_gaps_report_aggregation():
     assert g["strong_fit_gaps"]["deployment methodology"] == 1
 
 
+# --- rejection reasons (gaps report section) -----------------------------------
+
+def _rej(job_id, reason):
+    return {"annotation_type": "rejection_reason", "field": None, "reason": reason}
+
+
+def test_rejection_report_aggregates_reasons_and_companies():
+    annotations = {
+        "j1": [_rej("j1", "too_salesy")],
+        "j2": [_rej("j2", "too_salesy"), {"annotation_type": "domain_incorrect", "reason": "x"}],
+        "j3": [_rej("j3", "wrong_function")],
+    }
+    by_job = {"j1": "CoreWeave", "j2": "CoreWeave", "j3": "xAI"}
+    rep = analyse.rejection_report(annotations, by_job)
+    assert rep["total"] == 3              # the domain_incorrect annotation is not counted
+    assert rep["role_count"] == 3
+    assert rep["reasons"]["too_salesy"] == 2
+    assert rep["company_counts"]["CoreWeave"] == 2
+    assert rep["company_reasons"]["CoreWeave"]["too_salesy"] == 2
+
+
+def test_gaps_report_includes_rejection_reasons():
+    scores = {"j1": _score("j1", label="strong_fit"), "j2": _score("j2", label="good_fit")}
+    annotations = {"j1": [_rej("j1", "too_salesy")], "j2": [_rej("j2", "domain_not_interesting")]}
+    by_job = {"j1": "Mistral", "j2": "Stripe"}
+    text = analyse.format_gaps(scores, today="2026-06-11", annotations=annotations, by_job=by_job)
+    assert "REJECTION REASONS — 2 recorded across 2 rejected roles" in text
+    assert "too_salesy" in text and "domain_not_interesting" in text
+    assert "Most-rejected companies:" in text
+
+
+def test_gaps_report_omits_rejection_section_when_none():
+    scores = {"j1": _score("j1", label="blocked_fit", blockers=["x"])}
+    text = analyse.format_gaps(scores, today="2026-06-11", annotations={}, by_job={"j1": "Acme"})
+    assert "REJECTION REASONS" not in text
+    # the rest of the gaps report still renders
+    assert "REQUIREMENT GAPS & BLOCKERS" in text
+
+
 # --- cost ----------------------------------------------------------------------
 
 def test_load_cost_and_jobs(tmp_path):

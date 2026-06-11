@@ -30,6 +30,7 @@ def test_annotation_type_is_the_spec_set():
         "role_type_incorrect", "domain_incorrect", "seniority_incorrect",
         "technical_depth_incorrect", "fit_score_disagree", "should_be_blocked",
         "false_block", "extraction_other",
+        "rejection_reason",  # parallel use: why the role wasn't pursued (BACKLOG §2)
     })
 
 

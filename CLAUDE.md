@@ -246,6 +246,18 @@ Kept in full: everything below — active operational guards Claude Code must kn
     it shows **all** companies and suppresses *rates* below 5 scored jobs (the shortlist-rate
     ranking needs ≥5 reviewed) — no "min jobs to appear" filter.
 
+39. *(→ SPEC §11.1 + BACKLOG §2)* Rejection reasons reuse the annotations sink — a
+    `rejection_reason` `ANNOTATION_TYPE` + `REJECTION_REASON` vocab (constants only, no schema
+    bump), recording *why a role wasn't pursued despite its score*. Same `POST /api/annotations`
+    + `annotations.jsonl` (no new endpoint/file). Notable points: (a) `annotation_type ==
+    "rejection_reason"` is the **only** type whose `reason` the API validates (against
+    `REJECTION_REASON`); all others keep free-text `reason`. (b) A rejection_reason carries
+    `field: null` — `validate_annotation_event` was relaxed to allow `field` ∈ {str, None}
+    (a wrong *type* still fails), and `AnnotationRequest.field` is now `str | None`. (c) The UI
+    control **omits a free-text notes field** (the layout mock showed one, but the annotation
+    record + POST body carry no notes destination — the structured `reason` is the payload).
+    (d) `cli.analyse --report gaps` shows the rejection section only when ≥1 is recorded.
+
 
 ## Schema summary
 

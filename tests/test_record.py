@@ -12,8 +12,10 @@ import pytest
 
 from models.record import (
     ACTIVITY_EVENT,
+    ANNOTATION_TYPE,
     JDRECORD_SCHEMA_VERSION,
     OUTCOME,
+    REJECTION_REASON,
     SCHEMA_VERSION,
     ApplicationRecord,
     JDRecord,
@@ -285,6 +287,19 @@ def _status_event(**over) -> dict:
 def test_outcome_and_activity_event_vocab_are_closed():
     assert "rejected_post_screen" in OUTCOME
     assert ACTIVITY_EVENT == {"status", "outcome", "note", "title", "fit_override"}
+
+
+def test_rejection_reason_in_annotation_type():
+    assert "rejection_reason" in ANNOTATION_TYPE
+
+
+def test_rejection_reason_vocab_complete():
+    assert REJECTION_REASON == frozenset({
+        "wrong_level", "wrong_function", "too_salesy", "too_research_heavy",
+        "too_delivery_consulting", "domain_not_interesting", "company_not_fit",
+        "seniority_mismatch", "location_mismatch", "other",
+    })
+    assert len(REJECTION_REASON) == 10
 
 
 @pytest.mark.parametrize(

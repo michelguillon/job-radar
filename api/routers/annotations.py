@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from api.security import require_unlocked
 from api.settings import Settings, get_settings
 from cli.track import _clock, append_event, load_events, load_scores
-from models.record import ANNOTATION_LOG_VERSION, validate_annotation_event
+from models.record import ANNOTATION_LOG_VERSION, REJECTION_REASON, validate_annotation_event
 
 router = APIRouter(prefix="/api", tags=["annotations"], dependencies=[Depends(require_unlocked)])
 
@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api", tags=["annotations"], dependencies=[Depends(re
 class AnnotationRequest(BaseModel):
     job_id: str
     annotation_type: str
-    field: str
+    field: str | None = None  # null for a rejection_reason (about the role, not a field)
     observed: Any = None
     expected: Any = None
     reason: str
@@ -38,6 +38,12 @@ def flag(body: AnnotationRequest, settings: Settings = Depends(get_settings)) ->
     score = scores.get(body.job_id)
     if score is None:
         raise HTTPException(status_code=404, detail=f"job_id not found in scored corpus: {body.job_id}")
+
+    # A rejection_reason reuses this sink to record *why a role wasn't pursued* (BACKLOG §2):
+    # its `reason` is a structured REJECTION_REASON value, not free text — validate it here
+    # (the only type-specific server validation; all other types keep `reason` free-form).
+    if body.annotation_type == "rejection_reason" and body.reason not in REJECTION_REASON:
+        raise HTTPException(status_code=422, detail=f"reason must be one of {sorted(REJECTION_REASON)}")
 
     # Duplicate prevention (job_radar_SPEC §10.11 Feature 2): an exact duplicate is the
     # same job_id + annotation_type + field + reason. The UI warns client-side from the

@@ -261,6 +261,42 @@ def test_annotation_bad_type_422(client, monkeypatch):
     assert r.status_code == 422
 
 
+def test_rejection_reason_valid(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    r = client.post("/api/annotations", json={
+        "job_id": "sha256:j1", "annotation_type": "rejection_reason", "field": None,
+        "observed": ["good_fit", "7"], "expected": [], "reason": "too_salesy",
+    })
+    assert r.status_code == 200
+    rec = track.load_events(client.settings.annotations_path)[0]
+    assert rec["annotation_type"] == "rejection_reason"
+    assert rec["reason"] == "too_salesy"
+    assert rec["field"] is None
+    assert rec["scorer_label"] == "good_fit"  # captured server-side
+
+
+def test_rejection_reason_invalid_reason(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    r = client.post("/api/annotations", json={
+        "job_id": "sha256:j1", "annotation_type": "rejection_reason", "field": None,
+        "observed": [], "expected": [], "reason": "not_a_reason",
+    })
+    assert r.status_code == 422
+
+
+def test_rejection_reason_duplicate(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    payload = {"job_id": "sha256:j1", "annotation_type": "rejection_reason", "field": None,
+               "observed": [], "expected": [], "reason": "too_salesy"}
+    assert client.post("/api/annotations", json=payload).status_code == 200
+    assert client.post("/api/annotations", json=payload).status_code == 409  # exact dup
+    # a different reason for the same job is not a duplicate
+    assert client.post("/api/annotations", json={**payload, "reason": "wrong_function"}).status_code == 200
+
+
 def test_annotation_unknown_job_id_404(client, monkeypatch):
     monkeypatch.setenv("JR_WRITE_KEY", KEY)
     _unlock(client)
