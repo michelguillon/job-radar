@@ -2409,6 +2409,146 @@ dimensions insufficient.
 
 ---
 
+## 11.3 — Job Radar ↔ cv-tailor Integration (three phases)
+
+**Full spec:** uploaded as a standalone document (cv-tailor integration spec).
+
+**Build order:** Phase 1 → use for 5–10 real applications → Phase 2 → Phase 3
+only after both tools are stable in daily use. Do not build Phase 3 before
+Phase 1 data proves which metrics are worth tracking.
+
+---
+
+### Phase 1 — Manual cv-tailor metrics in Job Radar
+
+**Trigger:** Unblocked now. Build after rejection reasons and yield tracking
+are stable.
+
+**Goal:** Allow recording cv-tailor run metrics against a Job Radar role after
+an application package has been generated. Creates the data model before any
+API integration.
+
+**Storage:** New append-only file `corpus/cv_tailor_links.jsonl`. Do not
+mutate JDRecord, ApplicationRecord, or cv-tailor output files.
+
+**Record format:**
+```json
+{
+  "v": 1,
+  "ts": "2026-06-11T12:00:00Z",
+  "job_id": "sha256:abc123",
+  "cv_tailor_run_id": "run_20260611_001",
+  "cv_tailor_score": 0.72,
+  "coverage_score": 0.81,
+  "grounding_score": 0.96,
+  "cvcm_enabled": true,
+  "tailoring_mode": "full",
+  "output_link": "https://cv-tailor.../runs/run_20260611_001",
+  "notes": "Good output, but profile needed manual tightening around AI depth.",
+  "source": "manual"
+}
+```
+
+**Note on schema stability:** `cv_tailor_score`, `coverage_score`,
+`grounding_score` are cv-tailor internal metrics tied to its current rubric
+version. If cv-tailor's rubric evolves, these field names may drift. Record the
+cv-tailor run ID so the source of truth remains in cv-tailor; the fields here
+are a summary snapshot, not a canonical store.
+
+**New API endpoint:**
+```
+POST /api/cv-tailor-results    # owner-protected (capability cookie)
+GET  /api/jobs/{job_id}        # read-only, public — returns job detail for
+                               # cv-tailor Phase 2 handoff
+```
+
+**Read model:** `stats.py --export-index` joins latest cv-tailor link per
+`job_id`, exposes `cv_tailor.has_output`, `cv_tailor.cv_score`,
+`cv_tailor.coverage_score`, etc. If none: `cv_tailor: {has_output: false}`.
+
+**UI:** Detail panel shows cv-tailor metrics (read-only for public, add/edit
+for owner). "Add CV-Tailor metrics" control owner-gated same as all writes.
+
+**Definition of Done:**
+- Owner can manually add cv-tailor metrics from Job Radar detail panel
+- Metrics append to `corpus/cv_tailor_links.jsonl`
+- Latest metrics appear in the role detail panel
+- `GET /api/jobs/{job_id}` returns job detail (for Phase 2 prep)
+- Existing scoring and tracking unchanged
+
+---
+
+### Phase 2 — Open job in cv-tailor
+
+**Trigger:** After 5–10 real Phase 1 applications — confirm data model is
+correct before building the handoff.
+
+**Goal:** "Open in CV-Tailor" button in Job Radar detail panel. Opens cv-tailor
+with the selected JD preloaded via job_id reference — no JD text in the URL
+(avoids length limits, encoding issues, browser history leakage, and
+duplicated source of truth).
+
+**URL pattern:**
+```
+https://cv-tailor.michel-portfolio.co.uk/new?source=job_radar&job_id=<job_id>
+```
+
+cv-tailor calls `GET /api/jobs/{job_id}` to fetch the JD, populates its input
+field, and stores the `job_id` reference. If the fetch fails: show error, allow
+manual paste, do not create an empty run.
+
+**No Job Radar changes needed** beyond `GET /api/jobs/{job_id}` (built in
+Phase 1). Phase 2 is primarily a cv-tailor build.
+
+---
+
+### Phase 3 — cv-tailor sends results back to Job Radar
+
+**Trigger:** Both tools stable in daily use. Phase 1 data confirms which metrics
+are worth tracking.
+
+**Goal:** When a cv-tailor run completes (and has `source=job_radar` + `job_id`),
+cv-tailor POSTs summary metrics to Job Radar. Closes the loop:
+Job Radar prediction → cv-tailor output → application outcome → future calibration.
+
+**Auth:** The HttpOnly cookie pattern (browser-based) does not apply to
+machine-to-machine calls. Use a **shared service secret** — a `CV_TAILOR_SERVICE_KEY`
+env var on Job Radar, sent as a `Bearer` token by cv-tailor. Separate from the
+owner write key. Do not expose `POST /api/cv-tailor-results` unauthenticated.
+
+**Storage:** Same `corpus/cv_tailor_links.jsonl`, same schema as Phase 1 manual
+records. Add `"source": "cv_tailor_api"` to distinguish. Multiple runs per job
+preserved; latest shown as primary, history collapsed below.
+
+**Failure handling:** A failed callback must not break cv-tailor run completion.
+cv-tailor shows a warning and allows retry; Job Radar is not in the critical path.
+
+---
+
+### Boundaries (both systems)
+
+Job Radar does not: generate CVs, store full generated CV documents, edit
+cv-tailor outputs, or score CV quality itself.
+
+cv-tailor does not: decide whether a job is worth applying to, mutate Job Radar
+fit scores, update Job Radar application status, or become a job tracker.
+
+---
+
+### Future use
+
+Once enough applications exist, this linkage enables:
+- Do high Job Radar fit scores lead to better cv-tailor scores?
+- Do high cv-tailor scores correlate with interviews?
+- Do Product roles convert differently from Solutions roles?
+- Are some companies high-fit but low-conversion?
+- Does CVCM improve application outcomes?
+
+The immediate reason is simpler: Job Radar should know whether a shortlisted
+role has already gone through cv-tailor.
+
+---
+
 ## 12. Relationship to cv-tailor
 
 cv-tailor is live in production. It is not modified as part of this
