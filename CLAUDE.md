@@ -297,6 +297,16 @@ Kept in full: everything below — active operational guards Claude Code must kn
     write controls are hidden; Add/Edit affordances gate on `unlocked`. (e) New settings field
     `cv_tailor_links_path` (`JR_CV_TAILOR_LINKS_PATH`), defaulted to the `cli.stats` constant.
 
+42. *(Phase 6 — security refactor)* Per-route gating replaces router-level
+    gating for all write endpoints. `require_unlocked` is now declared on
+    each individual POST route, not at the APIRouter constructor. This
+    makes the security decision explicit at the point of definition and
+    prevents accidental gating of intentionally-public GET endpoints.
+    Introduced by the cv_tailor.py pattern (deviation 41) and applied
+    consistently across workflow.py and annotations.py. No behaviour
+    change — same endpoints protected, same endpoints public. Convention:
+    `api/CLAUDE.md` "Endpoint security — per-route gating rule".
+
 
 ## Schema summary
 

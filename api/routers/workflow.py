@@ -4,8 +4,9 @@ Task-oriented endpoints (status / note / title) over the SAME append-only event 
 CLI uses. Each reuses cli.track: build_event (which runs validate_activity_event) →
 append_event. The API adds nothing the CLI doesn't already do — it is one more write path
 over corpus/activity_log.jsonl, not a second source of truth. Every endpoint is gated on
-the capability cookie (require_unlocked) and 404s an unknown job_id (the CLI's --force
-escape hatch is intentionally not exposed over HTTP).
+the capability cookie **per-route** (`dependencies=[Depends(require_unlocked)]` on each POST,
+not at the router level — api/CLAUDE.md "per-route gating rule", deviation 42) and 404s an
+unknown job_id (the CLI's --force escape hatch is intentionally not exposed over HTTP).
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from cli.track import (
     transition_warning,
 )
 
-router = APIRouter(prefix="/api", tags=["workflow"], dependencies=[Depends(require_unlocked)])
+router = APIRouter(prefix="/api", tags=["workflow"])
 
 
 class StatusRequest(BaseModel):
@@ -73,7 +74,7 @@ def _append(log_path: str, job_id: str, *, event: str, value, notes: str) -> dic
     return record
 
 
-@router.post("/status")
+@router.post("/status", dependencies=[Depends(require_unlocked)])
 def set_status(body: StatusRequest, settings: Settings = Depends(get_settings)) -> dict:
     """Move a job to a workflow status. Surfaces a (non-blocking) transition warning —
     real searches skip and backtrack stages (cli.track precedent: warn, never block)."""
@@ -84,7 +85,7 @@ def set_status(body: StatusRequest, settings: Settings = Depends(get_settings)) 
     return {"ok": True, "job_id": body.job_id, "status": body.status, "warning": warning}
 
 
-@router.post("/note")
+@router.post("/note", dependencies=[Depends(require_unlocked)])
 def add_note(body: NoteRequest, settings: Settings = Depends(get_settings)) -> dict:
     """Attach a pure note (no status change)."""
     _require_scored(body.job_id, settings.scored_glob)
@@ -92,7 +93,7 @@ def add_note(body: NoteRequest, settings: Settings = Depends(get_settings)) -> d
     return {"ok": True, "job_id": body.job_id}
 
 
-@router.post("/title")
+@router.post("/title", dependencies=[Depends(require_unlocked)])
 def set_title(body: TitleRequest, settings: Settings = Depends(get_settings)) -> dict:
     """Set a display-title override (presentation only — never scored)."""
     _require_scored(body.job_id, settings.scored_glob)
@@ -100,7 +101,7 @@ def set_title(body: TitleRequest, settings: Settings = Depends(get_settings)) ->
     return {"ok": True, "job_id": body.job_id, "title": body.title}
 
 
-@router.post("/outcome")
+@router.post("/outcome", dependencies=[Depends(require_unlocked)])
 def set_outcome(body: OutcomeRequest, settings: Settings = Depends(get_settings)) -> dict:
     """Record a terminal outcome (OUTCOME vocab — e.g. rejected_interview) with an optional
     reason. The granular outcome and the workflow status are orthogonal (model C): the UI
@@ -110,7 +111,7 @@ def set_outcome(body: OutcomeRequest, settings: Settings = Depends(get_settings)
     return {"ok": True, "job_id": body.job_id, "outcome": body.outcome}
 
 
-@router.post("/fit-override")
+@router.post("/fit-override", dependencies=[Depends(require_unlocked)])
 def set_fit_override(body: FitOverrideRequest, settings: Settings = Depends(get_settings)) -> dict:
     """Override the scorer's fit_label with the owner's assessment (job_radar_SPEC §10.11
     Feature 1). A workflow decision — it appends a fit_override event and NEVER mutates the

@@ -1990,5 +1990,19 @@ also serves a public read. +12 tests (430 total); full suite green; `tsc -b` cle
 
 ---
 
+### Per-route security gating > router-level (§10.4) — refactor 2026-06-11
+
+Moved `require_unlocked` off the APIRouter constructor and onto each individual write route
+(workflow.py, annotations.py), matching the cv_tailor.py pattern (deviation 41/42). Per-route
+gating is **more explicit** than router-level: the security decision is visible at the point of
+definition, every new endpoint forces a conscious public-vs-owner choice, and one router can
+safely mix a public GET with owner-only POSTs (the trigger — cv_tailor.py serves both). Pure
+refactor, zero behaviour change: same endpoints 403 without a cookie, same GETs public — the
+unchanged 430-test suite is the proof. Default for any new endpoint: owner-only unless the spec
+says "public" (then comment it). No PUT/PATCH exist — the model is append-only; a proposed
+mutation should be re-modelled as an append event first.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

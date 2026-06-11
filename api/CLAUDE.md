@@ -14,17 +14,38 @@ write path over the same JSONL the CLI appends to** — never a second source of
 - **Reuse, don't duplicate** write/validation logic. `build_event` runs
   `validate_activity_event`; annotations run `validate_annotation_event`. The CLI
   (`python -m cli.track`) stays a fully valid, equivalent write path over the same files.
-- **Fail-closed security.** Every write router carries
-  `dependencies=[Depends(require_unlocked)]`. No `JR_WRITE_KEY` → all writes 403. The
-  backend enforces — UI hiding is convenience only. Capability cookie `jr_write` is
-  stdlib-HMAC signed (NOT `itsdangerous`), HttpOnly, SameSite=lax, Secure via
-  `COOKIE_SECURE`, path `/api`. Copied/adapted from cv-tailor `api/security.py`.
+- **Fail-closed security, gated per-route.** Every write endpoint carries
+  `dependencies=[Depends(require_unlocked)]` **on the route** (not at the router level — see
+  "Endpoint security" below, deviation 42). No `JR_WRITE_KEY` → all writes 403. The backend
+  enforces — UI hiding is convenience only. Capability cookie `jr_write` is stdlib-HMAC signed
+  (NOT `itsdangerous`), HttpOnly, SameSite=lax, Secure via `COOKIE_SECURE`, path `/api`.
+  Copied/adapted from cv-tailor `api/security.py`.
 - **404, not --force.** Unknown `job_id` → 404 on every write (the CLI's `--force` escape
   hatch is intentionally not exposed over HTTP).
 - **Write endpoints** (all gated): `POST /api/status|note|title|outcome` (workflow.py,
   append to `activity_log.jsonl`) + `POST /api/annotations` (annotations.py →
   `annotations.jsonl`). `outcome` validates against `OUTCOME`; the UI pairs it with a
   `/api/status` call to move the workflow lane (the two are orthogonal under model C).
+
+## Endpoint security — per-route gating rule
+
+Every write endpoint (POST / future PUT / future PATCH) that modifies a
+corpus file or could kick off a pipeline stage MUST have
+`dependencies=[Depends(require_unlocked)]` declared on the route itself,
+not at the router level.
+
+Read endpoints (GET) that are intentionally public must have NO dependency.
+This makes the security decision visible at the point of definition.
+
+When adding a new endpoint, always ask: should this be public or
+owner-only? If the spec does not explicitly state "public", the endpoint
+is owner-only by default. If the spec says "public", add a comment:
+`# public — no auth required (see SPEC §X.X)`
+
+There are currently no PUT or PATCH endpoints in this API. The data model
+is append-only — writes always append new records, never mutate existing
+ones. If a PUT or PATCH is ever proposed, push back: can it be modelled
+as an append event instead?
 
 ## Read-only report downloads
 

@@ -4,7 +4,9 @@ A field-level scoring/extraction flag. It NEVER mutates an extraction — it rec
 the owner disagrees with one, with the scorer's verdict at flag time captured for later
 calibration (Phase 7). Appends to corpus/annotations.jsonl (a separate sink from the
 activity log — different purpose, different future consumer). Gated on the capability
-cookie; 404s an unknown job_id; validated against ANNOTATION_TYPE before append.
+cookie **per-route** (`dependencies=[Depends(require_unlocked)]` on the POST, not at the
+router level — api/CLAUDE.md "per-route gating rule", deviation 42); 404s an unknown
+job_id; validated against ANNOTATION_TYPE before append.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ from api.settings import Settings, get_settings
 from cli.track import _clock, append_event, load_events, load_scores
 from models.record import ANNOTATION_LOG_VERSION, REJECTION_REASON, validate_annotation_event
 
-router = APIRouter(prefix="/api", tags=["annotations"], dependencies=[Depends(require_unlocked)])
+router = APIRouter(prefix="/api", tags=["annotations"])
 
 
 class AnnotationRequest(BaseModel):
@@ -31,7 +33,7 @@ class AnnotationRequest(BaseModel):
     reason: str
 
 
-@router.post("/annotations")
+@router.post("/annotations", dependencies=[Depends(require_unlocked)])
 def flag(body: AnnotationRequest, settings: Settings = Depends(get_settings)) -> dict:
     """Append one scoring flag, capturing the scorer's current verdict for the job_id."""
     scores = load_scores(settings.scored_glob)

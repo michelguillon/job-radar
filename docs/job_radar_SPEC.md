@@ -1551,6 +1551,14 @@ before any scorer change.
 - Cookie: HMAC-signed, HttpOnly, SameSite=Lax, short expiry
 - Backend enforces: write endpoints return 403 without valid cookie even
   if UI is bypassed
+- **Per-route gating (as-built, deviation 42):** `require_unlocked` is declared
+  on each individual write route (`dependencies=[Depends(require_unlocked)]` on
+  the POST), **not** at the router level. Public GET routes carry no dependency.
+  This keeps the public-vs-owner decision visible at the point of definition and
+  lets one router safely mix a public read with owner-only writes (the trigger:
+  `cv_tailor.py` serves a public `GET /api/jobs/{job_id}` alongside an owner-only
+  `POST /api/cv-tailor-results`). New endpoints are owner-only by default unless
+  the spec explicitly says "public". See §13.8 + `api/CLAUDE.md`.
 
 ---
 
@@ -2675,6 +2683,25 @@ appends to the same JSONL files the CLI appends to — the data model
 is unchanged, the source of truth is unchanged, the CLI remains a
 valid write path. No database is introduced. "Files all the way down"
 is preserved.
+
+### 13.8 — Per-route security gating, not router-level (Phase 6 refactor)
+
+**Decision:** The `require_unlocked` capability-cookie dependency is declared
+on each individual write route (`@router.post(..., dependencies=[Depends(require_unlocked)])`),
+not once at the `APIRouter` constructor. Public read routes (GET) carry no
+dependency. Introduced by `cv_tailor.py` (deviation 41) and applied consistently
+across `workflow.py` and `annotations.py` (deviation 42).
+
+**Rationale:** Router-level gating was correct while every endpoint in a router
+shared one access level. The cv-tailor integration broke that assumption: one
+router needed a public `GET /api/jobs/{job_id}` *and* an owner-only
+`POST /api/cv-tailor-results`. Per-route gating makes the public-vs-owner choice
+**visible at the point of definition**, forces a conscious decision on every new
+endpoint, and removes ambiguity about what is and isn't protected — a security
+posture that fails safe by being explicit rather than inherited. The default for
+a new endpoint is owner-only unless the spec explicitly says "public" (then it is
+commented as such). The refactor was behaviour-preserving: the same endpoints stay
+protected and public, proven by the unchanged test suite (430 passing).
 
 ---
 
