@@ -71,6 +71,22 @@ function toFraction(s: string): number | null {
   return Math.max(0, Math.min(1, n / 100));
 }
 
+// cv_quality_score is the raw 0.0–10.0 rubric score — NOT a fraction. Input + display use the
+// 0–10 scale directly (shown as X.X/10), unlike fit/coverage which are stored 0.0–1.0.
+function qualityStr(v: number | null | undefined): string {
+  return v == null ? "" : String(v);
+}
+function qualityDisplay(v: number | null | undefined): string {
+  return v == null ? "—" : `${v}/10`;
+}
+function toQuality(s: string): number | null {
+  const t = s.trim();
+  if (!t) return null;
+  const n = Number(t);
+  if (isNaN(n)) return null;
+  return Math.max(0, Math.min(10, n));
+}
+
 const CV_TAILOR_MODES = ["full", "targeted", "minimal"];
 
 // CV-Tailor section (job_radar_SPEC §11.3). Read-only for everyone; the Add/Edit form is
@@ -92,17 +108,17 @@ function CvTailorSection({ job, onChanged }: { job: Job; onChanged: () => Promis
   const [toast, setToast] = useState<Toast>(null);
 
   const [runId, setRunId] = useState(cv.run_id || "");
-  const [cvScore, setCvScore] = useState(toPercentStr(cv.cv_score));
+  const [fitScore, setFitScore] = useState(toPercentStr(cv.fit_score));
   const [coverage, setCoverage] = useState(toPercentStr(cv.coverage_score));
-  const [grounding, setGrounding] = useState(toPercentStr(cv.grounding_score));
+  const [cvQuality, setCvQuality] = useState(qualityStr(cv.cv_quality_score));
   const [cvcm, setCvcm] = useState(!!cv.cvcm_enabled);
   const [mode, setMode] = useState(cv.tailoring_mode || "full");
   const [link, setLink] = useState(cv.output_link || "");
   const [notes, setNotes] = useState(cv.notes || "");
 
   function resetForm() {
-    setRunId(cv.run_id || ""); setCvScore(toPercentStr(cv.cv_score));
-    setCoverage(toPercentStr(cv.coverage_score)); setGrounding(toPercentStr(cv.grounding_score));
+    setRunId(cv.run_id || ""); setFitScore(toPercentStr(cv.fit_score));
+    setCoverage(toPercentStr(cv.coverage_score)); setCvQuality(qualityStr(cv.cv_quality_score));
     setCvcm(!!cv.cvcm_enabled); setMode(cv.tailoring_mode || "full");
     setLink(cv.output_link || ""); setNotes(cv.notes || "");
   }
@@ -116,9 +132,9 @@ function CvTailorSection({ job, onChanged }: { job: Job; onChanged: () => Promis
       await api.recordCvTailorResult({
         job_id: job.job_id,
         cv_tailor_run_id: runId.trim(),
-        cv_tailor_score: toFraction(cvScore),
+        fit_score: toFraction(fitScore),
         coverage_score: toFraction(coverage),
-        grounding_score: toFraction(grounding),
+        cv_quality_score: toQuality(cvQuality),
         cvcm_enabled: cvcm,
         tailoring_mode: mode,
         output_link: link.trim() || null,
@@ -145,9 +161,9 @@ function CvTailorSection({ job, onChanged }: { job: Job; onChanged: () => Promis
             <input className={FIELD_INPUT} value={runId} placeholder="run_20260611_001" disabled={busy} onChange={(e) => setRunId(e.target.value)} />
           </div>
           <div className="grid grid-cols-3 gap-2">
-            <div><label className={LABEL}>CV score (0–100)</label><input className={FIELD_INPUT} inputMode="numeric" value={cvScore} disabled={busy} onChange={(e) => setCvScore(e.target.value)} /></div>
+            <div><label className={LABEL}>Fit score (0–100)</label><input className={FIELD_INPUT} inputMode="numeric" value={fitScore} disabled={busy} onChange={(e) => setFitScore(e.target.value)} /></div>
             <div><label className={LABEL}>Coverage (0–100)</label><input className={FIELD_INPUT} inputMode="numeric" value={coverage} disabled={busy} onChange={(e) => setCoverage(e.target.value)} /></div>
-            <div><label className={LABEL}>Grounding (0–100)</label><input className={FIELD_INPUT} inputMode="numeric" value={grounding} disabled={busy} onChange={(e) => setGrounding(e.target.value)} /></div>
+            <div><label className={LABEL}>CV Quality (0–10)</label><input className={FIELD_INPUT} inputMode="decimal" value={cvQuality} placeholder="8.1" disabled={busy} onChange={(e) => setCvQuality(e.target.value)} /></div>
           </div>
           <div className="flex flex-wrap items-end gap-3">
             <label className="flex items-center gap-[6px] text-[12.5px] text-ink">
@@ -174,9 +190,9 @@ function CvTailorSection({ job, onChanged }: { job: Job; onChanged: () => Promis
             <span className="text-[11px] text-ink-faint">{fmtDate(cv.ts)}</span>
           </div>
           <div className="mb-[4px] flex flex-wrap gap-x-[18px] gap-y-1 tabular-nums">
-            <span><span className="text-ink-soft">CV score:</span> {pctDisplay(cv.cv_score)}</span>
+            <span><span className="text-ink-soft">Fit:</span> {pctDisplay(cv.fit_score)}</span>
             <span><span className="text-ink-soft">Coverage:</span> {pctDisplay(cv.coverage_score)}</span>
-            <span><span className="text-ink-soft">Grounding:</span> {pctDisplay(cv.grounding_score)}</span>
+            <span><span className="text-ink-soft">CV Quality:</span> {qualityDisplay(cv.cv_quality_score)}</span>
           </div>
           <div className="mb-[4px] flex flex-wrap gap-x-[18px] text-[12.5px] text-ink-soft">
             <span>CVCM: {cv.cvcm_enabled ? "enabled" : "disabled"}</span>

@@ -35,6 +35,9 @@ class Settings:
     stats_path: str = STATS_PATH
     # cv-tailor run links (job_radar_SPEC §11.3). Defaulted for the same reason.
     cv_tailor_links_path: str = CV_TAILOR_LINKS_PATH
+    # Shared service secret for cv-tailor's Phase 3 machine-to-machine callback (Bearer token
+    # on POST /api/cv-tailor-results). Separate from JR_WRITE_KEY. Unset = Bearer path closed.
+    cv_tailor_service_key: str = ""
 
 
 def get_settings() -> Settings:
@@ -49,4 +52,5 @@ def get_settings() -> Settings:
         seeds_path=os.environ.get("JR_SEEDS_PATH", SEEDS_PATH),
         stats_path=os.environ.get("JR_STATS_PATH", STATS_PATH),
         cv_tailor_links_path=os.environ.get("JR_CV_TAILOR_LINKS_PATH", CV_TAILOR_LINKS_PATH),
+        cv_tailor_service_key=os.environ.get("CV_TAILOR_SERVICE_KEY", ""),
     )

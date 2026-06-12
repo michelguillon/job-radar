@@ -61,14 +61,15 @@ export interface Annotation {
 }
 
 // cv-tailor run snapshot embedded per job (job_radar_SPEC §11.3). The cv-tailor run is the
-// source of truth; scores here are a summary (0.0–1.0, shown as %). {has_output:false} when
-// no run has been recorded; the metric fields are present only when has_output is true.
+// source of truth; the metrics mirror the cv-tailor UI — fit_score + coverage_score are
+// 0.0–1.0 (shown as %), cv_quality_score is 0.0–10.0 (shown as X.X/10). {has_output:false}
+// when no run has been recorded; the metric fields are present only when has_output is true.
 export interface CvTailor {
   has_output: boolean;
   run_id?: string | null;
-  cv_score?: number | null;
+  fit_score?: number | null;
   coverage_score?: number | null;
-  grounding_score?: number | null;
+  cv_quality_score?: number | null;
   cvcm_enabled?: boolean | null;
   tailoring_mode?: string | null;
   output_link?: string | null;
@@ -171,14 +172,15 @@ export interface AnnotationPayload {
   reason: string;
 }
 
-// cv-tailor metrics POST body (job_radar_SPEC §11.3). Scores are 0.0–1.0 floats (the UI
-// divides its 0–100 inputs by 100 before sending); all but run_id are optional.
+// cv-tailor metrics POST body (job_radar_SPEC §11.3). fit_score + coverage_score are 0.0–1.0
+// floats (the UI divides its 0–100 inputs by 100); cv_quality_score is 0.0–10.0 (the raw
+// rubric score, sent as-is). All but run_id are optional.
 export interface CvTailorResultPayload {
   job_id: string;
   cv_tailor_run_id: string;
-  cv_tailor_score?: number | null;
+  fit_score?: number | null;
   coverage_score?: number | null;
-  grounding_score?: number | null;
+  cv_quality_score?: number | null;
   cvcm_enabled?: boolean | null;
   tailoring_mode?: string | null;
   output_link?: string | null;

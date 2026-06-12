@@ -2,7 +2,8 @@
 ## Unified specification — changes to both applications
 
 **Status:** Phase 1 ✅ built (commit 32d1a09). Phase 2 ✅ built (Job Radar button + cv-tailor
-handoff). Phases 3–4 pending.
+handoff). Phase 3 ◐ Job Radar side built — schema cleanup + Bearer-token endpoint (deviation
+43); cv-tailor callback pending. Phase 4 pending.
 **Last updated:** 2026-06-12
 **Owned by:** Both repos — `job-radar` and `cv-tailor`
 
@@ -94,8 +95,13 @@ deviation 41 + LEARNINGS.
   no auth — returns `raw_text` for Phase 2 handoff). Per-route rather than
   router-level because the two endpoints have different access levels (deviation 41)
 - React detail panel — `CvTailorSection`: read-only for all, owner Add/Edit form
-  (scores entered 0–100, sent as 0.0–1.0 floats)
+  (fit/coverage entered 0–100 → sent 0.0–1.0; cv-quality entered 0–10 → sent as-is)
 - `api/settings.py` — `JR_CV_TAILOR_LINKS_PATH` env var
+
+**Schema cleanup (deviation 43, before Phase 3):** the metrics were aligned to the
+cv-tailor UI — `cv_tailor_score` → `fit_score` (0.0–1.0), `grounding_score` removed,
+`cv_quality_score` (0.0–10.0, raw rubric score) added. Old records are migrated to the
+new names at read time (`cli.stats._migrate_cv_tailor_fields`) — no file rewrite.
 
 **Trigger:** Unblocked. Build after yield tracking and rejection reasons
 are stable.
@@ -116,9 +122,9 @@ same pattern as `activity_log.jsonl` and `annotations.jsonl`.
   "ts": "2026-06-11T12:00:00Z",
   "job_id": "sha256:abc123",
   "cv_tailor_run_id": "run_20260611_001",
-  "cv_tailor_score": 0.72,
-  "coverage_score": 0.81,
-  "grounding_score": 0.96,
+  "fit_score": 0.56,
+  "coverage_score": 0.35,
+  "cv_quality_score": 8.1,
   "cvcm_enabled": true,
   "tailoring_mode": "full",
   "output_link": "https://cv-tailor.michel-portfolio.co.uk/runs/run_20260611_001",
@@ -127,20 +133,21 @@ same pattern as `activity_log.jsonl` and `annotations.jsonl`.
 }
 ```
 
-All fields except `v`, `ts`, `job_id` are optional. `source` defaults to
-`"manual"` for Phase 1 manual records and `"cv_tailor_api"` for Phase 3
-automated records. The cv-tailor run_id is the source of truth anchor —
-the score fields here are a summary snapshot. If cv-tailor's rubric
-evolves, these field names may drift; the run_id lets you trace back to
-the canonical cv-tailor record.
+The three metrics mirror the cv-tailor UI: `fit_score` + `coverage_score` are
+normalised 0.0–1.0 (shown as %), `cv_quality_score` is the raw 0.0–10.0 rubric score
+(shown as X.X/10). All fields except `v`, `ts`, `job_id` are optional. `source`
+defaults to `"manual"` (Phase 1 manual records) and `"cv_tailor_api"` (Phase 3
+callback). The cv-tailor run_id is the source of truth anchor — the score fields
+here are a summary snapshot.
 
 **New API endpoints:**
 
 ```
-POST /api/cv-tailor-results    Owner-protected (capability cookie)
+POST /api/cv-tailor-results    Owner capability cookie OR CV_TAILOR_SERVICE_KEY
+                               Bearer token (Phase 3 m2m, deviation 43)
                                Validates job_id exists (404 if not)
-                               Validates scores are 0.0–1.0 (422 if not)
-                               Appends to corpus/cv_tailor_links.jsonl
+                               Validates fit/coverage 0.0–1.0, cv_quality 0.0–10.0
+                               (422 if not). Appends to corpus/cv_tailor_links.jsonl
 
 GET  /api/jobs/{job_id}        Public, read-only
                                Returns job detail for Phase 2 handoff
@@ -157,9 +164,9 @@ cv-tailor links alongside activity log and annotations.
   "cv_tailor": {
     "has_output": true,
     "run_id": "run_20260611_001",
-    "cv_score": 0.72,
-    "coverage_score": 0.81,
-    "grounding_score": 0.96,
+    "fit_score": 0.56,
+    "coverage_score": 0.35,
+    "cv_quality_score": 8.1,
     "cvcm_enabled": true,
     "tailoring_mode": "full",
     "output_link": "https://...",
@@ -342,42 +349,48 @@ Application outcome (Phase 4)
 Future calibration
 ```
 
-### 6.1 Changes to Job Radar
+### 6.1 Changes to Job Radar — endpoint auth ✅ built
 
-**New endpoint** (already specified in Phase 1):
+**Endpoint** (built in Phase 1):
 
 ```
 POST /api/cv-tailor-results
 ```
 
 In Phase 3 this endpoint also accepts machine-to-machine calls from
-cv-tailor. The auth mechanism changes from capability cookie (browser) to
-a **shared service secret** — `CV_TAILOR_SERVICE_KEY` env var on Job Radar,
-sent as a `Bearer` token by cv-tailor.
+cv-tailor. **✅ Built (Job Radar side, deviation 43):** the endpoint now accepts
+the owner capability cookie **OR** a `CV_TAILOR_SERVICE_KEY` Bearer token (a
+shared service secret, separate from `JR_WRITE_KEY`), validated constant-time by
+`api.security.has_valid_service_token`. Both paths fail closed (no cookie + no/
+invalid token, or an unconfigured key → 403).
 
 ```python
-# Job Radar: validates either capability cookie OR service token
-if not (has_valid_cookie(request) or has_valid_service_token(request)):
-    raise HTTPException(403)
+# api/routers/cv_tailor.py — accepts either capability cookie OR service token
+if not (
+    verify_token(request.cookies.get(WRITE_COOKIE))
+    or has_valid_service_token(request, settings.cv_tailor_service_key)
+):
+    raise HTTPException(403, "not authorised — owner unlock or service token required")
 ```
 
-The `source` field distinguishes origin:
+The `source` field distinguishes origin (validated against `CV_TAILOR_SOURCE`):
 - `"manual"` — posted from the Job Radar UI (Phase 1)
 - `"cv_tailor_api"` — posted by cv-tailor callback (Phase 3)
 
-**UI additions:**
-
-Multiple cv-tailor runs per job are preserved. In the detail panel:
+**Remaining (not yet built):** the run-history UI below — Phase 1/2 surface only
+the *latest* run per job (`load_cv_tailor_links` keeps latest by `ts`). Surfacing
+the collapsed previous-runs list is a later UI step, deferred until callbacks
+actually produce multiple runs per job.
 
 ```
 ─── CV-Tailor ────────────────────────────────────
 Latest run: run_20260612_002     2026-06-12
-CV score: 78%  Coverage: 85%  Grounding: 98%
+Fit: 78%   Coverage: 85%   CV Quality: 8.7/10
 CVCM: enabled   Mode: full
 ↗ Open output
 
 Previous runs ▾
-  2026-06-11  run_20260611_001  CV: 72%  Coverage: 81%
+  2026-06-11  run_20260611_001  Fit: 72%  Coverage: 81%
 ```
 
 ### 6.2 Changes to cv-tailor
@@ -386,23 +399,26 @@ Previous runs ▾
 
 When a run has `source=job_radar` + `job_id` and reaches `run_complete`:
 
-1. Assemble callback payload from `PipelineOutput`:
+1. Assemble callback payload from `PipelineOutput` (field names per deviation 43 —
+   the schema the Job Radar endpoint validates):
    ```json
    {
      "job_id": "sha256:abc123",
      "cv_tailor_run_id": "run_20260612_002",
-     "cv_tailor_score": 0.78,
+     "fit_score": 0.78,
      "coverage_score": 0.85,
-     "grounding_score": 0.98,
+     "cv_quality_score": 8.7,
      "cvcm_enabled": true,
      "tailoring_mode": "full",
      "output_link": "https://cv-tailor.michel-portfolio.co.uk/runs/run_20260612_002",
+     "source": "cv_tailor_api",
      "notes": ""
    }
    ```
-   Map from `PipelineOutput`: `overall_fit_score` → `cv_tailor_score`,
-   grounded `keyword_coverage` (F-38) → `coverage_score`,
-   `1 - (fabrication_flags / total_claims)` → `grounding_score`.
+   Map from `PipelineOutput`: `overall_fit_score` → `fit_score` (0.0–1.0),
+   grounded `keyword_coverage` (F-38) → `coverage_score` (0.0–1.0), CV quality
+   rubric score → `cv_quality_score` (0.0–10.0, raw). The speculative
+   `grounding_score` is dropped (no Job Radar destination field).
 
 2. POST to `https://job-radar.michel-portfolio.co.uk/api/cv-tailor-results`
    with `Authorization: Bearer <CV_TAILOR_SERVICE_KEY>`
@@ -515,7 +531,7 @@ Mistral extraction. Do not block the run.
 |---|---|---|---|
 | Phase 1 — Manual POST from browser | HttpOnly capability cookie (`JR_WRITE_KEY`) — per-route (deviation 41/42) | Browser → Job Radar API | ✅ |
 | Phase 2 — cv-tailor fetches JD | No auth — `GET /api/jobs/{job_id}` is public | cv-tailor server → Job Radar API | ✅ |
-| Phase 3 — cv-tailor POSTs results | Bearer token (`CV_TAILOR_SERVICE_KEY`) | cv-tailor server → Job Radar API | 🔲 |
+| Phase 3 — cv-tailor POSTs results | Bearer token (`CV_TAILOR_SERVICE_KEY`) | cv-tailor server → Job Radar API | ◐ JR endpoint built (deviation 43); cv-tailor callback pending |
 | Phase 4 — cv-tailor fetches extraction | No auth — same public endpoint as Phase 2 | cv-tailor server → Job Radar API | 🔲 |
 
 The browser capability cookie (HttpOnly, SameSite=Lax) is never sent in
@@ -526,7 +542,9 @@ Phase 3 uses a separate shared secret specifically for service-to-service auth.
 individual write route, not at the router level. This makes the security decision
 explicit at the point of definition — a public endpoint and an owner-only endpoint
 can coexist in the same router without ambiguity. All write endpoints across
-`workflow.py`, `annotations.py`, and `cv_tailor.py` follow this pattern.
+`workflow.py`, `annotations.py`, and `cv_tailor.py` follow this pattern, **except**
+`POST /api/cv-tailor-results`, which runs an inline cookie-OR-Bearer check instead
+(it must accept both the owner cookie and the Phase 3 service token — deviation 43).
 
 ---
 
@@ -546,7 +564,7 @@ GET /api/jobs/{job_id}  ──────────► Phase 0 bypass (Phase 
        │                            (Phase 2 URL handoff)
        ▼
 cv_tailor.has_output: true
-cv_score / coverage / grounding
+fit_score / coverage / cv_quality
 output_link ──────────────────────► ↗ Open output (in UI)
 ```
 
@@ -570,11 +588,12 @@ output_link ──────────────────────�
 | `.gitignore` | `corpus/cv_tailor_links.jsonl` | 1 | ✅ |
 | `api/routers/workflow.py` | Per-route `require_unlocked` (deviation 42 refactor) | 1 | ✅ |
 | `api/routers/annotations.py` | Per-route `require_unlocked` (deviation 42 refactor) | 1 | ✅ |
-| `frontend` | Smart cv-tailor button — "Create CV" (no run) or "Open in cv-tailor" (run exists) | 2 | 🔲 |
-| `api/routers/cv_tailor.py` | Add Bearer token auth for service calls | 3 | 🔲 |
+| `frontend` | Smart cv-tailor button — "Create CV" (no run) or "Open in cv-tailor" (run exists) | 2 | ✅ |
+| `models/record.py` + `cli/stats.py` | Schema cleanup: `fit_score`/`cv_quality_score`, drop `grounding_score`, read-time migration | 3 | ✅ (deviation 43) |
+| `api/routers/cv_tailor.py` + `api/security.py` | Bearer token auth (`has_valid_service_token`) — cookie OR token | 3 | ✅ (deviation 43) |
+| `api/settings.py` + `.env.example` | `CV_TAILOR_SERVICE_KEY` setting + env var | 3 | ✅ |
 | `frontend` | Run history (multiple runs) in detail panel | 3 | 🔲 |
 | `api/routers/cv_tailor.py` | Return `extraction` in `GET /api/jobs/{job_id}` | 4 | 🔲 |
-| `.env.example` | `CV_TAILOR_SERVICE_KEY=` | 3 | 🔲 |
 
 ### cv-tailor
 

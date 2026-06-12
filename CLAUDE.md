@@ -290,7 +290,8 @@ Kept in full: everything below — active operational guards Claude Code must kn
     `{has_output: false}` when no link exists. (b) `api/routers/cv_tailor.py` gates **per-route**
     (`POST /api/cv-tailor-results` carries `Depends(require_unlocked)`) rather than at the router
     level, because `GET /api/jobs/{job_id}` in the same router is **public** (read-only JD detail
-    incl. `raw_text`, already visible in the UI; built now for the Phase 2 handoff). (c) UI scores
+    incl. `raw_text`, already visible in the UI; built now for the Phase 2 handoff). *(POST auth
+    extended to cookie-OR-Bearer + fields renamed in deviation 43.)* (c) UI scores
     are 0–100 in the form, divided by 100 to the 0.0–1.0 floats the API stores; displayed as %.
     (d) `CvTailorSection` is rendered inside `WriteControls` (above the scoring-flags panel) **and**
     standalone when `!configured` (read-only-deploy fallback) so the snapshot is visible even where
@@ -306,6 +307,22 @@ Kept in full: everything below — active operational guards Claude Code must kn
     consistently across workflow.py and annotations.py. No behaviour
     change — same endpoints protected, same endpoints public. Convention:
     `api/CLAUDE.md` "Endpoint security — per-route gating rule".
+
+43. *(→ SPEC §11.3 + INTEGRATION_SPEC §6)* cv-tailor schema cleanup + Phase 3 Bearer-token
+    auth (before automating the callback). **Schema:** the three metrics now mirror the
+    cv-tailor UI — `fit_score` + `coverage_score` are 0.0–1.0 (shown as %), `cv_quality_score`
+    is the raw **0.0–10.0** rubric score (shown as X.X/10, **not** normalised — different range
+    in `validate_cv_tailor_link`). `cv_tailor_score` → renamed `fit_score`; `grounding_score`
+    (no UI counterpart) **removed**. Still constants-only, no `SCHEMA_VERSION` bump.
+    **Read-time migration (not a file rewrite):** `cli.stats._migrate_cv_tailor_fields` maps
+    old `cv_tailor_score` → `fit_score` and drops `grounding_score` as records load, so the
+    existing append-only file is never rewritten and old lines surface under the new names.
+    **Phase 3 auth:** `POST /api/cv-tailor-results` now accepts the owner capability cookie
+    **OR** a `CV_TAILOR_SERVICE_KEY` Bearer token (`api.security.has_valid_service_token`,
+    constant-time) — an inline dual-auth check that **supersedes** the per-route
+    `require_unlocked` on this one endpoint (deviation 41(b)); both fail closed. New settings
+    field `cv_tailor_service_key` (`CV_TAILOR_SERVICE_KEY`, separate from `JR_WRITE_KEY`,
+    unset = Bearer path closed); added to `.env.example`. `GET /api/jobs/{job_id}` unchanged.
 
 
 ## Schema summary

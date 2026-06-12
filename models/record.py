@@ -232,23 +232,32 @@ def validate_cv_tailor_link(record: dict) -> list[str]:
 
     A vocabulary + required-field guard so a malformed line never enters the append-only
     ``corpus/cv_tailor_links.jsonl``. ``v``/``ts``/``job_id`` are required; every metric is
-    optional but, when present, must be a normalised 0.0–1.0 float (cvcm a bool, source a
-    known value). The link never mutates an extraction or a score — it is a side snapshot.
+    optional but, when present, must be in range (cvcm a bool, source a known value). The
+    three metrics mirror the cv-tailor UI: ``fit_score`` + ``coverage_score`` are normalised
+    0.0–1.0 (shown as %), ``cv_quality_score`` is the raw 0.0–10.0 rubric score (shown as
+    X.X/10 — NOT normalised). The link never mutates an extraction or a score — it is a side
+    snapshot. (Field names cleaned up before Phase 3 — deviation 43: ``cv_tailor_score`` →
+    ``fit_score``, ``grounding_score`` dropped, ``cv_quality_score`` added.)
     """
     errors: list[str] = []
     for name in ("ts", "job_id"):
         value = record.get(name)
         if not isinstance(value, str) or not value:
             errors.append(f"{name}: must be a non-empty string")
-    for name in ("cv_tailor_score", "coverage_score", "grounding_score"):
+
+    def _check_float(name: str, lo: float, hi: float) -> None:
         if name in record and record[name] is not None:
             value = record[name]
             if (
                 isinstance(value, bool)
                 or not isinstance(value, (int, float))
-                or not (0.0 <= value <= 1.0)
+                or not (lo <= value <= hi)
             ):
-                errors.append(f"{name}: must be a float 0.0-1.0")
+                errors.append(f"{name}: must be a float {lo}-{hi}")
+
+    _check_float("fit_score", 0.0, 1.0)
+    _check_float("coverage_score", 0.0, 1.0)
+    _check_float("cv_quality_score", 0.0, 10.0)  # raw rubric score, NOT normalised
     cvcm = record.get("cvcm_enabled")
     if cvcm is not None and not isinstance(cvcm, bool):
         errors.append("cvcm_enabled: must be a boolean")

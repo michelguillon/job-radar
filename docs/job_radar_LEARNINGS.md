@@ -2015,5 +2015,37 @@ own key gate guards non-owner access). `tsc -b` clean; 430 pytest unchanged.
 
 ---
 
+### cv-tailor schema cleanup + Phase 3 Bearer auth (§11.3 / deviation 43) — built 2026-06-12
+
+Two pre-Phase-3 changes to `corpus/cv_tailor_links.jsonl` and its endpoint.
+
+- **Name the fields after the UI they mirror, before automation bakes them in.** Phase 1
+  shipped `cv_tailor_score`/`coverage_score`/`grounding_score` — but the cv-tailor UI actually
+  shows *Fit %*, *Grounded Coverage %*, and *CV Quality X.X/10*, and `grounding_score` mapped to
+  nothing. Renaming to `fit_score`/`coverage_score`/`cv_quality_score` and dropping the
+  speculative field *now* (manual records only, before the callback writes thousands) is far
+  cheaper than after. The lesson: a speculative field added "while we're here" is a liability
+  until something real populates it — Phase 1 was the right time to delete one.
+- **Two scales in one record is a real footgun — encode it in the validator, not a comment.**
+  `fit_score`/`coverage_score` are 0.0–1.0; `cv_quality_score` is 0.0–10.0 (raw rubric). The
+  validator enforces the *different* range per field, the UI form labels the scale ("0–10") and
+  converts only fit/coverage (÷100), and the display renders `X.X/10` vs `%`. Mixing them would
+  silently store 8.1 as "810%". The range lives in `validate_cv_tailor_link`, the one place every
+  write path (CLI-none-here, API, cv-tailor callback) funnels through.
+- **Read-time migration beat a file rewrite for an append-only log.** Old lines keep their old
+  names on disk forever (append-only); `cli.stats._migrate_cv_tailor_fields` maps them on load.
+  No migration stage, no rewrite, no schema bump — consistent with "append-only, never migrate in
+  place." The cost is one tiny normaliser at the read boundary, paid once per load.
+- **Dual-auth is an inline check, the deliberate exception to per-route `require_unlocked`.**
+  `POST /api/cv-tailor-results` must accept the owner cookie (browser, Phase 1) OR a service
+  Bearer token (machine, Phase 3), so it can't use the single `require_unlocked` dependency
+  (deviation 42). The inline `verify_token(cookie) or has_valid_service_token(request, key)` both
+  fail closed; the service key is separate from `JR_WRITE_KEY` and unset → Bearer path closed. The
+  per-route convention still holds everywhere else — this one endpoint documents its exception.
+
+440 tests; `tsc -b` clean.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

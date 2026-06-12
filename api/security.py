@@ -28,6 +28,7 @@ from fastapi import HTTPException, Request
 __all__ = [
     "WRITE_COOKIE", "WRITE_TTL", "COOKIE_PATH", "cookie_secure", "write_configured",
     "key_matches", "issue_token", "verify_token", "require_unlocked",
+    "has_valid_service_token",
 ]
 
 WRITE_COOKIE = "jr_write"
@@ -89,6 +90,21 @@ def verify_token(token: str | None, *, now: int | None = None) -> bool:
     if exp < (int(time.time()) if now is None else now):
         return False
     return hmac.compare_digest(sig, _sign(exp, secret))
+
+
+def has_valid_service_token(request: Request, key: str) -> bool:
+    """True iff the request carries `Authorization: Bearer <key>` matching the configured
+    `CV_TAILOR_SERVICE_KEY` (machine-to-machine auth for cv-tailor's Phase 3 callback).
+
+    Fails closed: an empty/unset `key` (no service integration configured) returns False, so
+    the Bearer path never opens when the deployment hasn't opted into it. The key is resolved
+    from settings (test-injectable), separate from the owner write key (`JR_WRITE_KEY`)."""
+    if not key:
+        return False
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return False
+    return hmac.compare_digest(auth[len("Bearer "):], key)
 
 
 def require_unlocked(request: Request) -> None:

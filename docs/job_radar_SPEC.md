@@ -2448,16 +2448,16 @@ API integration.
 **Storage:** New append-only file `corpus/cv_tailor_links.jsonl`. Do not
 mutate JDRecord, ApplicationRecord, or cv-tailor output files.
 
-**Record format:**
+**Record format** (field names cleaned up before Phase 3 — deviation 43):
 ```json
 {
   "v": 1,
   "ts": "2026-06-11T12:00:00Z",
   "job_id": "sha256:abc123",
   "cv_tailor_run_id": "run_20260611_001",
-  "cv_tailor_score": 0.72,
-  "coverage_score": 0.81,
-  "grounding_score": 0.96,
+  "fit_score": 0.56,
+  "coverage_score": 0.35,
+  "cv_quality_score": 8.1,
   "cvcm_enabled": true,
   "tailoring_mode": "full",
   "output_link": "https://cv-tailor.../runs/run_20260611_001",
@@ -2466,22 +2466,30 @@ mutate JDRecord, ApplicationRecord, or cv-tailor output files.
 }
 ```
 
-**Note on schema stability:** `cv_tailor_score`, `coverage_score`,
-`grounding_score` are cv-tailor internal metrics tied to its current rubric
-version. If cv-tailor's rubric evolves, these field names may drift. Record the
-cv-tailor run ID so the source of truth remains in cv-tailor; the fields here
-are a summary snapshot, not a canonical store.
+The three metrics mirror the cv-tailor UI: `fit_score` + `coverage_score` are
+normalised **0.0–1.0** (shown as %), `cv_quality_score` is the raw **0.0–10.0**
+rubric score (shown as X.X/10 — not normalised). The original `cv_tailor_score`
+was renamed `fit_score`; the speculative `grounding_score` (no UI counterpart)
+was removed. Old records on disk are mapped to the new names at read time
+(`cli.stats._migrate_cv_tailor_fields`) — no file rewrite, no schema bump.
 
-**New API endpoint:**
+**Note on schema stability:** these are cv-tailor internal metrics tied to its
+current rubric version. If cv-tailor's rubric evolves, these field names may
+drift. Record the cv-tailor run ID so the source of truth remains in cv-tailor;
+the fields here are a summary snapshot, not a canonical store.
+
+**API endpoints:**
 ```
-POST /api/cv-tailor-results    # owner-protected (capability cookie)
+POST /api/cv-tailor-results    # owner capability cookie OR CV_TAILOR_SERVICE_KEY
+                               # Bearer token (Phase 3 machine-to-machine, deviation 43)
 GET  /api/jobs/{job_id}        # read-only, public — returns job detail for
                                # cv-tailor Phase 2 handoff
 ```
 
 **Read model:** `stats.py --export-index` joins latest cv-tailor link per
-`job_id`, exposes `cv_tailor.has_output`, `cv_tailor.cv_score`,
-`cv_tailor.coverage_score`, etc. If none: `cv_tailor: {has_output: false}`.
+`job_id`, exposes `cv_tailor.has_output`, `cv_tailor.fit_score`,
+`cv_tailor.coverage_score`, `cv_tailor.cv_quality_score`, etc. If none:
+`cv_tailor: {has_output: false}`.
 
 **UI:** Detail panel shows cv-tailor metrics (read-only for public, add/edit
 for owner). "Add CV-Tailor metrics" control owner-gated same as all writes.
@@ -2535,10 +2543,13 @@ are worth tracking.
 cv-tailor POSTs summary metrics to Job Radar. Closes the loop:
 Job Radar prediction → cv-tailor output → application outcome → future calibration.
 
-**Auth:** The HttpOnly cookie pattern (browser-based) does not apply to
-machine-to-machine calls. Use a **shared service secret** — a `CV_TAILOR_SERVICE_KEY`
-env var on Job Radar, sent as a `Bearer` token by cv-tailor. Separate from the
-owner write key. Do not expose `POST /api/cv-tailor-results` unauthenticated.
+**Auth — ✅ built (Job Radar side):** The HttpOnly cookie pattern (browser-based)
+does not apply to machine-to-machine calls. `POST /api/cv-tailor-results` now
+accepts the owner capability cookie **OR** a `CV_TAILOR_SERVICE_KEY` Bearer token
+(`api.security.has_valid_service_token`, constant-time; separate from `JR_WRITE_KEY`;
+both fail closed) — deviation 43. The endpoint is never unauthenticated. The
+cv-tailor-side callback on run completion (assemble payload → POST with the Bearer
+token) remains a cv-tailor build (INTEGRATION_SPEC §6.2).
 
 **Storage:** Same `corpus/cv_tailor_links.jsonl`, same schema as Phase 1 manual
 records. Add `"source": "cv_tailor_api"` to distinguish. Multiple runs per job

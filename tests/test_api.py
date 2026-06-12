@@ -432,7 +432,7 @@ def test_cv_tailor_results_post_valid(client, monkeypatch):
     _unlock(client)
     r = client.post("/api/cv-tailor-results", json={
         "job_id": "sha256:j1", "cv_tailor_run_id": "run_20260611_001",
-        "cv_tailor_score": 0.72, "coverage_score": 0.81, "grounding_score": 0.96,
+        "fit_score": 0.56, "coverage_score": 0.35, "cv_quality_score": 8.1,
         "cvcm_enabled": True, "tailoring_mode": "full",
         "output_link": "https://cv-tailor.example/runs/run_20260611_001", "notes": "good",
     })
@@ -440,7 +440,8 @@ def test_cv_tailor_results_post_valid(client, monkeypatch):
     links = track.load_events(client.settings.cv_tailor_links_path)
     assert len(links) == 1
     assert links[0]["cv_tailor_run_id"] == "run_20260611_001"
-    assert links[0]["cv_tailor_score"] == 0.72
+    assert links[0]["fit_score"] == 0.56 and links[0]["cv_quality_score"] == 8.1
+    assert "grounding_score" not in links[0] and "cv_tailor_score" not in links[0]
     assert links[0]["source"] == "manual"
 
 
@@ -455,7 +456,17 @@ def test_cv_tailor_results_score_out_of_range(client, monkeypatch):
     monkeypatch.setenv("JR_WRITE_KEY", KEY)
     _unlock(client)
     r = client.post("/api/cv-tailor-results", json={
-        "job_id": "sha256:j1", "cv_tailor_run_id": "run_1", "cv_tailor_score": 1.5,
+        "job_id": "sha256:j1", "cv_tailor_run_id": "run_1", "fit_score": 1.5,
+    })
+    assert r.status_code == 422
+
+
+def test_cv_tailor_results_cv_quality_out_of_range(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    # 11.0 is out of the 0–10 rubric range (but would be a valid 0–1 *failure* too).
+    r = client.post("/api/cv-tailor-results", json={
+        "job_id": "sha256:j1", "cv_tailor_run_id": "run_1", "cv_quality_score": 11.0,
     })
     assert r.status_code == 422
 
@@ -464,6 +475,69 @@ def test_cv_tailor_results_requires_auth(client, monkeypatch):
     monkeypatch.setenv("JR_WRITE_KEY", KEY)  # configured but this client never unlocks
     r = client.post("/api/cv-tailor-results", json={"job_id": "sha256:j1", "cv_tailor_run_id": "run_1"})
     assert r.status_code == 403
+
+
+# --- cv-tailor: Phase 3 Bearer-token (machine-to-machine) auth -------------------
+
+SVC_KEY = "cv-tailor-service-secret"
+
+
+def _svc_settings(client):
+    """Settings with a configured CV_TAILOR_SERVICE_KEY (Bearer path enabled)."""
+    from dataclasses import replace
+    return replace(client.settings, cv_tailor_service_key=SVC_KEY)
+
+
+def test_bearer_token_auth_accepted(client, monkeypatch):
+    # No cookie at all; a valid service token authorises the machine-to-machine POST.
+    monkeypatch.delenv("JR_WRITE_KEY", raising=False)
+    app.dependency_overrides[get_settings] = lambda: _svc_settings(client)
+    r = client.post(
+        "/api/cv-tailor-results",
+        json={"job_id": "sha256:j1", "cv_tailor_run_id": "run_cb", "fit_score": 0.78, "source": "cv_tailor_api"},
+        headers={"Authorization": f"Bearer {SVC_KEY}"},
+    )
+    assert r.status_code == 200
+    assert track.load_events(client.settings.cv_tailor_links_path)[0]["source"] == "cv_tailor_api"
+
+
+def test_bearer_token_wrong_key(client, monkeypatch):
+    monkeypatch.delenv("JR_WRITE_KEY", raising=False)
+    app.dependency_overrides[get_settings] = lambda: _svc_settings(client)
+    r = client.post(
+        "/api/cv-tailor-results",
+        json={"job_id": "sha256:j1", "cv_tailor_run_id": "run_cb"},
+        headers={"Authorization": "Bearer wrong-secret"},
+    )
+    assert r.status_code == 403
+
+
+def test_bearer_token_unconfigured(client, monkeypatch):
+    # No CV_TAILOR_SERVICE_KEY configured → the Bearer path is closed even with a token.
+    monkeypatch.delenv("JR_WRITE_KEY", raising=False)
+    r = client.post(
+        "/api/cv-tailor-results",
+        json={"job_id": "sha256:j1", "cv_tailor_run_id": "run_cb"},
+        headers={"Authorization": f"Bearer {SVC_KEY}"},
+    )
+    assert r.status_code == 403
+
+
+def test_both_auth_paths_work(client, monkeypatch):
+    # Cookie path (owner) and token path (service) both authorise the same endpoint.
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    app.dependency_overrides[get_settings] = lambda: _svc_settings(client)
+    # token, no cookie
+    assert client.post(
+        "/api/cv-tailor-results",
+        json={"job_id": "sha256:j1", "cv_tailor_run_id": "run_tok"},
+        headers={"Authorization": f"Bearer {SVC_KEY}"},
+    ).status_code == 200
+    # cookie, no token
+    _unlock(client)
+    assert client.post(
+        "/api/cv-tailor-results", json={"job_id": "sha256:j1", "cv_tailor_run_id": "run_cookie"},
+    ).status_code == 200
 
 
 def _seed_validated_jd(tmp_path, *, company="Elastic", raw_text="Full JD text...") -> str:
@@ -506,12 +580,12 @@ def test_index_overlays_live_cv_tailor(client, monkeypatch):
     _unlock(client)
     # the seeded index.json row has no cv_tailor; a freshly recorded link must show on reload
     client.post("/api/cv-tailor-results", json={
-        "job_id": "sha256:j1", "cv_tailor_run_id": "run_x", "cv_tailor_score": 0.5,
+        "job_id": "sha256:j1", "cv_tailor_run_id": "run_x", "fit_score": 0.5, "cv_quality_score": 7.4,
     })
     rec = client.get("/api/index").json()["records"][0]
     assert rec["cv_tailor"]["has_output"] is True
     assert rec["cv_tailor"]["run_id"] == "run_x"
-    assert rec["cv_tailor"]["cv_score"] == 0.5
+    assert rec["cv_tailor"]["fit_score"] == 0.5 and rec["cv_tailor"]["cv_quality_score"] == 7.4
 
 
 # --- health --------------------------------------------------------------------

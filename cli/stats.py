@@ -172,10 +172,25 @@ def load_cv_tailor_links(path: str = CV_TAILOR_LINKS_PATH) -> dict[str, dict]:
         job_id = event.get("job_id")
         if not job_id:
             continue
+        _migrate_cv_tailor_fields(event)
         prev = latest.get(job_id)
         if prev is None or str(event.get("ts", "")) >= str(prev.get("ts", "")):
             latest[job_id] = event
     return latest
+
+
+def _migrate_cv_tailor_fields(record: dict) -> None:
+    """Read-time field migration (deviation 43) — no file rewrite, no pipeline stage.
+
+    Phase-1 records used ``cv_tailor_score`` and a speculative ``grounding_score``. The
+    schema was cleaned up before Phase 3: ``cv_tailor_score`` → ``fit_score``, and
+    ``grounding_score`` (no UI counterpart) dropped. Old lines on disk are normalised to the
+    new names as they load; new lines already carry them. ``cv_quality_score`` simply absent
+    on old records (correctly → null in the view)."""
+    if "cv_tailor_score" in record and "fit_score" not in record:
+        record["fit_score"] = record["cv_tailor_score"]
+    record.pop("cv_tailor_score", None)
+    record.pop("grounding_score", None)
 
 
 def cv_tailor_view(link: dict | None) -> dict:
@@ -188,9 +203,11 @@ def cv_tailor_view(link: dict | None) -> dict:
     return {
         "has_output": True,
         "run_id": link.get("cv_tailor_run_id"),
-        "cv_score": link.get("cv_tailor_score"),
+        # fit_score + coverage_score are 0.0–1.0 (shown as %); cv_quality_score is 0.0–10.0
+        # (shown as X.X/10). Old cv_tailor_score is migrated to fit_score on load (deviation 43).
+        "fit_score": link.get("fit_score", link.get("cv_tailor_score")),
         "coverage_score": link.get("coverage_score"),
-        "grounding_score": link.get("grounding_score"),
+        "cv_quality_score": link.get("cv_quality_score"),
         "cvcm_enabled": link.get("cvcm_enabled"),
         "tailoring_mode": link.get("tailoring_mode"),
         "output_link": link.get("output_link"),

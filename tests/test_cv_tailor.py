@@ -15,7 +15,7 @@ from models.record import ApplicationRecord, validate_cv_tailor_link
 def _link(job_id: str, *, ts: str, run: str, **over) -> dict:
     rec = {
         "v": 1, "ts": ts, "job_id": job_id, "cv_tailor_run_id": run,
-        "cv_tailor_score": 0.72, "coverage_score": 0.81, "grounding_score": 0.96,
+        "fit_score": 0.56, "coverage_score": 0.35, "cv_quality_score": 8.1,
         "cvcm_enabled": True, "tailoring_mode": "full",
         "output_link": "https://cv-tailor.example/runs/" + run, "notes": "ok", "source": "manual",
     }
@@ -37,11 +37,31 @@ def test_validate_cv_tailor_link_valid():
     assert validate_cv_tailor_link(_link("sha256:j1", ts="2026-06-11T12:00:00Z", run="run_1")) == []
 
 
-def test_validate_cv_tailor_link_score_out_of_range():
+def test_validate_fit_score_valid():
+    assert validate_cv_tailor_link(
+        _link("sha256:j1", ts="2026-06-11T12:00:00Z", run="run_1", fit_score=0.56)
+    ) == []
+
+
+def test_validate_fit_score_out_of_range():
     errors = validate_cv_tailor_link(
-        _link("sha256:j1", ts="2026-06-11T12:00:00Z", run="run_1", cv_tailor_score=1.5)
+        _link("sha256:j1", ts="2026-06-11T12:00:00Z", run="run_1", fit_score=1.5)
     )
-    assert any("cv_tailor_score" in e for e in errors)
+    assert any("fit_score" in e for e in errors)
+
+
+def test_validate_cv_quality_score_valid():
+    # 8.1 is valid on the 0–10 rubric scale (would FAIL the 0–1 check fit/coverage use).
+    assert validate_cv_tailor_link(
+        _link("sha256:j1", ts="2026-06-11T12:00:00Z", run="run_1", cv_quality_score=8.1)
+    ) == []
+
+
+def test_validate_cv_quality_score_out_of_range():
+    errors = validate_cv_tailor_link(
+        _link("sha256:j1", ts="2026-06-11T12:00:00Z", run="run_1", cv_quality_score=11.0)
+    )
+    assert any("cv_quality_score" in e for e in errors)
 
 
 def test_validate_cv_tailor_link_optional_fields_omitted():
@@ -85,6 +105,21 @@ def test_load_cv_tailor_links_missing_file(tmp_path):
     assert load_cv_tailor_links(str(tmp_path / "nope.jsonl")) == {}
 
 
+def test_load_migrates_old_field_names(tmp_path):
+    # A Phase-1 record on disk: old cv_tailor_score + speculative grounding_score (deviation 43).
+    path = tmp_path / "cv_tailor_links.jsonl"
+    import json
+    old = {
+        "v": 1, "ts": "2026-06-11T00:00:00Z", "job_id": "sha256:j1", "cv_tailor_run_id": "run_old",
+        "cv_tailor_score": 0.72, "coverage_score": 0.81, "grounding_score": 0.96, "source": "manual",
+    }
+    path.write_text(json.dumps(old) + "\n", encoding="utf-8")
+    rec = load_cv_tailor_links(str(path))["sha256:j1"]
+    assert rec["fit_score"] == 0.72        # cv_tailor_score → fit_score
+    assert "cv_tailor_score" not in rec     # old name removed
+    assert "grounding_score" not in rec     # dropped silently (no destination field)
+
+
 # --- index row -----------------------------------------------------------------
 
 def test_index_row_has_cv_tailor_section():
@@ -102,5 +137,16 @@ def test_index_row_embeds_cv_tailor_link():
     cv = rows[0]["cv_tailor"]
     assert cv["has_output"] is True
     assert cv["run_id"] == "run_1"
-    assert cv["cv_score"] == 0.72 and cv["coverage_score"] == 0.81 and cv["grounding_score"] == 0.96
+    assert cv["fit_score"] == 0.56 and cv["coverage_score"] == 0.35 and cv["cv_quality_score"] == 8.1
+    assert "grounding_score" not in cv and "cv_score" not in cv
     assert cv["cvcm_enabled"] is True and cv["tailoring_mode"] == "full"
+
+
+def test_index_row_migrates_old_link_fields():
+    # An old-format link (cv_tailor_score) reaches the view → surfaces as fit_score.
+    scores = {"sha256:j1": _score("sha256:j1")}
+    workflow = {"sha256:j1": _default_state()}
+    links = {"sha256:j1": {"cv_tailor_run_id": "run_old", "cv_tailor_score": 0.72,
+                           "coverage_score": 0.81, "grounding_score": 0.96}}
+    cv = build_index_rows(scores, {}, {}, workflow, cv_tailor_links=links)[0]["cv_tailor"]
+    assert cv["fit_score"] == 0.72 and cv["cv_quality_score"] is None
