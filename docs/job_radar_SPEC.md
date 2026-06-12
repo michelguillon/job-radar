@@ -2276,6 +2276,51 @@ shipped in `company_seeds.yaml`: `frontier_ai` · `ai_application_platform` ·
 `semiconductor_ai_compute` · `strategic_ai_delivery` · `retail_media_data` ·
 `customer_data_martech`.
 
+### Manual JD entry via UI ✅ built 2026-06-12
+
+**Need:** Roles from companies *outside* the monitored ATS universe (Workday portals,
+custom career pages, referrals, LinkedIn) can now enter the pipeline from the browser, not
+just the `corpus/manual/` CLI drop folder.
+
+**`POST /api/manual-ingest`** (`api/routers/manual_ingest.py`) — owner-gated (per-route
+`require_unlocked`, deviation 42). Body: `{company, title, raw_text, source_url?, notes?}`.
+It runs ONE pasted JD through the live pipeline **synchronously** (~10–20s) and returns
+`{job_id, company, title, fit_label, fit_score, priority_score}`:
+
+1. **Validate** — `raw_text` non-empty + ≥ 200 chars (422 "JD text too short …"); company/title
+   required.
+2. **Dedup** — `record_hash(normalise(raw_text))` (the *normalised* hash the pipeline uses, so a
+   manually-entered JD and its auto-collected twin share one `job_id`) checked against
+   `load_scores(scored_glob)`; a re-submission is **409** `{job_id, message}` *before* any
+   extraction cost.
+3. **Extract** — `pipeline.label.extract_one` (single synchronous `messages.create`, **Haiku 4.5**,
+   standard non-batch pricing) reusing the batch path's `build_system_prompt` /
+   `build_user_content` / `parse_extraction`, so the extraction shape is identical. This is the
+   **one sanctioned non-batch extraction** (CLAUDE.md deviation 44). The owner-supplied title +
+   location ride to the prompt via the `[ATS METADATA]` block (an in-memory `build_meta` sidecar).
+4. **Validate + score** — `models.record.validate` (422 on a malformed extraction) → the **locked**
+   `scoring.scorer.score` against `candidate_profile.yaml`.
+5. **Append** — a Tier-4 `validated_manual_{ts}.jsonl` (JDRecord, `source_ats="manual"`), a
+   `scored_manual_{ts}.jsonl` (ApplicationRecord), and a `meta_manual_{ts}.jsonl` sidecar, each
+   written next to its read glob so the next `load_scores`/`load_jdrecords`/`load_meta` picks it up.
+   An optional `notes` becomes a workflow `note` event (never silently dropped).
+6. **Cost** — one `manual_ingest` entry appended to `corpus/stats.json` (same ledger as batch runs;
+   `load_cost_to_date` sums it).
+7. **Index** — rebuilds `corpus/index.json` via the same join `cli.stats --export-index` performs,
+   so the role shows in Browse on the next refetch.
+
+It never touches the automated collection pipeline, the scorer, the schema (`SCHEMA_VERSION`
+unchanged), or the `corpus/manual/` CLI path. Note the spec's earlier "clean_readable → label.py →
+validate.py → score.py" sketch is a *conceptual* pipeline: pasted text needs no `clean_readable`
+(that strips HTML; a pasted JD is already readable), and the endpoint reuses the underlying
+functions directly rather than shelling the stage CLIs.
+
+**Frontend** — `frontend/src/components/AddRoleModal.tsx`, an "Add role manually" button at the
+bottom of the sidebar (owner-only; the component returns `null` unless `unlocked`). The modal
+(company / title / source URL / notes / JD textarea) shows an "Extracting and scoring role…
+10–20 seconds" state while the POST is in flight, never closes mid-flight, surfaces 409/422 inline,
+and on success shows the scored result + refetches the index.
+
 ### cv-tailor integration signal (post-deployment design decision)
 
 First observed: Fin Senior AI Deployment Consultant — Partners

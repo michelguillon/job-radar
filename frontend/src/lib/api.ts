@@ -187,6 +187,25 @@ export interface CvTailorResultPayload {
   notes?: string | null;
 }
 
+// Manual JD entry (job_radar_SPEC §11.1). The owner pastes a JD; the backend runs the live
+// pipeline synchronously (~10–20s) and returns the scored result. company/title/raw_text are
+// required; source_url/notes optional.
+export interface ManualIngestPayload {
+  company: string;
+  title: string;
+  raw_text: string;
+  source_url?: string;
+  notes?: string;
+}
+export interface ManualIngestResult {
+  job_id: string;
+  company: string;
+  title: string;
+  fit_label: string;
+  fit_score: number;
+  priority_score: number;
+}
+
 export const api = {
   index: () => get<IndexResponse>("/index"),
   capabilities: () => get<Capabilities>("/capabilities"),
@@ -209,4 +228,6 @@ export const api = {
   // Append a cv-tailor run snapshot for a scored role (owner-gated, §11.3).
   recordCvTailorResult: (payload: CvTailorResultPayload) =>
     post<{ job_id: string; cv_tailor_run_id: string }>("/cv-tailor-results", payload),
+  // Paste-and-score a JD from outside the monitored universe (owner-gated, §11.1).
+  manualIngest: (payload: ManualIngestPayload) => post<ManualIngestResult>("/manual-ingest", payload),
 };

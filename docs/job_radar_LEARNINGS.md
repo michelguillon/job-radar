@@ -2047,5 +2047,42 @@ Two pre-Phase-3 changes to `corpus/cv_tailor_links.jsonl` and its endpoint.
 
 ---
 
+## 2026-06-12 — Manual JD entry via UI (job_radar_SPEC §11.1, deviation 44)
+
+- **The "Batch API only — never synchronous extraction" rule has exactly one sanctioned
+  exception, and it earned it.** Manual UI ingest must score ONE pasted JD interactively, so
+  batch (with its minutes-to-hours latency) is simply the wrong tool. `pipeline.label.extract_one`
+  is a single synchronous `messages.create` that **reuses the batch path's prompt + parser**
+  (`build_system_prompt` / `build_user_content` / `parse_extraction`), so the extraction is
+  identical in shape — only the transport differs. The convention now reads "batch for bulk
+  labelling; the manual-ingest endpoint is the documented single-JD exception." A blanket rule with
+  a named, justified exception beats a rule quietly broken.
+- **Different model, different price table — don't reuse the batch `COST_PER_MTOK`.** The batch
+  path is Opus at the 50%-off batch rate; the sync path is Haiku 4.5 at *standard* rates ($1/$5 per
+  1M). `SYNC_COST_PER_MTOK` is its own constant and `estimate_sync_cost` is shaped exactly like
+  `estimate_cost` so the entry drops into `corpus/stats.json` and `load_cost_to_date` sums it with
+  no special-casing. Picking the model/pricing from the live `claude-api` reference (not memory)
+  kept the numbers honest.
+- **Hash the *normalised* text, not the raw paste.** The build sketch said `record_hash(raw_text)`,
+  but the automated pipeline hashes `normalise(clean(...))`. Using `record_hash(normalise(raw_text))`
+  means a manually-entered JD and its later auto-collected twin land on the **same** `job_id` — the
+  dedup actually works across entry points. A subtly-different hash would have silently created
+  duplicates that only diverge by whitespace/case.
+- **Synthesise a unique `source_url` when none is given.** The title/location sidecar is keyed by
+  `source_url`; two manual entries with an empty URL would collide in the join and clobber each
+  other's title. `source_url = body.source_url or f"manual:{job_id}"` keeps the key unique without
+  inventing a new keying scheme.
+- **Write next to the read glob, not to a hard-coded dir.** `_out_path` derives the output directory
+  from the settings read glob and emits `{prefix}_manual_{ts}.jsonl` matching the glob's pattern, so
+  the just-written file is immediately visible to `load_scores`/`load_jdrecords`/`load_meta` — and
+  tests point the globs at `tmp_path` with zero corpus-path special-casing.
+- **Tier vs source are orthogonal.** A manual UI entry is `source_ats="manual"` (browser entry
+  point) **and** `tier=4` (Claude-extracted method) — distinct from the human-structured Tier-1/2
+  records in `corpus/manual/`. The two axes answer different questions; don't collapse them.
+
+447 tests; `tsc -b` clean.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

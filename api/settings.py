@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from cli.collect import SEEDS_PATH
 from cli.stats import ANNOTATIONS_PATH, CV_TAILOR_LINKS_PATH, INDEX_PATH, STATS_PATH
 from cli.track import LOG_PATH, META_GLOB, SCORED_GLOB, VALIDATED_GLOB
+from scoring.profile import DEFAULT_PROFILE_PATH
 
 # ANNOTATIONS_PATH (field-level scoring flags, separate from the activity log) is the
 # canonical read-model constant in cli.stats — re-exported here so the API and the index
@@ -38,6 +39,9 @@ class Settings:
     # Shared service secret for cv-tailor's Phase 3 machine-to-machine callback (Bearer token
     # on POST /api/cv-tailor-results). Separate from JR_WRITE_KEY. Unset = Bearer path closed.
     cv_tailor_service_key: str = ""
+    # candidate_profile.yaml the manual-ingest endpoint scores against (job_radar_SPEC §11.1).
+    # Defaulted so existing Settings(...) construction keeps working.
+    profile_path: str = DEFAULT_PROFILE_PATH
 
 
 def get_settings() -> Settings:
@@ -53,4 +57,5 @@ def get_settings() -> Settings:
         stats_path=os.environ.get("JR_STATS_PATH", STATS_PATH),
         cv_tailor_links_path=os.environ.get("JR_CV_TAILOR_LINKS_PATH", CV_TAILOR_LINKS_PATH),
         cv_tailor_service_key=os.environ.get("CV_TAILOR_SERVICE_KEY", ""),
+        profile_path=os.environ.get("JR_PROFILE_PATH", DEFAULT_PROFILE_PATH),
     )

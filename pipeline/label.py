@@ -427,3 +427,74 @@ def estimate_cost(results: list[dict]) -> dict:
             totals[k] = totals.get(k, 0) + v
     cost = sum(totals[k] * COST_PER_MTOK[k] for k in totals) / 1_000_000
     return {"model": MODEL, "tokens": totals, "cost_usd": round(cost, 6)}
+
+
+# ---------------------------------------------------------------------------
+# Synchronous single-JD extraction (manual UI ingest — job_radar_SPEC §11.1).
+#
+# The batch path above (run_batch/poll/download/merge) is the only path for bulk
+# automated labelling (CLAUDE.md: "Batch API only … never synchronous extraction").
+# The manual UI ingest is the *single explicit exception*: one JD pasted by the owner
+# must be scored interactively (~10–20s), so it calls messages.create synchronously with
+# the SAME extraction prompt and parsing as the batch path — identical extraction shape,
+# different transport. Haiku 4.5 (fast + cheap) at STANDARD (non-batch) pricing.
+# ---------------------------------------------------------------------------
+
+SYNC_MODEL = "claude-haiku-4-5"
+SYNC_TIMEOUT = 30  # seconds — a single small extraction is comfortably under this
+
+# Standard (NON-batch) Haiku 4.5 pricing: $1 / $5 per 1M in/out; cache read 0.1x input,
+# cache write 1.25x input. (COST_PER_MTOK above is Opus at the 50%-off batch rate — a
+# different model and a different price tier, so it is NOT reused here.)
+SYNC_COST_PER_MTOK = {
+    "input": 1.00,
+    "output": 5.00,
+    "cache_read": 0.10,
+    "cache_write": 1.25,
+}
+
+
+def _sync_client(timeout: int = SYNC_TIMEOUT):
+    import anthropic
+
+    return anthropic.Anthropic(timeout=timeout)
+
+
+def extract_one(record: JDRecord, *, client=None, model: str = SYNC_MODEL, meta: dict | None = None):
+    """Extract schema-v1.2 fields from ONE JDRecord synchronously; return ``(extraction, usage)``.
+
+    Reuses ``build_system_prompt`` / ``build_user_content`` / ``parse_extraction`` so the manual
+    UI ingest path produces the exact same extraction shape as the batch pipeline. ``extraction``
+    is the parsed JSON dict (the caller applies it onto the record + validates); ``usage`` is a
+    token-count dict for ``estimate_sync_cost``. Raises on a transport error (caller → 500) or an
+    unparseable JSON body (``json.JSONDecodeError`` — caller → 422).
+    """
+    client = client or _sync_client()
+    system = [{"type": "text", "text": build_system_prompt(), "cache_control": {"type": "ephemeral"}}]
+    msg = client.messages.create(
+        model=model,
+        max_tokens=MAX_TOKENS,
+        system=system,
+        thinking={"type": "disabled"},
+        messages=[{"role": "user", "content": build_user_content(record, meta)}],
+    )
+    text = next((b.text for b in msg.content if b.type == "text"), "")
+    extraction = parse_extraction(text)
+    u = msg.usage
+    usage = {
+        "input": getattr(u, "input_tokens", 0) or 0,
+        "output": getattr(u, "output_tokens", 0) or 0,
+        "cache_read": getattr(u, "cache_read_input_tokens", 0) or 0,
+        "cache_write": getattr(u, "cache_creation_input_tokens", 0) or 0,
+    }
+    return extraction, usage
+
+
+def estimate_sync_cost(usage: dict, *, model: str = SYNC_MODEL) -> dict:
+    """Cost dict for one synchronous extraction at STANDARD (non-batch) rates.
+
+    Shaped like ``estimate_cost`` (``model`` / ``tokens`` / ``cost_usd``) so it appends cleanly
+    to ``corpus/stats.json`` and ``cli.stats.load_cost_to_date`` sums its ``cost_usd``.
+    """
+    cost = sum(usage.get(k, 0) * SYNC_COST_PER_MTOK[k] for k in SYNC_COST_PER_MTOK) / 1_000_000
+    return {"model": model, "tokens": usage, "cost_usd": round(cost, 6)}

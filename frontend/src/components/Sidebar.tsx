@@ -3,6 +3,7 @@ import { YIELD_REPORT_URL, type Job } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { fitBadgeClass } from "@/lib/ui";
 import { effectiveStatus, FIT_LABELS, LABEL_TEXT, STATUS_ORDER, type Filters } from "@/lib/jobs";
+import { AddRoleModal } from "@/components/AddRoleModal";
 
 // Search, fit/priority ranges, location toggle, and frequency-counted checkbox groups for
 // fit label / status / domain / role. All Tailwind — no global classes.
@@ -53,12 +54,13 @@ function Checks({
 }
 
 export function Sidebar({
-  records, filters, setFilters, onReset,
+  records, filters, setFilters, onReset, onAdded,
 }: {
   records: Job[];
   filters: Filters;
   setFilters: (next: Filters) => void;
   onReset: () => void;
+  onAdded: () => Promise<void>;
 }) {
   const patch = (mut: (f: Filters) => void) => { mut(filters); setFilters({ ...filters }); };
   const toggleIn = (set: Set<string>, v: string) => patch(() => (set.has(v) ? set.delete(v) : set.add(v)));
@@ -158,6 +160,9 @@ export function Sidebar({
       >
         <Download className="h-3.5 w-3.5" /> Yield report
       </a>
+
+      {/* Manual JD entry (job_radar_SPEC §11.1) — owner-only; the modal hides itself unless unlocked. */}
+      <AddRoleModal onAdded={onAdded} />
     </aside>
   );
 }

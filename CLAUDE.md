@@ -31,7 +31,9 @@ thing tests actually run against.
 - **Docker only** — `docker compose run --rm job-radar python ...`
 - **Tests always** — pytest, placed in `tests/`. Run after every step.
 - **Schema locked at v1.2** — no changes without explicit instruction
-- **Batch API only** for labelling — never synchronous extraction
+- **Batch API only** for *bulk* labelling — never synchronous extraction. **One sanctioned
+  exception:** manual-ingest scores a single pasted JD synchronously (`pipeline.label.extract_one`,
+  Haiku 4.5) — deviation 44. Reuses the batch prompt/parser; do not generalise to bulk paths.
 - **BeautifulSoup only** for scraping — no Playwright, no Selenium
 - **JSONL only** — no database, no ORM, no migrations
 - **Append-only records** — never migrate in place; bump schema version
@@ -86,7 +88,7 @@ thing tests actually run against.
 | 3 — Job Tracker | ✅ complete — `track.py` (model C, append-only event log), 263 tests. Extraction quality fixed (deviation 21). Real corpus build underway. Scorer locked. |
 | 4 — Discovery Layer | ✅ complete + **operational** — incremental collection (deviation 24) + `cli/digest.py` (deviation 26) + **working** weekly cron (`cron/`, fixed deviation 36) + cross-corpus dedupe (deviation 19). **102-company universe** seeded (SPEC §11.1); first real server run: 5,498 collected → 65 new survivors → 117 scored, $3.18 to date. |
 | 5 — Static UI | ✅ complete — `ui/{index.html,app.js,style.css}` static SPA (no framework/build/CDN), reads the joined `corpus/index.json`, served by nginx behind the `ui` Docker profile (`docker compose --profile ui up` → :8080). Browse + Pipeline + detail drawer + filters + stats bar. `index.json` contract changed to a join (deviation 27). 318 tests. |
-| 6 — Interactive UI | ✅ complete — thin FastAPI `api/` (security/settings/main + index/auth/workflow/annotations routers) over `cli.track` + `models.record`; stdlib-HMAC `jr_write` cookie, fail-closed (`JR_WRITE_KEY`/`COOKIE_SECURE`); `GET /api/index` re-projects the live activity log; `ANNOTATION_TYPE` + `validate_annotation_event` (constants only, no schema bump); `corpus/annotations.jsonl` sink. **React/Vite `frontend/`** (cv-tailor stack: `UnlockProvider`, typed `lib/api`, `useIndex`, Browse/Pipeline/Detail + owner write controls + flag form) replaces the retired Phase 5 `ui/`. `api` + `frontend` compose services (`--profile ui` → :8080/:8000). **362 tests + browser-verified.** **Deployed** behind Caddy + Cloudflare at job-radar.michel-portfolio.co.uk (`docker-compose.prod.yml`, SPEC §10.9). **§10.11 workflow enhancements built**: manual fit override + annotation visibility/dedup (event-log append + read-model join, no scorer/schema change; deviation 37). Conventions: `api/CLAUDE.md`, `frontend/CLAUDE.md` (deviations 28–37). |
+| 6 — Interactive UI | ✅ complete — thin FastAPI `api/` (security/settings/main + index/auth/workflow/annotations routers) over `cli.track` + `models.record`; stdlib-HMAC `jr_write` cookie, fail-closed (`JR_WRITE_KEY`/`COOKIE_SECURE`); `GET /api/index` re-projects the live activity log; `ANNOTATION_TYPE` + `validate_annotation_event` (constants only, no schema bump); `corpus/annotations.jsonl` sink. **React/Vite `frontend/`** (cv-tailor stack: `UnlockProvider`, typed `lib/api`, `useIndex`, Browse/Pipeline/Detail + owner write controls + flag form) replaces the retired Phase 5 `ui/`. `api` + `frontend` compose services (`--profile ui` → :8080/:8000). **362 tests + browser-verified.** **Deployed** behind Caddy + Cloudflare at job-radar.michel-portfolio.co.uk (`docker-compose.prod.yml`, SPEC §10.9). **§10.11 workflow enhancements built**: manual fit override + annotation visibility/dedup (event-log append + read-model join, no scorer/schema change; deviation 37). Conventions: `api/CLAUDE.md`, `frontend/CLAUDE.md` (deviations 28–37). **Manual JD entry via UI built** (SPEC §11.1): `POST /api/manual-ingest` + `frontend/.../AddRoleModal.tsx` — synchronous single-JD extract→score→append→reindex, `ats="manual"` (deviation 44). |
 | 7 — Fine-Tuned Analyser | Deferred (Project 5) |
 
 ---
@@ -323,6 +325,26 @@ Kept in full: everything below — active operational guards Claude Code must kn
     `require_unlocked` on this one endpoint (deviation 41(b)); both fail closed. New settings
     field `cv_tailor_service_key` (`CV_TAILOR_SERVICE_KEY`, separate from `JR_WRITE_KEY`,
     unset = Bearer path closed); added to `.env.example`. `GET /api/jobs/{job_id}` unchanged.
+
+44. *(→ SPEC §11.1)* **Manual JD entry via UI.** `POST /api/manual-ingest`
+    (`api/routers/manual_ingest.py`, owner-gated per-route) scores ONE pasted JD synchronously
+    and appends it to the corpus. Notable points: (a) **The one sanctioned violation of "Batch
+    API only — never synchronous extraction":** `pipeline.label.extract_one` is a single
+    `messages.create` (**Haiku 4.5**, standard non-batch pricing — its own `SYNC_COST_PER_MTOK`,
+    NOT the Opus batch table) that *reuses* the batch `build_system_prompt`/`build_user_content`/
+    `parse_extraction`, so the extraction shape is identical. (b) Dedup hashes the **normalised**
+    text — `record_hash(normalise(raw_text))` — so a manual entry and its auto-collected twin share
+    one `job_id` (409 on re-submit, *before* any extraction cost). (c) A manual entry is
+    `source_ats="manual"` **and** `tier=4` (Claude-extracted) — orthogonal to the human Tier-1/2
+    `corpus/manual/` drop folder, which still works. (d) Writes `validated_manual_{ts}` /
+    `scored_manual_{ts}` / `meta_manual_{ts}` files next to their read globs (so `load_*` pick them
+    up), appends a `manual_ingest` cost entry to `stats.json`, and rebuilds `index.json` via the same
+    `cli.stats` join. An optional `notes` becomes a workflow `note` event (never silently dropped).
+    (e) Owner-supplied `title`/`location` ride to the extraction via the `[ATS METADATA]` block; an
+    empty `source_url` is synthesised to `manual:{job_id}` to keep the sidecar key unique. (f) New
+    settings field `profile_path` (`JR_PROFILE_PATH`, default `candidate_profile.yaml`). (g) Frontend
+    `AddRoleModal.tsx` in the sidebar — owner-only (renders `null` unless `unlocked`), shows a
+    10–20s "extracting and scoring" state, never closes mid-flight. `SCHEMA_VERSION` unchanged.
 
 
 ## Schema summary

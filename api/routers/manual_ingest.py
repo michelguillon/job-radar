@@ -1,0 +1,210 @@
+"""api/routers/manual_ingest.py — manual JD entry via the UI (job_radar_SPEC §11.1).
+
+A growing number of high-value roles come from companies *outside* the monitored ATS
+universe (Workday portals, custom career pages, referrals, LinkedIn). ``corpus/manual/`` is
+the CLI escape hatch; this endpoint is the browser-accessible equivalent — same output, same
+pipeline, same detail-panel experience.
+
+``POST /api/manual-ingest`` (owner-gated) runs ONE pasted JD through the live pipeline
+**synchronously** (~10–20s): ``build_manual_record`` → single-call Claude extraction
+(``pipeline.label.extract_one``, Haiku 4.5 — the *one* sanctioned non-batch extraction, see
+CLAUDE.md deviation 44) → ``validate`` → ``score`` → append validated + scored + meta sidecar
+files (``*_manual_{ts}.jsonl``, ``ats="manual"``) → cost to ``stats.json`` → rebuild
+``index.json``. It NEVER touches the automated collection pipeline, the scorer, or the schema.
+
+Deduplication is the same SHA-256 the pipeline uses: ``record_hash(normalise(raw_text))`` (NOT
+the raw text — the automated pipeline normalises before hashing, so normalising here keeps a
+manually-entered JD and its auto-collected twin on the same ``job_id``). A re-submission is a
+409 no-op before any extraction cost is spent.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+
+from api.security import require_unlocked
+from api.settings import Settings, get_settings
+from cli.label import append_stats
+from cli.stats import (
+    build_index_rows,
+    export_index,
+    index_stats,
+    load_annotations,
+    load_cost_to_date,
+    load_cv_tailor_links,
+)
+from cli.track import (
+    _clock,
+    append_event,
+    build_event,
+    load_events,
+    load_jdrecords,
+    load_meta,
+    load_scores,
+    project,
+)
+from collectors.base import build_meta
+from models.record import (
+    _ANNOTATION_FIELDS,
+    _EXTRACTION_FIELDS,
+    JDRecord,
+    validate,
+)
+from pipeline.clean import normalise
+from pipeline.dedupe import record_hash
+from pipeline.label import ANNOTATION_DEFAULTS, estimate_sync_cost, extract_one
+from scoring.profile import load_profile
+from scoring.scorer import score
+
+log = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api", tags=["manual-ingest"])
+
+# Claude-extracted, so the Tier-4 (automated-labelled) tier — distinct from the human-structured
+# Tier-1/2 records in corpus/manual/. ``source_ats="manual"`` marks the browser entry point.
+MANUAL_TIER = 4
+MIN_JD_CHARS = 200  # below this is almost certainly not a full JD
+
+
+class ManualIngestRequest(BaseModel):
+    company: str
+    title: str
+    raw_text: str
+    source_url: str = ""
+    notes: str = ""
+
+
+def build_manual_record(*, company: str, title: str, raw_text: str, source_url: str, collected_at: str) -> JDRecord:
+    """A Tier-4 ``manual`` JDRecord with identity/raw set and every extraction/annotation field
+    ``None`` (extraction fills them next). ``id`` is the content hash the pipeline would assign."""
+    return JDRecord(
+        id=record_hash(normalise(raw_text)),
+        source_url=source_url,
+        source_ats="manual",
+        company=company,
+        collected_at=collected_at,
+        tier=MANUAL_TIER,
+        raw_html=None,
+        raw_text=raw_text,
+        **{f: None for f in (*_EXTRACTION_FIELDS, *_ANNOTATION_FIELDS)},
+    )
+
+
+def _out_path(read_glob: str, prefix: str, ts: str) -> str:
+    """A writable ``{prefix}_manual_{ts}.jsonl`` next to the read glob, matching its pattern.
+
+    e.g. ``corpus/scored/scored_*.jsonl`` → ``corpus/scored/scored_manual_{ts}.jsonl`` (so the
+    next ``load_scores(scored_glob)`` picks it up). Tests point the globs at ``tmp_path``."""
+    directory = os.path.dirname(read_glob) or "."
+    os.makedirs(directory, exist_ok=True)
+    return os.path.join(directory, f"{prefix}_manual_{ts}.jsonl")
+
+
+def _rebuild_index(settings: Settings) -> None:
+    """Re-run the same join ``cli.stats --export-index`` does, so the new role shows on reload."""
+    scores = load_scores(settings.scored_glob)
+    jds = load_jdrecords(settings.validated_glob)
+    metas = load_meta(settings.meta_glob)
+    workflow = project(load_events(settings.log_path))
+    annotations = load_annotations(settings.annotations_path)
+    cv_links = load_cv_tailor_links(settings.cv_tailor_links_path)
+    rows = build_index_rows(scores, jds, metas, workflow, annotations, cv_links)
+    stats = index_stats(rows, cost_to_date=load_cost_to_date(settings.stats_path))
+    export_index(rows, stats, path=settings.index_path, generated_at=_clock())
+
+
+@router.post("/manual-ingest", dependencies=[Depends(require_unlocked)])
+def manual_ingest(body: ManualIngestRequest, settings: Settings = Depends(get_settings)) -> dict:
+    """Owner-gated synchronous ingest of one pasted JD. See module docstring for the pipeline.
+
+    200 → ``{job_id, company, title, fit_label, fit_score, priority_score}``; 409 duplicate;
+    422 too-short / extraction-invalid; 500 unexpected pipeline error."""
+    text = body.raw_text.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="JD text is required")
+    if len(text) < MIN_JD_CHARS:
+        raise HTTPException(status_code=422, detail="JD text too short — paste the full job description")
+    if not body.company.strip() or not body.title.strip():
+        raise HTTPException(status_code=422, detail="company and title are required")
+
+    job_id = record_hash(normalise(body.raw_text))
+    if job_id in load_scores(settings.scored_glob):
+        raise HTTPException(status_code=409, detail={"job_id": job_id, "message": "This JD is already in the corpus"})
+
+    # Synthesise a unique source_url when none is given, so the metadata sidecar (keyed by
+    # source_url → carries the owner-supplied title/location to the join) can't collide across
+    # manual entries with empty URLs.
+    source_url = body.source_url.strip() or f"manual:{job_id}"
+    record = build_manual_record(
+        company=body.company.strip(), title=body.title.strip(),
+        raw_text=body.raw_text, source_url=source_url, collected_at=_clock(),
+    )
+    meta = build_meta(
+        source_url=source_url, source_ats="manual", company=body.company.strip(),
+        title=body.title.strip(), location_str="",
+    )
+
+    # --- single-JD Claude extraction (synchronous; the one sanctioned non-batch path) ---
+    try:
+        extraction, usage = extract_one(record, meta=meta)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=422, detail=f"extraction failed — model returned no parseable JSON ({exc})")
+    except Exception:  # transport / timeout / API error
+        log.exception("manual ingest: extraction call failed for %s", job_id)
+        raise HTTPException(status_code=500, detail="extraction failed — please try again")
+
+    try:
+        for field in _EXTRACTION_FIELDS:
+            setattr(record, field, extraction[field])
+    except (KeyError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=f"extraction incomplete — missing field {exc}")
+    record.tier = MANUAL_TIER
+    # Seed neutral annotation defaults so the record is schema-valid (Claude never sets these).
+    for field, default in ANNOTATION_DEFAULTS.items():
+        if getattr(record, field) is None:
+            setattr(record, field, default)
+
+    errors = validate(record)
+    if errors:
+        raise HTTPException(status_code=422, detail=f"extraction did not validate: {errors}")
+
+    # --- score (locked scorer, same as the pipeline) ---
+    try:
+        profile = load_profile(settings.profile_path)
+        scored_at = _clock()
+        app_record = score(record, profile, scored_at)
+    except Exception:
+        log.exception("manual ingest: scoring failed for %s", job_id)
+        raise HTTPException(status_code=500, detail="scoring failed — please try again")
+
+    # --- append corpus files (validated JD + scored ApplicationRecord + meta sidecar) ---
+    ts = scored_at.replace("-", "").replace(":", "")
+    with open(_out_path(settings.validated_glob, "validated", ts), "w", encoding="utf-8") as fh:
+        fh.write(record.to_jsonl() + "\n")
+    with open(_out_path(settings.scored_glob, "scored", ts), "w", encoding="utf-8") as fh:
+        fh.write(app_record.to_jsonl() + "\n")
+    with open(_out_path(settings.meta_glob, "meta", ts), "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(meta, ensure_ascii=False) + "\n")
+
+    # Persist any owner note as a workflow note event (otherwise it would be silently dropped).
+    if body.notes.strip():
+        append_event(settings.log_path, build_event(job_id, event="note", value=None, notes=body.notes.strip(), ts=_clock()))
+
+    # --- cost tracking (same ledger as batch runs) + index rebuild ---
+    append_stats({"run": ts, "step": "manual_ingest", "job_id": job_id, "records": 1, **estimate_sync_cost(usage)},
+                 path=settings.stats_path)
+    _rebuild_index(settings)
+
+    return {
+        "job_id": job_id,
+        "company": body.company.strip(),
+        "title": body.title.strip(),
+        "fit_label": app_record.fit_label,
+        "fit_score": app_record.fit_score,
+        "priority_score": app_record.priority_score,
+    }

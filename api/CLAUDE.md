@@ -9,6 +9,10 @@ write path over the same JSONL the CLI appends to** — never a second source of
   `project`, `load_scores`, `transition_warning`, `_clock`, `_default_state`) and
   `models.record` vocab/validators. **NEVER** call the scorer, labeller, or any pipeline
   stage. A write = `require_unlocked` → `build_event`/`validate_*` → `append_event` → 200.
+  **The one exception:** `POST /api/manual-ingest` (`routers/manual_ingest.py`, SPEC §11.1,
+  deviation 44) DOES run the live pipeline — single-JD synchronous extract (`pipeline.label.
+  extract_one`, Haiku 4.5) → `validate` → `score` → append corpus files → rebuild `index.json`.
+  It is the documented thick endpoint; do not copy its shape to the other (thin) write routes.
 - **The scorer is LOCKED.** The API reads scores (`load_scores`), it never writes a scored
   file. Annotations record disagreement with a score — they never mutate an extraction.
 - **Reuse, don't duplicate** write/validation logic. `build_event` runs
@@ -24,8 +28,10 @@ write path over the same JSONL the CLI appends to** — never a second source of
   hatch is intentionally not exposed over HTTP).
 - **Write endpoints** (all gated): `POST /api/status|note|title|outcome` (workflow.py,
   append to `activity_log.jsonl`) + `POST /api/annotations` (annotations.py →
-  `annotations.jsonl`). `outcome` validates against `OUTCOME`; the UI pairs it with a
-  `/api/status` call to move the workflow lane (the two are orthogonal under model C).
+  `annotations.jsonl`) + `POST /api/manual-ingest` (manual_ingest.py — the one thick endpoint,
+  writes `*_manual_{ts}.jsonl` + rebuilds the index, deviation 44). `outcome` validates against
+  `OUTCOME`; the UI pairs it with a `/api/status` call to move the workflow lane (the two are
+  orthogonal under model C).
 
 ## Endpoint security — per-route gating rule
 
@@ -76,7 +82,8 @@ corpus. New Phase-6 sink: `corpus/annotations.jsonl` (gitignored, append-only).
 - `JR_WRITE_KEY` — owner unlock secret + HMAC signing key. Unset = read-only deployment.
 - `COOKIE_SECURE` — `true` in prod (HTTPS leg); off for localhost http.
 - `JR_LOG_PATH` / `JR_SCORED_GLOB` / `JR_VALIDATED_GLOB` / `JR_META_GLOB` / `JR_INDEX_PATH`
-  / `JR_ANNOTATIONS_PATH` — path overrides (defaults = CLI constants).
+  / `JR_ANNOTATIONS_PATH` / `JR_STATS_PATH` / `JR_PROFILE_PATH` — path overrides (defaults = CLI
+  constants; `JR_PROFILE_PATH` defaults to `candidate_profile.yaml`, used by manual-ingest scoring).
 
 ## Run
 
