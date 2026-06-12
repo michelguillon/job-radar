@@ -362,6 +362,24 @@ Kept in full: everything below — active operational guards Claude Code must kn
     functions (mirrors `/api/report/yield`); "CV-Tailor calibration" download button in the React
     sidebar. No schema bump, no new sink.
 
+46. *(→ SPEC §16 + `docs/SPEC_LANGFUSE_INSTRUMENTATION.md` §3)* **Langfuse pipeline tracing
+    (Phase B).** `cli/telemetry.py` is the ONE module importing the langfuse SDK (lazily, inside
+    functions — so `import cli.telemetry` works with langfuse uninstalled). Opt-in by
+    `LANGFUSE_PUBLIC_KEY`: unset → every recorder is a clean no-op (the default; `conftest.py`
+    pops the key so the suite runs untraced, escape hatch `JR_TRACE_TESTS=1`). Notable points:
+    (a) **Post-hoc spans** — the Batch API is async, so the two recorders build their trace tree
+    AFTER results arrive, let the root span CLOSE, then `flush()` (the CLI exits with no periodic
+    exporter — flush-before-close loses the trace; `langfuse_LEARNINGS.md` §7/§8). (b) Two targets:
+    `record_extraction_batch` (`cli/label.py`, after `merge_results`) and `record_scoring_run`
+    (`cli/score.py`). Rows assembled by **pure** builders (`build_trace_rows`/`build_scoring_rows`);
+    the scoring breakdown is re-derived with `stage1_fit` (read-only — scorer untouched). (c) No
+    business-logic/prompt/schema change (`SCHEMA_VERSION` unchanged); observability never raises
+    into the pipeline (every recorder guards + swallows). (d) `python -m cli.telemetry debug-trace`
+    is the zero-cost path probe (`auth_check` lives here, NEVER in `init_langfuse` — a sync probe
+    would hang). (e) **Deployment:** Job Radar's OWN project keys (not cv-tailor's),
+    `LANGFUSE_BASE_URL` = INTERNAL container URL (no Cloudflare hairpin), no quotes; `job-radar-api`
+    joins the external `tracing` network (server-side `.env` + compose, see `.env.example`).
+
 
 ## Schema summary
 

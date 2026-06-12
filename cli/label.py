@@ -20,6 +20,7 @@ import logging
 import os
 from datetime import datetime, timezone
 
+from cli import telemetry
 from models.record import JDRecord
 from pipeline import label
 from pipeline.clean import clean_readable
@@ -73,6 +74,40 @@ def _write_jsonl(path: str, records) -> None:
     with open(path, "w", encoding="utf-8") as fh:
         for r in records:
             fh.write((r.to_jsonl() if isinstance(r, JDRecord) else json.dumps(r, ensure_ascii=False)) + "\n")
+
+
+def build_trace_rows(
+    records: list[JDRecord],
+    results: list[dict],
+    labelled: list[JDRecord],
+    meta_index: dict[str, dict],
+    *,
+    model: str = label.MODEL,
+) -> list[dict]:
+    """Assemble one Langfuse trace row per batch result (telemetry.record_extraction_batch).
+
+    Pure assembly from data already in hand — the input prompt is rebuilt with the same
+    ``build_user_content`` the batch used, the completion/usage come from the downloaded
+    result, and ``validated`` reflects whether the record survived ``merge_results`` (i.e.
+    parsed + every extraction key present). No effect when tracing is disabled — the caller
+    guards on it, and the recorder early-returns regardless.
+    """
+    validated_ids = {r.id for r in labelled}
+    rows: list[dict] = []
+    for entry in results:
+        record = records[label._index_of(entry["custom_id"])]
+        usage = entry.get("usage", {})
+        rows.append({
+            "job_id": record.id,
+            "company": record.company,
+            "model": model,
+            "prompt": label.build_user_content(record, meta_index.get(record.source_url)),
+            "completion": entry.get("raw_text", ""),
+            "input_tokens": usage.get("input", 0),
+            "output_tokens": usage.get("output", 0),
+            "validated": record.id in validated_ids,
+        })
+    return rows
 
 
 def append_stats(entry: dict, path: str = STATS_PATH) -> None:
@@ -134,6 +169,15 @@ def main(argv: list[str] | None = None) -> int:
     if failures:
         failures_path = os.path.join(args.out_dir, f"failures_{ts}.jsonl")
         _write_jsonl(failures_path, failures)
+
+    # Observability (opt-in, no-op without LANGFUSE_PUBLIC_KEY): one post-hoc trace for the
+    # whole batch — child span + generation + validation score per JD. Best-effort by design.
+    if telemetry.is_enabled():
+        telemetry.record_extraction_batch(
+            batch_id,
+            build_trace_rows(records, results, labelled, meta_index),
+            metadata={"date": ts},
+        )
 
     cost = label.estimate_cost(results)
     append_stats(

@@ -26,9 +26,10 @@ import os
 from collections import Counter
 from datetime import datetime, timezone
 
+from cli import telemetry
 from models.record import JDRecord, SchemaVersionError, validate_application_record
-from scoring.profile import load_profile
-from scoring.scorer import score
+from scoring.profile import Profile, load_profile
+from scoring.scorer import score, stage1_fit
 
 OUT_DIR = "corpus/scored"
 DEFAULT_INPUT = "corpus/validated/validated_*.jsonl"
@@ -69,6 +70,38 @@ def load_records(input_glob: str) -> list[JDRecord]:
     return records
 
 
+def build_scoring_rows(
+    records: list[JDRecord], results: list, profile: Profile
+) -> list[dict]:
+    """Assemble one Langfuse trace row per scored JD (telemetry.record_scoring_run).
+
+    The per-dimension breakdown is re-derived with ``stage1_fit`` — a pure, read-only
+    call (the scorer is never mutated), giving the same signal sub-scores + gate outcomes
+    the ApplicationRecord was built from. Five dimensions are surfaced: the three signal
+    discriminators (role / domain / technical_depth) and the two penalty gates
+    (seniority / location). No effect when tracing is disabled.
+    """
+    rows: list[dict] = []
+    for jd, rec in zip(records, results):
+        _, bd = stage1_fit(jd, profile)
+        rows.append({
+            "job_id": rec.job_id,
+            "company": jd.company,
+            "fit_label": rec.fit_label,
+            "fit_score": rec.fit_score,
+            "dimensions": [
+                {"dimension": "role", "score": bd.role, "rationale": "signal ×2"},
+                {"dimension": "domain", "score": bd.domain, "rationale": "signal ×2"},
+                {"dimension": "technical_depth", "score": bd.technical_depth, "rationale": "signal ×1"},
+                {"dimension": "seniority", "score": -bd.seniority_penalty,
+                 "rationale": f"gate {bd.seniority_gate}"},
+                {"dimension": "location", "score": -bd.location_penalty,
+                 "rationale": f"gate {bd.location_gate}"},
+            ],
+        })
+    return rows
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Score validated JDs against the candidate profile.")
     parser.add_argument("--input", default=DEFAULT_INPUT, help=f"Glob for validated JSONL (default: {DEFAULT_INPUT})")
@@ -102,6 +135,15 @@ def main(argv: list[str] | None = None) -> int:
     with open(out_path, "w", encoding="utf-8") as fh:
         for rec in results:
             fh.write(rec.to_jsonl() + "\n")
+
+    # Observability (opt-in, no-op without LANGFUSE_PUBLIC_KEY): one trace for the run —
+    # a jd_scoring span per JD with a dimension_score breakdown. Best-effort by design.
+    if telemetry.is_enabled():
+        telemetry.record_scoring_run(
+            f"scoring_{ts}",
+            build_scoring_rows(records, results, profile),
+            metadata={"run_date": scored_at},
+        )
 
     distribution = dict(sorted(Counter(r.fit_label for r in results).items()))
     shown = [r for r in results if is_shown(r.fit_label, r.fit_score, mode, args.min_fit)]

@@ -29,6 +29,15 @@ services:
     command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]  # no --reload
     restart: unless-stopped
     ports: !override []                        # internal-only; reached via the default net
+    networks:
+      # Declaring networks here OVERRIDES the implicit default attachment, so `default` must be
+      # listed explicitly (intra-stack: nginx/frontend reaches the api by container_name). `tracing`
+      # is the shared external network the Langfuse stack lives on — the pipeline CLIs run inside
+      # this container (`docker compose run … python -m cli.label/score`) and reach the Langfuse web
+      # container by name via LANGFUSE_BASE_URL (SPEC §16, deviation 46). Unlike `caddy`, joining
+      # `tracing` is safe — no service-alias collisions (we use the container_name, not `api`).
+      - default
+      - tracing
 
   # Multi-stage build (Node → nginx-alpine). nginx serves the static bundle on :80 and
   # proxies /api/* → job-radar-api:8000 (frontend/nginx.conf, by container_name).
@@ -50,5 +59,10 @@ networks:
   # entry-point container (frontend) joins it; the api stays off it (gotcha #6 — service
   # aliases like `api` collide across apps on the shared network, container_names don't).
   caddy:
+    external: true
+  # Shared observability network the self-hosted Langfuse stack lives on. Created once on the
+  # server (`docker network create tracing`); cv-tailor is already attached. The api joins it so
+  # in-container pipeline runs can export traces to langfuse-langfuse-web-1:3000 (SPEC §16).
+  tracing:
     external: true
   default: {}

@@ -2118,5 +2118,32 @@ A sixth read-only report, comparing Job Radar's fit verdict against cv-tailor's 
 
 ---
 
+## Langfuse instrumentation (Phase B) — pipeline observability, opt-in & fail-open
+
+- **One SDK import surface, gated by one env var.** `cli/telemetry.py` is the only module
+  that touches the langfuse SDK (lazily, inside functions), and `LANGFUSE_PUBLIC_KEY` is the
+  single on/off gate — unset → every recorder is a clean no-op. The suite (now 462 tests)
+  runs untraced via `conftest.py` popping the key (escape hatch `JR_TRACE_TESTS=1`).
+  Observability never raises into the pipeline; a failed trace logs a WARNING and continues.
+- **Post-hoc spans, because the Batch API is async.** Unlike cv-tailor's real-time pipeline,
+  Job Radar's extraction results arrive after the batch ends, so the two recorders
+  (`record_extraction_batch` in `cli/label.py`, `record_scoring_run` in `cli/score.py`) build
+  their trace tree from already-collected data, let the root span CLOSE, then `flush()` — the
+  CLI exits with no periodic exporter, so flush-after-close is what makes the trace exist
+  (`langfuse_LEARNINGS.md` §7/§8).
+- **Pure row-builders, scorer untouched.** `build_trace_rows` rebuilds the extraction prompt
+  with the same `build_user_content` the batch used; `build_scoring_rows` re-derives the
+  dimension breakdown with `stage1_fit` (read-only). Both are unit-testable without the SDK —
+  no business-logic, prompt, or schema change (`SCHEMA_VERSION` unchanged).
+- **Trust the verified artifact over the spec sketch.** The instrumentation spec's §3 sketch
+  used a different langfuse API than the cv-tailor module already proven live against the same
+  v4.7.1 server. Mirrored the proven surface (`create_trace_id` / `start_as_current_observation`
+  / `create_score(observation_id=…)`) and introspected the installed SDK to confirm every
+  signature before wiring. See `docs/langfuse_LEARNINGS.md` §8 and SPEC §16.
+
+462 tests; langfuse 4.7.1 surface introspected in-container; `debug-trace` verified (disabled path).
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

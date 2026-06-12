@@ -2870,3 +2870,48 @@ a single labelling run. Cost tracked per run. Fine-tuning deferred
 until the corpus justifies it. These are the decisions of someone
 who has thought about production constraints, not someone building
 a demo.
+
+---
+
+## 16. Observability — Langfuse instrumentation (Phase B) ✅ built 2026-06-13
+
+Full design: `docs/SPEC_LANGFUSE_INSTRUMENTATION.md` (§3 = Job Radar) +
+`docs/SPEC_LANGFUSE_DEPLOYMENT.md`; the *why* lives in `docs/langfuse_LEARNINGS.md`.
+This section records what was built on the Job Radar side.
+
+**Opt-in, fail-open, single import surface.** `cli/telemetry.py` is the ONE module
+that imports the langfuse SDK (lazily, inside functions — so `import cli.telemetry`
+works with langfuse uninstalled). Tracing is gated entirely by `LANGFUSE_PUBLIC_KEY`:
+unset → every recorder is a clean no-op (the default, and how the 462-test suite runs;
+`conftest.py` pops the key, escape hatch `JR_TRACE_TESTS=1`). Observability never raises
+into the pipeline — each recorder guards on `is_enabled()` and swallows its own errors.
+
+**Post-hoc, not real-time (the Batch-API difference from cv-tailor).** Job Radar's
+extraction uses the Claude Batch API — results arrive asynchronously, so spans are
+created *after* the batch ends, from already-collected data. The CLI then exits, so
+there is no periodic exporter to fall back on: each recorder builds its tree, lets the
+root span CLOSE, then `flush()`es (flushing before the root closes loses the trace —
+the bug that bit cv-tailor, `langfuse_LEARNINGS.md` §7).
+
+**Two trace targets** (deterministic trace id from `batch_id` / run id; a WARNING log
+line correlates `batch_id → trace_id`):
+- `extraction_batch` (`cli/label.py`, after `merge_results`): root span → one
+  `jd_extraction` span per JD → a `claude_extraction` generation (model + token usage)
+  → a `validation_passed` numeric score per JD. Rows assembled by `build_trace_rows`
+  (pure) — the prompt rebuilt with the same `build_user_content` the batch used.
+- `scoring_run` (`cli/score.py`): root span → one `jd_scoring` span per JD (fit
+  metadata) → one `dimension_score` span per dimension (role/domain/technical_depth +
+  the seniority/location gates). The breakdown is re-derived with `stage1_fit` (pure,
+  read-only — the scorer is never touched), assembled by `build_scoring_rows`.
+
+**Debug toolkit first (§11).** `python -m cli.telemetry debug-trace` creates a minimal
+trace + score with NO LLM call and returns `{enabled, host, trace_id, auth_check, error}`
+— a zero-cost end-to-end path check to run from inside the container before spending any
+tokens. `auth_check` lives here (request-time), never in `init_langfuse` (a sync,
+no-timeout probe would hang startup).
+
+**Deployment (server-side, M720q).** Job Radar uses its OWN Langfuse project keys (not
+cv-tailor's — shared keys land traces in the wrong dashboard), `LANGFUSE_BASE_URL` set to
+the INTERNAL container URL (a container can't hairpin to its own Cloudflare URL), no
+quotes around values. The `job-radar-api` service joins the external `tracing` network.
+Env vars documented in `.env.example`. No business-logic, prompt, or schema change.
