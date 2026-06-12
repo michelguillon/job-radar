@@ -11,7 +11,9 @@ aggregation functions over plain data (so tests stay deterministic), with a thin
     python -m cli.analyse --report status
     python -m cli.analyse --report companies
     python -m cli.analyse --report gaps
-    python -m cli.analyse --report all             # all four, header-separated
+    python -m cli.analyse --report yield
+    python -m cli.analyse --report cv_tailor       # Job Radar vs cv-tailor fit divergence
+    python -m cli.analyse --report all             # all six, header-separated
 
 Reuses the tracker's loaders + join (cli.track.load_scores / load_jdrecords /
 load_meta / load_events / project) — it does not reimplement the score ⨝ JD ⨝
@@ -30,7 +32,14 @@ from collections import Counter
 from datetime import datetime, timezone
 
 from cli.collect import SEEDS_PATH, load_companies
-from cli.stats import ANNOTATIONS_PATH, STATS_PATH, load_annotations, load_cost_to_date
+from cli.stats import (
+    ANNOTATIONS_PATH,
+    CV_TAILOR_LINKS_PATH,
+    STATS_PATH,
+    load_all_cv_tailor_links,
+    load_annotations,
+    load_cost_to_date,
+)
 from cli.track import (
     LOG_PATH,
     META_GLOB,
@@ -49,8 +58,11 @@ from models.record import APPLICATION_STATUS
 
 log = logging.getLogger("analyse")
 
-REPORTS = ("score-distribution", "status", "companies", "gaps", "yield", "all")
+REPORTS = ("score-distribution", "status", "companies", "gaps", "yield", "cv_tailor", "all")
 DEFAULT_REPORT = "score-distribution"
+
+# cv-tailor tailoring modes always rendered in the mode breakdown (even at 0 runs).
+CVT_MODES = ("demo", "full")
 
 # A scored role rated ≥ this then rejected is a scorer false positive (BACKLOG §5).
 HIGH_SCORE_THRESHOLD = 7
@@ -374,6 +386,136 @@ def build_yield_report(seeds, scores, jds, workflow, annotations, *, cost_per_jo
 
 
 # ---------------------------------------------------------------------------
+# Pure: cv-tailor calibration (job_radar_SPEC §11.1 + §11.3)
+# ---------------------------------------------------------------------------
+#
+# Joins the cv-tailor run links against the scored corpus to compare the two
+# systems' fit verdicts. Job Radar's fit_score is 1–10; cv-tailor's fit_score is
+# 0.0–1.0. Both are normalised to 0–100 and the delta (CVT − JR) shows divergence —
+# negative = cv-tailor scored lower (expected, especially in demo mode). A run whose
+# job_id is not in the scored corpus is surfaced (not dropped) as diagnostic data.
+
+
+def _cvt_pct(value: float | None) -> int | None:
+    """A 0.0–1.0 cv-tailor score → 0–100 integer percent (None-safe)."""
+    return round(value * 100) if value is not None else None
+
+
+def _cvt_row(job_id: str, link: dict, score, jd, meta, state) -> dict:
+    """One latest-per-job comparison row (Job Radar vs cv-tailor)."""
+    in_corpus = score is not None
+    cvt_fit_pct = _cvt_pct(link.get("fit_score"))
+    jr_fit = score.fit_score if in_corpus else None
+    delta = (cvt_fit_pct - jr_fit * 10) if (cvt_fit_pct is not None and jr_fit is not None) else None
+    return {
+        "job_id": job_id,
+        "in_corpus": in_corpus,
+        "company": jd.company if jd else None,
+        "title": _title_for(jd, meta, state.get("title_override")) if jd else None,
+        "jr_fit_score": jr_fit,
+        "jr_label": score.fit_label if in_corpus else None,
+        "cvt_fit_pct": cvt_fit_pct,
+        "coverage_pct": _cvt_pct(link.get("coverage_score")),
+        "cv_quality_score": link.get("cv_quality_score"),
+        "mode": link.get("tailoring_mode") or "(unknown)",
+        "run_id": link.get("cv_tailor_run_id"),
+        "ts": link.get("ts"),
+        "delta": delta,
+    }
+
+
+def build_cv_tailor_report(all_links, scores, jds, metas, workflow) -> dict:
+    """Pure join: cv-tailor run links ⨝ scored corpus ⨝ validated JDs.
+
+    ``all_links`` is the full (non-deduplicated) list from
+    ``cli.stats.load_all_cv_tailor_links``. Returns the latest-per-job comparison
+    ``rows`` (sorted by Job Radar fit_score desc, with out-of-corpus runs last), the
+    ``divergence`` summary, the per-``mode`` breakdown, and the ``multiple_runs`` per
+    role. The caller renders it; nothing here writes a corpus file."""
+    latest: dict[str, dict] = {}
+    runs_by_job: dict[str, list[dict]] = {}
+    for link in all_links:
+        jid = link["job_id"]
+        runs_by_job.setdefault(jid, []).append(link)
+        prev = latest.get(jid)
+        if prev is None or str(link.get("ts", "")) >= str(prev.get("ts", "")):
+            latest[jid] = link
+
+    rows: list[dict] = []
+    for jid, link in latest.items():
+        score = scores.get(jid)
+        jd = jds.get(jid)
+        meta = metas.get(jd.source_url) if jd else None
+        state = workflow.get(jid, _default_state())
+        rows.append(_cvt_row(jid, link, score, jd, meta, state))
+    # In-corpus rows first, by JR fit desc; out-of-corpus rows last, by job_id.
+    rows.sort(key=lambda r: (
+        0 if r["in_corpus"] else 1,
+        -(r["jr_fit_score"] or 0),
+        (r["company"] or r["job_id"]).lower(),
+    ))
+
+    # Divergence summary over rows that have both verdicts (delta computable).
+    scored = [r for r in rows if r["delta"] is not None]
+    divergence = None
+    if scored:
+        divergence = {
+            "mean": round(sum(r["delta"] for r in scored) / len(scored)),
+            "most_aligned": min(scored, key=lambda r: abs(r["delta"])),
+            "most_divergent": max(scored, key=lambda r: abs(r["delta"])),
+        }
+
+    # Per-mode breakdown (latest-per-job rows grouped by tailoring_mode).
+    extra_modes = sorted({r["mode"] for r in rows} - set(CVT_MODES) - {"(unknown)"})
+    mode_order = list(CVT_MODES) + extra_modes + (["(unknown)"] if any(r["mode"] == "(unknown)" for r in rows) else [])
+    mode_breakdown = []
+    for mode in mode_order:
+        group = [r for r in rows if r["mode"] == mode]
+        fits = [r["cvt_fit_pct"] for r in group if r["cvt_fit_pct"] is not None]
+        covs = [r["coverage_pct"] for r in group if r["coverage_pct"] is not None]
+        mode_breakdown.append({
+            "mode": mode,
+            "runs": len(group),
+            "cvt_fit_mean": round(sum(fits) / len(fits)) if fits else None,
+            "coverage_mean": round(sum(covs) / len(covs)) if covs else None,
+        })
+
+    # Roles with more than one run (full history), oldest→latest, latest flagged.
+    multiple_runs = []
+    for jid, runs in runs_by_job.items():
+        if len(runs) < 2:
+            continue
+        ordered = sorted(runs, key=lambda r: str(r.get("ts", "")))
+        latest_ts = ordered[-1].get("ts")
+        jd = jds.get(jid)
+        meta = metas.get(jd.source_url) if jd else None
+        state = workflow.get(jid, _default_state())
+        multiple_runs.append({
+            "job_id": jid,
+            "company": jd.company if jd else None,
+            "title": _title_for(jd, meta, state.get("title_override")) if jd else None,
+            "runs": [{
+                "run_id": r.get("cv_tailor_run_id"),
+                "ts": r.get("ts"),
+                "cvt_fit_pct": _cvt_pct(r.get("fit_score")),
+                "coverage_pct": _cvt_pct(r.get("coverage_score")),
+                "cv_quality_score": r.get("cv_quality_score"),
+                "is_latest": r.get("ts") == latest_ts,
+            } for r in ordered],
+        })
+    multiple_runs.sort(key=lambda m: (m["company"] or m["job_id"]).lower())
+
+    return {
+        "rows": rows,
+        "role_count": len(latest),
+        "total_runs": len(all_links),
+        "divergence": divergence,
+        "mode_breakdown": mode_breakdown,
+        "multiple_runs": multiple_runs,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Pure: presentation
 # ---------------------------------------------------------------------------
 
@@ -635,6 +777,103 @@ def format_yield(data: dict, *, today: str) -> str:
     return "\n".join(lines)
 
 
+def _qual(value: float | None) -> str:
+    """A cv-tailor quality score (0.0–10.0) as X.X, or ``—`` when absent."""
+    return f"{value:.1f}" if value is not None else "—"
+
+
+def _cvt_pct_str(value: int | None) -> str:
+    return f"{value}%" if value is not None else "—"
+
+
+def _short_id(job_id: str, width: int = 18) -> str:
+    """A truncated job_id for out-of-corpus diagnostic rows (keeps the sha prefix)."""
+    return job_id if len(job_id) <= width else job_id[:width] + "..."
+
+
+def format_cv_tailor(data: dict, *, today: str) -> str:
+    """Render the cv-tailor calibration report (job_radar_SPEC §11.1 + §11.3)."""
+    rows = data["rows"]
+    if not rows:
+        return f"CV-TAILOR CALIBRATION REPORT — {today}\n\nNo cv-tailor runs recorded yet."
+
+    modes_present = {r["mode"] for r in rows}
+    mode_summary = f"all {next(iter(modes_present))} mode" if len(modes_present) == 1 else "mixed modes"
+    lines = [
+        f"CV-TAILOR CALIBRATION REPORT — {today}",
+        f"{data['role_count']} roles with cv-tailor runs | {mode_summary}",
+        "",
+        "━━ By Job Radar fit score (desc) " + "━" * 44,
+        "",
+        f"{'Company':<22} {'Title':<40} {'JR':>2}  {'JR label':<18} "
+        f"{'CVT':>4}  {'Cov':>4}  {'Qual':>4}  {'Mode':<6} {'Δ':>4}",
+        "─" * 116,
+    ]
+    in_corpus = [r for r in rows if r["in_corpus"]]
+    out_corpus = [r for r in rows if not r["in_corpus"]]
+    for r in in_corpus:
+        delta = f"{r['delta']:+d}" if r["delta"] is not None else "—"
+        lines.append(
+            f"{_truncate(r['company'] or '?', 22):<22} {_truncate(r['title'] or '?', 40):<40} "
+            f"{r['jr_fit_score']:>2}  {(r['jr_label'] or ''):<18} "
+            f"{_cvt_pct_str(r['cvt_fit_pct']):>4}  {_cvt_pct_str(r['coverage_pct']):>4}  "
+            f"{_qual(r['cv_quality_score']):>4}  {_truncate(r['mode'], 6):<6} {delta:>4}"
+        )
+    if out_corpus:
+        lines += ["", "Runs not in the scored corpus (diagnostic — role not collected/scored):"]
+        for r in out_corpus:
+            lines.append(
+                f"  {_short_id(r['job_id']):<22} (not in corpus)   "
+                f"CVT: {_cvt_pct_str(r['cvt_fit_pct'])}  cov: {_cvt_pct_str(r['coverage_pct'])}  "
+                f"qual: {_qual(r['cv_quality_score'])}"
+            )
+
+    # ━━ Divergence summary ━━
+    lines += ["", "━━ Divergence summary " + "━" * 55, "",
+              "Δ = CVT fit% − (JR fit_score × 10)  [negative = cv-tailor lower than Job Radar]", ""]
+    div = data["divergence"]
+    if not div:
+        lines.append("  (no role has both a Job Radar score and a cv-tailor run yet)")
+    else:
+        def _label(r: dict) -> str:
+            return f"{r['company'] or _short_id(r['job_id'])} {_truncate(r['title'] or '', 40)}".strip()
+        sign = "cv-tailor consistently lower" if div["mean"] < 0 else "cv-tailor consistently higher"
+        lines += [
+            f"Mean divergence:   {div['mean']:+d}  ({sign})",
+            f"Most aligned:      {_label(div['most_aligned'])}  (Δ {div['most_aligned']['delta']:+d})",
+            f"Most divergent:    {_label(div['most_divergent'])}  (Δ {div['most_divergent']['delta']:+d})",
+        ]
+
+    # ━━ By mode ━━
+    lines += ["", "━━ By mode " + "━" * 66, ""]
+    for m in data["mode_breakdown"]:
+        fit = _cvt_pct_str(m["cvt_fit_mean"])
+        cov = _cvt_pct_str(m["coverage_mean"])
+        lines.append(f"  {m['mode']:<6} {m['runs']:>3} runs   CVT fit mean: {fit:>4}   Coverage mean: {cov:>4}")
+
+    # ━━ Multiple runs ━━
+    lines += ["", "━━ Multiple runs (same role, different runs) " + "━" * 32, ""]
+    if not data["multiple_runs"]:
+        lines.append("  (no role has more than one run)")
+    else:
+        for m in data["multiple_runs"]:
+            label = f"{m['company'] or ''} {m['title'] or ''}".strip() or _short_id(m["job_id"])
+            lines.append(f"  {label}: {len(m['runs'])} runs")
+            for run in m["runs"]:
+                flag = "  ← latest" if run["is_latest"] else ""
+                lines.append(
+                    f"    {run['run_id'] or '(no run_id)'}  fit: {_cvt_pct_str(run['cvt_fit_pct'])}  "
+                    f"cov: {_cvt_pct_str(run['coverage_pct'])}  qual: {_qual(run['cv_quality_score'])}{flag}"
+                )
+
+    # ━━ Notes ━━
+    lines += ["", "━━ Notes " + "━" * 68, "",
+              "All cv-tailor demo-mode fit% and coverage% run systematically lower than full",
+              "mode (typically 2–3× after refinement iterations). Run full mode on high-priority",
+              "roles before drawing conclusions from a large negative Δ."]
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # IO + report dispatch
 # ---------------------------------------------------------------------------
@@ -671,7 +910,8 @@ def load_yield_seeds(seeds_path: str = SEEDS_PATH) -> list[dict]:
 
 
 def build_reports(report: str, scores, jds, metas, workflow, *, today: str, now: datetime,
-                  cost: float | None, cost_per_job: float | None, annotations=None, seeds=None) -> list[str]:
+                  cost: float | None, cost_per_job: float | None, annotations=None, seeds=None,
+                  cv_tailor_links=None) -> list[str]:
     """Return the requested report(s) as a list of rendered blocks."""
     by_job = companies_by_job(scores, jds)
     blocks: dict[str, str] = {
@@ -683,8 +923,13 @@ def build_reports(report: str, scores, jds, metas, workflow, *, today: str, now:
             build_yield_report(seeds or [], scores, jds, workflow, annotations or {}, cost_per_job=cost_per_job),
             today=today,
         ),
+        "cv_tailor": lambda: format_cv_tailor(
+            build_cv_tailor_report(cv_tailor_links or [], scores, jds, metas, workflow),
+            today=today,
+        ),
     }
-    order = ["score-distribution", "status", "companies", "gaps", "yield"] if report == "all" else [report]
+    order = (["score-distribution", "status", "companies", "gaps", "yield", "cv_tailor"]
+             if report == "all" else [report])
     return [blocks[name]() for name in order]
 
 
@@ -699,6 +944,8 @@ def cmd_analyse(argv: list[str], *, now=_now, out=print) -> int:
     parser.add_argument("--annotations", default=ANNOTATIONS_PATH, help=f"Annotations log (default: {ANNOTATIONS_PATH})")
     parser.add_argument("--stats-file", default=STATS_PATH, dest="stats_file", help=f"Cost ledger (default: {STATS_PATH})")
     parser.add_argument("--seeds", default=SEEDS_PATH, help=f"Company seeds for the yield report (default: {SEEDS_PATH})")
+    parser.add_argument("--cv-tailor-links", default=CV_TAILOR_LINKS_PATH, dest="cv_tailor_links",
+                        help=f"cv-tailor run links for the cv_tailor report (default: {CV_TAILOR_LINKS_PATH})")
     args = parser.parse_args(argv)
 
     scores = load_scores(args.scored)
@@ -707,6 +954,7 @@ def cmd_analyse(argv: list[str], *, now=_now, out=print) -> int:
     workflow = project(load_events(args.log))
     annotations = load_annotations(args.annotations)
     seeds = load_yield_seeds(args.seeds)
+    cv_tailor_links = load_all_cv_tailor_links(args.cv_tailor_links)
 
     if not scores:
         out("(no scored jobs found — run the pipeline first)")
@@ -719,7 +967,7 @@ def cmd_analyse(argv: list[str], *, now=_now, out=print) -> int:
     today = now_dt.strftime("%Y-%m-%d")
     blocks = build_reports(args.report, scores, jds, metas, workflow,
                            today=today, now=now_dt, cost=cost, cost_per_job=cost_per_job,
-                           annotations=annotations, seeds=seeds)
+                           annotations=annotations, seeds=seeds, cv_tailor_links=cv_tailor_links)
     out(("\n\n" + "=" * 72 + "\n\n").join(blocks))
     return 0
 

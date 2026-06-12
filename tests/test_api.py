@@ -425,6 +425,41 @@ def test_yield_report_downloads(client, tmp_path, monkeypatch):
     assert "Mistral AI" in res.text
 
 
+def test_cv_tailor_report_downloads(client):
+    """GET /api/report/cv_tailor is public, returns text/plain, and attaches as a .txt."""
+    import os
+    from dataclasses import replace
+    from models.record import JDRecord
+    from tests.factories import base_envelope
+
+    # Validated JD for the scored job (sha256:j1 is fit=7 in the fixture's scored corpus).
+    base_dir = os.path.dirname(client.settings.log_path)
+    vpath = os.path.join(base_dir, "validated_20260609.jsonl")
+    env = base_envelope()
+    env.update(id="sha256:j1", company="Acme", raw_text="Solutions Engineer\nbody")
+    with open(vpath, "w", encoding="utf-8") as fh:
+        fh.write(JDRecord.from_dict(env).to_jsonl() + "\n")
+
+    with open(client.settings.cv_tailor_links_path, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "v": 1, "job_id": "sha256:j1", "ts": "2026-06-12T16:00:00Z",
+            "cv_tailor_run_id": "run_1", "fit_score": 0.36, "coverage_score": 0.15,
+            "cv_quality_score": 7.9, "tailoring_mode": "demo",
+        }) + "\n")
+
+    full = replace(client.settings, validated_glob=vpath)
+    app.dependency_overrides[get_settings] = lambda: full
+
+    res = client.get("/api/report/cv_tailor")
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/plain")
+    assert "attachment" in res.headers["content-disposition"]
+    assert res.headers["content-disposition"].endswith('.txt"')
+    assert "CV-TAILOR CALIBRATION REPORT" in res.text
+    assert "Acme" in res.text
+    assert "-34" in res.text   # JR 7 × 10 = 70; CVT 36% → Δ = 36 − 70 = −34
+
+
 # --- cv-tailor: POST results (gated) + GET job detail (public) ------------------
 
 def test_cv_tailor_results_post_valid(client, monkeypatch):

@@ -179,6 +179,24 @@ def load_cv_tailor_links(path: str = CV_TAILOR_LINKS_PATH) -> dict[str, dict]:
     return latest
 
 
+def load_all_cv_tailor_links(path: str = CV_TAILOR_LINKS_PATH) -> list[dict]:
+    """Every cv-tailor link record (NOT deduplicated), in file order, with the read-time
+    field migration applied (deviation 43).
+
+    ``load_cv_tailor_links`` keeps only the latest run per ``job_id`` (the read-model
+    contract); the calibration report (``cli.analyse --report cv_tailor``) also needs the
+    full history so it can surface multiple runs of the same role. Records without a
+    ``job_id`` are skipped, same as the latest-per-job loader.
+    """
+    records: list[dict] = []
+    for event in load_events(path):
+        if not event.get("job_id"):
+            continue
+        _migrate_cv_tailor_fields(event)
+        records.append(event)
+    return records
+
+
 def _migrate_cv_tailor_fields(record: dict) -> None:
     """Read-time field migration (deviation 43) — no file rewrite, no pipeline stage.
 

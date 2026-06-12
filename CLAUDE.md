@@ -346,6 +346,22 @@ Kept in full: everything below — active operational guards Claude Code must kn
     `AddRoleModal.tsx` in the sidebar — owner-only (renders `null` unless `unlocked`), shows a
     10–20s "extracting and scoring" state, never closes mid-flight. `SCHEMA_VERSION` unchanged.
 
+45. *(→ SPEC §11.1 + §11.3)* **CV-Tailor calibration report.** `cli.analyse --report cv_tailor`
+    (sixth report) compares Job Radar's fit verdict against cv-tailor's per role, joining
+    `corpus/cv_tailor_links.jsonl` ⨝ scored ⨝ validated. Strictly read-only, same pure-functions
+    shape as the other reports. Notable points: (a) **Two loaders for one sink, by design:** the
+    new `cli.stats.load_all_cv_tailor_links` returns **all** runs (list, un-deduplicated) so the
+    multiple-runs section can show run history — distinct from `load_cv_tailor_links` (latest per
+    `job_id`, the read-model contract); same `_migrate_cv_tailor_fields` + skip-no-job_id. (b) The
+    calibration signal is `Δ = CVT_fit% − (JR_fit_score × 10)` (both normalised to 0–100; JR is
+    1–10, CVT is 0.0–1.0); negative = cv-tailor lower. Most-aligned/divergent rank by `|Δ|`. (c)
+    Runs whose `job_id` is **not** in the scored corpus are surfaced as a "(not in corpus)"
+    diagnostic block, never dropped. (d) Per-mode breakdown counts **latest-per-role** rows (so
+    header role-count and breakdown run-count agree); `demo`/`full` always render. (e)
+    `GET /api/report/cv_tailor` (read-only, no auth) returns the *same* report via the same pure
+    functions (mirrors `/api/report/yield`); "CV-Tailor calibration" download button in the React
+    sidebar. No schema bump, no new sink.
+
 
 ## Schema summary
 

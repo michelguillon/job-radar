@@ -2186,14 +2186,14 @@ file, never calls a pipeline stage, and never touches the Anthropic API. It reus
 tracker's loaders + join (`cli.track.load_scores`/`load_jdrecords`/`load_meta`/
 `load_events`/`project`) rather than reimplementing the score ⨝ JD ⨝ activity-log join,
 following the cli.track / cli.digest shape (pure aggregation functions + a thin `main()`).
-Four reports: **score-distribution** (default — fit-label + fit-score histograms, top
+Six reports: **score-distribution** (default — fit-label + fit-score histograms, top
 companies by strong/blocked count, est. cost/job from `stats.json`); **status** (pipeline
 lane counts, review/shortlist/apply rates, stale-application list); **companies** (per-company
 jobs/strong/blocked/reviewed/shortlisted, shortlist-rate ranking, "zero-shortlist despite a
 real sample"); **gaps** (top blocking constraints across blocked roles + top requirement gaps
 across all and within strong-fit roles, plus rejection reasons section when data exists);
-and **yield** (the company yield report — see below). `--report all` runs all five,
-header-separated.
+**yield** (the company yield report — see below); and **cv_tailor** (the cv-tailor
+calibration report — see below). `--report all` runs all six, header-separated.
 
 ### Company metadata + yield tracking ✅ built 2026-06-11
 
@@ -2242,6 +2242,25 @@ if invalid); existing 409-duplicate behaviour unchanged. Frontend shows the cont
 section (reason frequency + most-rejected companies with breakdown), shown only when ≥1
 exists. Deviation 39: the UI mock showed an optional free-text notes field but the annotation
 record has no destination for it — omitted to avoid silently dropping input.
+
+### CV-Tailor calibration report ✅ built 2026-06-12
+
+`python -m cli.analyse --report cv_tailor` compares Job Radar's fit verdict against
+cv-tailor's, per role with a recorded cv-tailor run. It reads `corpus/cv_tailor_links.jsonl`
+(via a new `cli.stats.load_all_cv_tailor_links`, which returns **all** runs, not the
+latest-per-job that `load_cv_tailor_links` keeps — so multiple runs of one role can be shown)
+joined to the scored corpus ⨝ validated JDs. Same read-only, pure-functions shape as the other
+reports; no corpus write. **Delta (Δ) is the calibration signal:** both scores normalise to
+0–100 — `Δ = CVT_fit% − (JR_fit_score × 10)`; negative means cv-tailor rated lower (expected,
+especially in demo mode). Sections: a main table (latest run per role, sorted by JR fit desc,
+with Δ); a divergence summary (mean Δ, most-aligned, most-divergent by |Δ|); a per-`tailoring_mode`
+breakdown (demo/full counts + CVT-fit/coverage means); a multiple-runs section (roles with >1
+run, latest flagged); and a notes block on demo-vs-full bias. Runs whose `job_id` is **not** in
+the scored corpus are surfaced as a diagnostic "(not in corpus)" line rather than silently
+dropped. **`GET /api/report/cv_tailor`** (read-only, no auth) returns the *same* report as a
+`text/plain` attachment via the same pure functions; a "CV-Tailor calibration" download button
+sits in the React sidebar beside the yield-report button. Empty/absent links file → a clean
+"No cv-tailor runs recorded yet." message.
 
 ### Production Company Universe v1.1 ✅ committed 2026-06-11
 
@@ -2535,6 +2554,15 @@ GET  /api/jobs/{job_id}        # read-only, public — returns job detail for
 `job_id`, exposes `cv_tailor.has_output`, `cv_tailor.fit_score`,
 `cv_tailor.coverage_score`, `cv_tailor.cv_quality_score`, etc. If none:
 `cv_tailor: {has_output: false}`.
+
+**Downstream consumer — calibration report.** The same sink feeds the
+`cli.analyse --report cv_tailor` calibration report (§11.1, "CV-Tailor calibration
+report"), which compares cv-tailor's fit verdict against Job Radar's per role. That
+report reads the **full** run history via `cli.stats.load_all_cv_tailor_links` (not the
+latest-per-job `load_cv_tailor_links` used here) so it can surface multiple runs of one
+role; `GET /api/report/cv_tailor` serves it as a download. This is the local,
+score-only counterpart to the cross-system Langfuse evidence layer (INTEGRATION_SPEC §7)
+that will eventually answer the divergence questions per run rather than per snapshot.
 
 **UI:** Detail panel shows cv-tailor metrics (read-only for public, add/edit
 for owner). "Add CV-Tailor metrics" control owner-gated same as all writes.

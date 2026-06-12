@@ -1,5 +1,5 @@
 import { Download } from "lucide-react";
-import { YIELD_REPORT_URL, type Job } from "@/lib/api";
+import { CV_TAILOR_REPORT_URL, YIELD_REPORT_URL, type Job } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { fitBadgeClass } from "@/lib/ui";
 import { effectiveStatus, FIT_LABELS, LABEL_TEXT, STATUS_ORDER, type Filters } from "@/lib/jobs";
@@ -153,12 +153,18 @@ export function Sidebar({
         Reset filters
       </button>
 
-      {/* Read-only company yield report (BACKLOG_YIELD_TRACKING) — public download, no unlock. */}
+      {/* Read-only report downloads (BACKLOG_YIELD_TRACKING + cv-tailor calibration) — public, no unlock. */}
       <a
         href={YIELD_REPORT_URL} download
         className="mt-[10px] flex w-full items-center justify-center gap-[6px] rounded-md border border-line bg-white py-[7px] text-[12.5px] text-ink-soft hover:bg-line-soft"
       >
         <Download className="h-3.5 w-3.5" /> Yield report
+      </a>
+      <a
+        href={CV_TAILOR_REPORT_URL} download
+        className="mt-[6px] flex w-full items-center justify-center gap-[6px] rounded-md border border-line bg-white py-[7px] text-[12.5px] text-ink-soft hover:bg-line-soft"
+      >
+        <Download className="h-3.5 w-3.5" /> CV-Tailor calibration
       </a>
 
       {/* Manual JD entry (job_radar_SPEC §11.1) — owner-only; the modal hides itself unless unlocked. */}

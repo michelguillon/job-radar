@@ -505,8 +505,30 @@ before designing:
 - What would a third "viewpoint" add that neither system currently captures?
   (e.g. market competitiveness, narrative strength, hiring manager perspective)
 
+**First-pass tooling for these questions ✅ built (2026-06-12, Job Radar side).**
+`python -m cli.analyse --report cv_tailor` (+ `GET /api/report/cv_tailor`) is the local,
+score-only calibration view: per role it shows `Δ = CVT_fit% − (JR_fit_score × 10)`, a
+divergence summary (mean/most-aligned/most-divergent), and a **demo-vs-full mode
+breakdown** — directly addressing the first and third questions above from the
+`cv_tailor_links.jsonl` snapshot. It is the snapshot-level complement to the per-run
+Langfuse evidence below; the systematic-same-direction-error and outcome-correlation
+questions still need the trace layer + linked outcomes.
+
 **Trigger for design:** 20+ linked applications with outcomes across both
 systems. The data is the design brief.
+
+**Observability for the data brief (Langfuse).** Answering these questions needs the
+per-run evidence captured, not just the final scores in `cv_tailor_links.jsonl`. That
+instrumentation is now being built — see `cv-tailor/docs/SPEC_LANGFUSE_INSTRUMENTATION.md`:
+- **cv-tailor side ✅ built (2026-06-12, F-53).** Each run emits one Langfuse trace
+  (`cv_tailor_run`) carrying `run_id`, `job_id`, `company`, and `job_radar_fit_label/score`
+  in metadata, with phase/iteration spans, per-call LLM generations (token counts), and
+  `fit_score`/`coverage_score`/`cv_quality_score`/`job_radar_fit_score` as trace scores.
+  `run_id` and `job_id` are the join keys back to Job Radar.
+- **Job Radar side 🔄 pending (Phase B).** Extraction-batch + scoring-run traces, so a role
+  is queryable end-to-end (Job Radar extraction → score → cv-tailor run → outcome) in one place.
+Once both sides emit traces, the §7 divergence questions are answerable by joining on `job_id`
+in the Langfuse store rather than by hand.
 
 **Relationship to Project 5 (fine-tuning):** a multi-agent scoring layer may
 be a better use of the corpus than fine-tuning the existing rule-based scorer.
@@ -582,6 +604,10 @@ output_link ──────────────────────�
 | `api/routers/cv_tailor.py` + `api/security.py` | Bearer token auth (`has_valid_service_token`) — cookie OR token | 3 | ✅ (deviation 43) |
 | `api/settings.py` + `.env.example` | `CV_TAILOR_SERVICE_KEY` setting + env var | 3 | ✅ |
 | `frontend` | Run history (multiple runs) in detail panel | 3 | 🔲 |
+| `cli/stats.py` | `load_all_cv_tailor_links()` — full run history (un-deduplicated), for the calibration report | 4-prep | ✅ |
+| `cli/analyse.py` | `--report cv_tailor` calibration report (JR vs CVT Δ, divergence summary, mode breakdown, multiple runs) | 4-prep | ✅ |
+| `api/routers/reports.py` | `GET /api/report/cv_tailor` (public download, same pure functions) | 4-prep | ✅ |
+| `frontend/src/{lib/api.ts,components/Sidebar.tsx}` | "CV-Tailor calibration" download button | 4-prep | ✅ |
 | `api/routers/cv_tailor.py` | Return `extraction` in `GET /api/jobs/{job_id}` | 4 | 🔲 |
 
 ### cv-tailor
@@ -636,4 +662,7 @@ scorers can be refined from the same evidence base.
 - cv-tailor Phase 0–6 pipeline: see `cv_tailor_ARCHITECTURE.md §3`
 - cv-tailor security model: see `cv_tailor_ARCHITECTURE.md §9`
 - Job Radar security model: see `docs/job_radar_SPEC.md §10.5`
+- Cross-system observability (Langfuse): see `cv-tailor/docs/SPEC_LANGFUSE_INSTRUMENTATION.md`
+  (cv-tailor instrumentation ✅ built; Job Radar instrumentation pending) — the evidence layer
+  for the §7 redesign.
 ENDOFFILE

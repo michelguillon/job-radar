@@ -2084,5 +2084,39 @@ Two pre-Phase-3 changes to `corpus/cv_tailor_links.jsonl` and its endpoint.
 
 ---
 
+## 2026-06-12 — CV-Tailor calibration report (`cli.analyse --report cv_tailor`, §11.1 + §11.3)
+
+A sixth read-only report, comparing Job Radar's fit verdict against cv-tailor's per role.
+
+- **Two loaders for one sink, by design.** `load_cv_tailor_links` keeps the *latest* run per
+  `job_id` (the read-model contract used by the index join + overlay). The calibration report
+  needs the *full* history to show multiple runs of one role, so a new
+  `load_all_cv_tailor_links` returns the un-deduplicated list. Same migration
+  (`_migrate_cv_tailor_fields`), same skip-no-job_id rule — just no dedup. Adding a second loader
+  was cleaner than bolting an `all=True` flag onto the existing one and reasoning about two return
+  *types* from one function.
+- **Normalise both scales before comparing — the delta is the whole point.** JR `fit_score` is
+  1–10; cv-tailor `fit_score` is 0.0–1.0. `Δ = CVT×100 − JR×10` puts both on 0–100. The report is
+  only useful because that single number makes "the two systems disagree by 64 points on the Trade
+  Desk role" legible at a glance. Most-aligned / most-divergent rank by `|Δ|` (robust to the rare
+  positive delta), not by raw value.
+- **Surface orphan runs, don't drop them.** A cv-tailor `job_id` not in the scored corpus (a run
+  done before the role was collected, or for a role since pruned) is real diagnostic data. It can't
+  get a Δ (no JR score) so it can't sit in the fit-sorted main table — it goes in a separate
+  "(not in corpus)" block. Silently dropping it would have hidden a class of "why is this run
+  here?" questions.
+- **Mode breakdown counts latest-per-role, not total runs.** The "demo N runs" line groups the
+  same latest-per-job rows the main table uses, so the role count in the header and the run count
+  in the breakdown agree. `demo`/`full` always render (even at 0) so the demo-vs-full bias is
+  always visible; any other observed mode appends after.
+- **The API endpoint is the CLI report verbatim.** `GET /api/report/cv_tailor` calls the *same*
+  `build_cv_tailor_report` + `format_cv_tailor` pure functions over settings-resolved paths —
+  identical to how `/api/report/yield` reuses the yield functions. No reimplementation, no second
+  source of truth; the browser just streams the text/plain attachment.
+
+454 tests; `tsc -b` clean.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

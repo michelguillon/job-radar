@@ -1,7 +1,7 @@
 """Tests for analyse.py — read-only corpus reports (SPEC §11.1).
 
 Covers the pure aggregation functions (label/score/status/company/gap counts +
-the min-sample rate guard) and an integration smoke test that runs all four
+the min-sample rate guard) and an integration smoke test that runs all six
 reports against the live corpus (skipped when the corpus is empty, e.g. a fresh
 checkout — corpus data is gitignored). Nothing here writes to any corpus file.
 """
@@ -304,6 +304,98 @@ def test_yield_cost_per_job_none_degrades():
     assert "COST_PER_JOB n/a" in text
 
 
+# --- cv-tailor calibration (SPEC §11.1 + §11.3) -------------------------------
+
+def _link(job_id, *, fit=None, cov=None, qual=None, mode="demo", run_id="run_1",
+          ts="2026-06-12T16:00:00Z"):
+    return {"v": 1, "job_id": job_id, "ts": ts, "cv_tailor_run_id": run_id,
+            "fit_score": fit, "coverage_score": cov, "cv_quality_score": qual,
+            "tailoring_mode": mode}
+
+
+def _cvt_scenario():
+    """Two scored roles with cv-tailor runs (Trade Desk fit 10, Writer fit 9)."""
+    scores, jds, metas, workflow = {}, {}, {}, {}
+    scores["ttd"] = _score("ttd", fit=10, label="strong_fit")
+    jds["ttd"] = make_record(id="ttd", company="The Trade Desk",
+                             raw_text="Sr Staff Product Manager\nbody")
+    scores["wr"] = _score("wr", fit=9, label="blocked_fit")
+    jds["wr"] = make_record(id="wr", company="Writer",
+                            raw_text="AI deployment engineer (UK)\nbody")
+    return scores, jds, metas, workflow
+
+
+def test_cv_tailor_report_basic():
+    scores, jds, metas, workflow = _cvt_scenario()
+    links = [_link("ttd", fit=0.36, cov=0.15, qual=7.9), _link("wr", fit=0.66, cov=0.45, qual=7.9)]
+    data = analyse.build_cv_tailor_report(links, scores, jds, metas, workflow)
+    assert data["role_count"] == 2 and data["total_runs"] == 2
+    text = analyse.format_cv_tailor(data, today="2026-06-12")
+    assert "CV-TAILOR CALIBRATION REPORT — 2026-06-12" in text
+    assert "The Trade Desk" in text and "Writer" in text
+    for section in ("By Job Radar fit score", "Divergence summary", "By mode",
+                    "Multiple runs", "Notes"):
+        assert section in text, section
+
+
+def test_cv_tailor_delta_calculation():
+    scores = {"j": _score("j", fit=10, label="strong_fit")}
+    jds = {"j": make_record(id="j", company="Co", raw_text="Role\nbody")}
+    links = [_link("j", fit=0.36, cov=0.15, qual=7.9)]
+    data = analyse.build_cv_tailor_report(links, scores, jds, {}, {})
+    row = data["rows"][0]
+    assert row["cvt_fit_pct"] == 36
+    assert row["delta"] == -64           # 36 − (10 × 10)
+    assert data["divergence"]["mean"] == -64
+
+
+def test_cv_tailor_multiple_runs_shown():
+    scores = {"j": _score("j", fit=8, label="good_fit")}
+    jds = {"j": make_record(id="j", company="Writer", raw_text="AI deployment engineer\nbody")}
+    links = [
+        _link("j", fit=0.60, cov=0.40, qual=7.8, run_id="run_20260612_163208", ts="2026-06-12T16:32:08Z"),
+        _link("j", fit=0.66, cov=0.45, qual=7.9, run_id="run_20260612_163935", ts="2026-06-12T16:39:35Z"),
+    ]
+    data = analyse.build_cv_tailor_report(links, scores, jds, {}, {})
+    assert len(data["multiple_runs"]) == 1
+    runs = data["multiple_runs"][0]["runs"]
+    assert len(runs) == 2
+    assert runs[-1]["is_latest"] and not runs[0]["is_latest"]   # latest = highest ts
+    # the latest run (66%) is the one the main row uses
+    assert data["rows"][0]["cvt_fit_pct"] == 66
+    text = analyse.format_cv_tailor(data, today="2026-06-12")
+    assert "run_20260612_163935" in text and "← latest" in text
+
+
+def test_cv_tailor_missing_from_corpus():
+    links = [_link("sha256:orphan", fit=0.36, cov=0.15, qual=7.9)]
+    data = analyse.build_cv_tailor_report(links, {}, {}, {}, {})   # empty scored corpus
+    row = data["rows"][0]
+    assert row["in_corpus"] is False and row["delta"] is None
+    text = analyse.format_cv_tailor(data, today="2026-06-12")
+    assert "(not in corpus)" in text
+    assert "CVT: 36%" in text
+
+
+def test_cv_tailor_mode_breakdown():
+    scores = {"a": _score("a", fit=8), "b": _score("b", fit=7)}
+    jds = {"a": make_record(id="a", company="A", raw_text="r\nb"),
+           "b": make_record(id="b", company="B", raw_text="r\nb")}
+    links = [_link("a", fit=0.30, cov=0.20, mode="demo"),
+             _link("b", fit=0.80, cov=0.60, mode="full")]
+    data = analyse.build_cv_tailor_report(links, scores, jds, {}, {})
+    by_mode = {m["mode"]: m for m in data["mode_breakdown"]}
+    assert by_mode["demo"]["runs"] == 1 and by_mode["demo"]["cvt_fit_mean"] == 30
+    assert by_mode["full"]["runs"] == 1 and by_mode["full"]["cvt_fit_mean"] == 80
+
+
+def test_cv_tailor_report_empty():
+    data = analyse.build_cv_tailor_report([], {}, {}, {}, {})
+    assert data["rows"] == []
+    text = analyse.format_cv_tailor(data, today="2026-06-12")
+    assert "No cv-tailor runs recorded yet." in text
+
+
 # --- cost ----------------------------------------------------------------------
 
 def test_load_cost_and_jobs(tmp_path):
@@ -325,7 +417,7 @@ def test_load_cost_and_jobs_missing_file(tmp_path):
 # --- integration: run all reports against the live corpus ----------------------
 
 def test_all_reports_run_against_real_corpus(capsys):
-    """Run all four reports against the live corpus, asserting no exceptions and
+    """Run all six reports against the live corpus, asserting no exceptions and
     non-empty output (mirrors test_digest's end-to-end shape). Skips on a fresh
     checkout where the (gitignored) corpus is absent."""
     import glob
@@ -340,4 +432,5 @@ def test_all_reports_run_against_real_corpus(capsys):
     assert "COMPANY REPORT" in out
     assert "REQUIREMENT GAPS & BLOCKERS" in out
     assert "COMPANY YIELD REPORT" in out   # yield is the fifth report in --report all
+    assert "CV-TAILOR CALIBRATION REPORT" in out  # cv_tailor is the sixth
     assert len(out.strip()) > 0
