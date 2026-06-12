@@ -38,8 +38,7 @@ eventual application outcomes.
 cv-tailor outputs, or score CV quality.
 
 **cv-tailor does not:** decide whether a job is worth applying to, mutate
-Job Radar fit scores, update Job Radar application status (until Phase 4),
-or become a job tracker.
+Job Radar fit scores, update Job Radar application status, or become a job tracker.
 
 ---
 
@@ -71,8 +70,8 @@ Phase 1 → manual metrics (unblocked now)
 Phase 2 → "Open in cv-tailor" button (Job Radar → cv-tailor handoff)
    ↓ both tools stable in daily integrated use
 Phase 3 → cv-tailor sends results back (automated callback)
-   ↓ Phase 3 data proves which metrics are worth using
-Phase 4 → Job Radar pre-computed analysis fed to cv-tailor (deep integration)
+   ↓ 20+ linked applications with outcomes
+Phase 4 → redesign based on data (original design retired — see §7)
 ```
 
 Do not build Phase 3 before Phase 1 data proves which metrics to track.
@@ -346,7 +345,7 @@ Job Radar fit prediction
 ↓
 cv-tailor output quality
 ↓
-Application outcome (Phase 4)
+Application outcome (Phase 4 — redesign pending)
 ↓
 Future calibration
 ```
@@ -463,85 +462,55 @@ Radar's critical path and Job Radar is not in cv-tailor's.
 
 ---
 
-## 7. Phase 4 — Job Radar pre-computed analysis fed to cv-tailor
+## 7. Phase 4 — Deep integration (to be redesigned based on data)
 
-**Trigger:** Phase 3 stable. Sufficient linked data to confirm that
-cv-tailor's Phase 0 JD extraction is the limiting quality factor (i.e.
-Job Radar's richer extraction would produce meaningfully better tailoring).
+**Status:** 🔄 Original design retired. To be redesigned once Phase 3 data
+accumulates.
 
-**Goal:** Skip cv-tailor's Phase 0 (JD extraction via Mistral) and instead
-use Job Radar's pre-computed `JDRecord` extraction, which is richer
-(17 fields, calibrated schema, validated against real JDs) and already
-paid for. Reduces per-run cost and improves tailoring quality for
-structured extraction fields.
+**Original assumption (retired):** Job Radar's 17-field `JDRecord` extraction
+(Claude Sonnet/Haiku) is richer than cv-tailor's Phase 0 (Mistral mini), so
+passing it to cv-tailor would improve tailoring quality.
 
-### 7.1 Changes to Job Radar
+**Why this doesn't hold:**
+The two extractions serve different purposes. Job Radar extracts to score
+structural fit — clean enums, blocking constraints, role/domain classification.
+cv-tailor extracts to understand what the JD is asking for in order to tailor
+the CV against it — keyword vocabulary, emphasis areas, skill gap language.
+Mistral's Phase 0 output stays closer to the raw JD text, which is exactly
+what keyword coverage matching needs. Coupling the two pipelines for marginal
+and unproven gain adds complexity without a clear benefit.
 
-**Extend `GET /api/jobs/{job_id}`** to include structured extraction fields:
+Early Phase 3 data supports this: cv-tailor fit assessments (37% fit, 15%
+coverage on a Job Radar strong_fit 10 role) are directionally correct and
+measuring something genuinely different — CV coverage vs structural profile fit.
+Both extractions appear to be doing their job well for their respective purpose.
 
-```json
-{
-  "job_id": "sha256:abc123",
-  "company": "Elastic",
-  "title": "Principal PM, AI agents",
-  "source_url": "https://...",
-  "location": "United Kingdom",
-  "fit_label": "strong_fit",
-  "fit_score": 10,
-  "priority_score": 10,
-  "raw_text": "Full JD text...",
-  "extraction": {
-    "role_type": ["Product", "AI Delivery"],
-    "seniority": "director",
-    "domain": ["AI Platform", "Enterprise Software"],
-    "technical_depth": "hybrid",
-    "delivery_motion": ["enterprise_platform", "partner_led"],
-    "required_technologies": ["Elasticsearch", "Python", "REST APIs"],
-    "required_competencies": ["product roadmap", "cross-functional leadership"],
-    "nice_to_have_technologies": ["Kubernetes", "Terraform"],
-    "nice_to_have_competencies": ["partner channel management"],
-    "remote_policy": "hybrid",
-    "leadership_geography": "EMEA",
-    "company_stage": "public",
-    "culture_signals": ["move fast", "customer obsession"]
-  }
-}
-```
+**Direction for redesign — multi-agent scoring orchestration:**
 
-No schema changes — these fields are already on `JDRecord`. Just expose
-them through the API.
+Rather than passing one system's extraction to the other, the more interesting
+design is a **shared scoring layer** that both systems could consume: a
+multi-agent orchestrator that assesses a role from multiple viewpoints
+(structural fit, CV coverage, market positioning, narrative coherence) and
+produces a richer, more calibrated signal than either system generates alone.
 
-### 7.2 Changes to cv-tailor
+This is a research-grade design problem — prompt engineering, context design,
+and loop architecture all apply. Key questions to answer from Phase 3 data
+before designing:
 
-**Phase 0 bypass when Job Radar extraction is available:**
+- Where do Job Radar and cv-tailor scores diverge most? (structural fit vs
+  coverage gap — which dimension predicts application outcomes better?)
+- Are there systematic cases where both systems are wrong in the same
+  direction? (suggests a shared extraction failure mode worth fixing)
+- Does demo vs full mode in cv-tailor change the divergence pattern?
+- What would a third "viewpoint" add that neither system currently captures?
+  (e.g. market competitiveness, narrative strength, hiring manager perspective)
 
-When a run has `source=job_radar` + `job_id` + Job Radar returns an
-`extraction` object:
+**Trigger for design:** 20+ linked applications with outcomes across both
+systems. The data is the design brief.
 
-1. Skip Phase 0 Mistral extraction
-2. Map `JDRecord.extraction` fields to cv-tailor's `JDAnalysis` schema:
-   - `required_technologies` → `required_skills` (technical)
-   - `required_competencies` → `required_skills` (soft/domain)
-   - `role_type` → `role_type`
-   - `domain` → `industry`
-   - `delivery_motion` → inform Phase 1 CVCM context
-   - `culture_signals` → `company_culture`
-3. Populate `JDAnalysis` from mapped fields; mark
-   `source: "job_radar_extraction"` in the run audit trail
-4. Proceed to Phase 1 (fit assessment) as normal
-
-**Fallback:** if mapping fails for any reason, fall back to Phase 0
-Mistral extraction. Do not block the run.
-
-**No new auth.** Uses the same `job_id` fetch from Phase 2/3.
-
-### 7.3 Definition of Done
-
-- cv-tailor uses Job Radar extraction fields when available
-- Phase 0 is skipped (cost reduction logged in cost_breakdown)
-- `source: "job_radar_extraction"` appears in the run audit trail
-- Fallback to Phase 0 extraction on any mapping error
-- cv-tailor output quality is measurably maintained or improved
+**Relationship to Project 5 (fine-tuning):** a multi-agent scoring layer may
+be a better use of the corpus than fine-tuning the existing rule-based scorer.
+Worth evaluating both directions when the corpus justifies it.
 
 ---
 
@@ -552,7 +521,7 @@ Mistral extraction. Do not block the run.
 | Phase 1 — Manual POST from browser | HttpOnly capability cookie (`JR_WRITE_KEY`) — per-route (deviation 41/42) | Browser → Job Radar API | ✅ |
 | Phase 2 — cv-tailor fetches JD | No auth — `GET /api/jobs/{job_id}` is public | cv-tailor server → Job Radar API | ✅ |
 | Phase 3 — cv-tailor POSTs results | Bearer token (`CV_TAILOR_SERVICE_KEY`) | cv-tailor server → Job Radar API | ✅ |
-| Phase 4 — cv-tailor fetches extraction | No auth — same public endpoint as Phase 2 | cv-tailor server → Job Radar API | 🔲 |
+| Phase 4 — redesign pending | TBD — depends on new design | TBD | 🔄 |
 
 The browser capability cookie (HttpOnly, SameSite=Lax) is never sent in
 machine-to-machine calls — it's physically inaccessible outside the browser.
@@ -629,7 +598,7 @@ output_link ──────────────────────�
 | `frontend/src/pages/RunPage.tsx` | Read `?source=job_radar&job_id=`, prefill, pass ref | 2 | ✅ |
 | `frontend/src/components/OutputPanel.tsx` | "From Job Radar: …" provenance line (owner) | 2 | ✅ |
 | `.env.example` | `JOB_RADAR_API_URL=` | 2 | ✅ |
-| `tailor/phases/phase0_jd_analysis.py` | Accept pre-computed extraction | 4 | 🔲 |
+| `tailor/phases/phase0_jd_analysis.py` | Phase 4 redesign — TBD | 4 | 🔄 |
 | `api/job_radar.py` | `post_results_to_job_radar()` — sync httpx, fire-and-forget | 3 | ✅ |
 | `api/runner.py` | Read metrics from checkpoints + fire callback after `run_complete` | 3 | ✅ |
 | `api/routers/runs.py` | Pass `output_dir` to `launch_run` so meta dir + callback dir match | 3 | ✅ |
