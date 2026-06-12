@@ -6,11 +6,11 @@
 
 **Project:** 4 — Job Radar
 **Repository:** job-radar (renamed from jd-refinery)
-**Status:** Phases 1–6 complete — 430 tests. **Deployed + operational** at
+**Status:** Phases 1–6 complete — 440 tests. **Deployed + operational** at
 job-radar.michel-portfolio.co.uk (Caddy + Cloudflare, SPEC §10.9). Discovery now runs the
 **81-company universe v2** (§11.1) via a working weekly cron; first real server run: 5,498
 collected → 65 new survivors → **117 scored, $3.18** labelling to date.
-**Last updated:** 2026-06-11
+**Last updated:** 2026-06-12
 **Deployment target:** M720q home server, Ubuntu Server 24.04, Docker + Caddy + Cloudflare
 **Schema version:** 1.3 (ApplicationRecord added Phase 2; annotation constants added Phase 6)
 **Predecessor:** jd-refinery (renamed; Phase 1 complete, 95 tests, commit efb8d41)
@@ -2547,9 +2547,23 @@ Job Radar prediction → cv-tailor output → application outcome → future cal
 does not apply to machine-to-machine calls. `POST /api/cv-tailor-results` now
 accepts the owner capability cookie **OR** a `CV_TAILOR_SERVICE_KEY` Bearer token
 (`api.security.has_valid_service_token`, constant-time; separate from `JR_WRITE_KEY`;
-both fail closed) — deviation 43. The endpoint is never unauthenticated. The
-cv-tailor-side callback on run completion (assemble payload → POST with the Bearer
-token) remains a cv-tailor build (INTEGRATION_SPEC §6.2).
+both fail closed) — deviation 43. The endpoint is never unauthenticated.
+
+**cv-tailor callback — ✅ built + deployed + smoke-tested (commit 5b59188, 328 cv-tailor tests):**
+First real callback 2026-06-12: Sr Staff PM role, Job Radar strong_fit 10 →
+cv-tailor Fit 37% / Coverage 15% / CV Quality 7.9/10 (demo mode). The discrepancy
+is the point — structural fit vs CV coverage are different questions, now both visible
+in one place.
+cv-tailor POSTs on run completion when `job_radar_source.job_id` is set and
+`JOB_RADAR_SERVICE_KEY` is configured (opt-in by config — unset = Phase 2 behaviour).
+Three as-built notes (see cv-tailor LEARNING_NOTES F-52):
+- **Sync httpx, not `asyncio.create_task`** — run completes on a worker thread with no
+  event loop; sync POST after `run_complete` is the correct bridge.
+- **`cv_quality_score` = aggregate `critique_score`** from the final non-frozen
+  iteration — the exact number the cv-tailor report header and Scores tab show.
+  Not an average of per-section `claude_quality` (as originally spec'd).
+- **EventSource held open 8s** for Job Radar-originated runs so the trailing
+  `job_radar_linked` SSE indicator is deliverable after `run_complete`.
 
 **Storage:** Same `corpus/cv_tailor_links.jsonl`, same schema as Phase 1 manual
 records. Add `"source": "cv_tailor_api"` to distinguish. Multiple runs per job

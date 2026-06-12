@@ -2,8 +2,10 @@
 ## Unified specification — changes to both applications
 
 **Status:** Phase 1 ✅ built (commit 32d1a09). Phase 2 ✅ built (Job Radar button + cv-tailor
-handoff). Phase 3 ◐ Job Radar side built — schema cleanup + Bearer-token endpoint (deviation
-43); cv-tailor callback pending. Phase 4 pending.
+handoff). Phase 3 ✅ built (Job Radar endpoint + cv-tailor callback, commit 5b59188) —
+**deployed and smoke-tested 2026-06-12** (first real callback: Sr Staff PM role, Job Radar
+strong_fit 10 → cv-tailor Fit 37% / Coverage 15% / CV Quality 7.9/10, demo mode).
+Phase 4 pending.
 **Last updated:** 2026-06-12
 **Owned by:** Both repos — `job-radar` and `cv-tailor`
 
@@ -393,7 +395,23 @@ Previous runs ▾
   2026-06-11  run_20260611_001  Fit: 72%  Coverage: 81%
 ```
 
-### 6.2 Changes to cv-tailor
+### 6.2 Changes to cv-tailor — ✅ built (commit 5b59188, 328 tests)
+
+**Status:** Complete. See cv-tailor `LEARNING_NOTES` F-52 + `SPEC §12.10`.
+As-built notes where implementation deviated from or refined the spec:
+- **Sync `httpx.post`, not `asyncio.create_task`** — run completes on a worker
+  thread with no event loop; `create_task` would raise. Sync POST after
+  `run_complete` is the correct bridge (mirrors `fetch_job`).
+- **`cv_quality_score` = aggregate `critique_score`** from the final non-frozen
+  iteration checkpoint (`iteration_N.json`), not an average of per-section
+  `claude_quality`. This is the exact number the cv-tailor report header and
+  Scores tab display — callback and UI can never disagree.
+- **EventSource held open 8s** for Job Radar-originated runs so the trailing
+  `job_radar_linked` SSE indicator is deliverable after `run_complete` fires.
+- **Opt-in by config:** `JOB_RADAR_SERVICE_KEY` unset → callback skipped
+  silently; exact Phase 2 behaviour. No code change needed to enable/disable.
+- **Metrics from on-disk checkpoints**, not `run_pipeline` return dict (which
+  omits fit score, quality, and CVCM).
 
 **Callback on run completion:**
 
@@ -433,13 +451,15 @@ Radar's critical path and Job Radar is not in cv-tailor's.
 **New env var on cv-tailor:** `JOB_RADAR_API_URL` + `CV_TAILOR_SERVICE_KEY`
 (matches the key set on Job Radar). Both gitignored in `.env`.
 
-### 6.3 Definition of Done
+### 6.3 Definition of Done — ✅ met
 
-- cv-tailor POSTs completed run metrics to Job Radar automatically
-- Job Radar appends the result without mutating scorer output
-- Job Radar UI displays latest cv-tailor result + run history per job
-- Failed callback does not break cv-tailor run completion
-- `CV_TAILOR_SERVICE_KEY` auth works independently of the browser cookie
+- ✅ cv-tailor POSTs completed run metrics to Job Radar automatically
+- ✅ Job Radar appends the result without mutating scorer output
+- ✅ Job Radar UI displays latest cv-tailor result per job
+- ✅ Failed callback does not break cv-tailor run completion
+- ✅ `CV_TAILOR_SERVICE_KEY` auth works independently of the browser cookie
+- 🔲 Run history UI (multiple runs per job) — deferred until callbacks
+  produce multiple runs; data already preserved append-only
 
 ---
 
@@ -531,7 +551,7 @@ Mistral extraction. Do not block the run.
 |---|---|---|---|
 | Phase 1 — Manual POST from browser | HttpOnly capability cookie (`JR_WRITE_KEY`) — per-route (deviation 41/42) | Browser → Job Radar API | ✅ |
 | Phase 2 — cv-tailor fetches JD | No auth — `GET /api/jobs/{job_id}` is public | cv-tailor server → Job Radar API | ✅ |
-| Phase 3 — cv-tailor POSTs results | Bearer token (`CV_TAILOR_SERVICE_KEY`) | cv-tailor server → Job Radar API | ◐ JR endpoint built (deviation 43); cv-tailor callback pending |
+| Phase 3 — cv-tailor POSTs results | Bearer token (`CV_TAILOR_SERVICE_KEY`) | cv-tailor server → Job Radar API | ✅ |
 | Phase 4 — cv-tailor fetches extraction | No auth — same public endpoint as Phase 2 | cv-tailor server → Job Radar API | 🔲 |
 
 The browser capability cookie (HttpOnly, SameSite=Lax) is never sent in
@@ -610,9 +630,13 @@ output_link ──────────────────────�
 | `frontend/src/components/OutputPanel.tsx` | "From Job Radar: …" provenance line (owner) | 2 | ✅ |
 | `.env.example` | `JOB_RADAR_API_URL=` | 2 | ✅ |
 | `tailor/phases/phase0_jd_analysis.py` | Accept pre-computed extraction | 4 | 🔲 |
-| `tailor/run.py` | Phase 3 callback on `run_complete` | 3 | 🔲 |
-| `frontend/src/` | "Linked back to Job Radar" confirmation in SSE timeline | 3 | 🔲 |
-| `.env.example` | `CV_TAILOR_SERVICE_KEY=` | 3 | 🔲 |
+| `api/job_radar.py` | `post_results_to_job_radar()` — sync httpx, fire-and-forget | 3 | ✅ |
+| `api/runner.py` | Read metrics from checkpoints + fire callback after `run_complete` | 3 | ✅ |
+| `api/routers/runs.py` | Pass `output_dir` to `launch_run` so meta dir + callback dir match | 3 | ✅ |
+| `frontend/src/lib/api.ts` | `job_radar_linked` SSE event type | 3 | ✅ |
+| `frontend/src/pages/RunPage.tsx` | Hold EventSource open 8s for JR runs; show ✓/⚠ indicator | 3 | ✅ |
+| `tests/test_job_radar_callback.py` | New — 7 unit tests for callback + metric extraction | 3 | ✅ |
+| `.env.example` | `JOB_RADAR_SERVICE_KEY=` + `CV_TAILOR_BASE_URL=` | 3 | ✅ |
 
 ---
 
