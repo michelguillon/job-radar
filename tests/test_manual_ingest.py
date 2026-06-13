@@ -217,8 +217,71 @@ def test_validate_record_still_strict():
     rec.role_type = ["Customer Success"]  # role_type lives in the nested extraction; set directly
     errors = validate(rec)
     assert any("role_type" in e for e in errors)
-    # soft_validate runs the SAME checks — it just doesn't block the caller.
-    assert soft_validate(rec) == errors
+    # soft_validate runs the SAME checks — it just classifies an enum gap as a (non-blocking)
+    # warning, never a hard error.
+    hard_errors, warnings = soft_validate(rec)
+    assert hard_errors == []
+    assert warnings == errors
+
+
+# --- Item 1: soft_validate structural-vs-enum split (SPEC §11.1) ----------------
+
+def test_soft_validate_structural_error_is_hard():
+    """A wrong-TYPE field (domain a string, not a list) is a hard error, never a warning."""
+    from models.record import soft_validate
+    from tests.factories import make_record
+
+    rec = make_record()
+    rec.domain = "AI Platform"  # structurally wrong: a bare string, not list[str]
+    hard_errors, warnings = soft_validate(rec)
+    assert any("domain" in e for e in hard_errors)
+    assert not any("domain" in w for w in warnings)
+
+
+def test_soft_validate_enum_gap_is_warning():
+    """A right-type but off-vocabulary value (unknown role_type) is a warning, not hard."""
+    from models.record import soft_validate
+    from tests.factories import make_record
+
+    rec = make_record()
+    rec.role_type = ["Customer Success"]  # a valid list[str], just not in ROLE_TYPE
+    hard_errors, warnings = soft_validate(rec)
+    assert any("role_type" in w for w in warnings)
+    assert not any("role_type" in e for e in hard_errors)
+
+
+# An extraction whose `domain` is a bare string instead of list[str] — a structural error
+# the scorer/serialiser can't tolerate (vs an off-vocabulary value, which they can).
+EXTRACTION_STRUCTURAL_ERROR = {**EXTRACTION, "domain": "FinTech"}
+
+
+def test_manual_ingest_structural_error_raises_422(client, monkeypatch):
+    """A structurally invalid extraction (wrong type) hard-fails — 422, nothing stored."""
+    monkeypatch.setattr(
+        manual_ingest, "extract_one",
+        lambda record, **_: (dict(EXTRACTION_STRUCTURAL_ERROR), dict(USAGE)),
+    )
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    r = client.post("/api/manual-ingest", json=_payload())
+    assert r.status_code == 422, r.text
+    assert "structurally invalid" in r.json()["detail"]
+    # The corpus stayed clean — a structural failure never appends a scored record.
+    assert not load_scores(client.settings.scored_glob)
+
+
+def test_manual_ingest_enum_gap_still_200(client, monkeypatch):
+    """An unknown role_type (enum gap) still stores at 200 with a warning (existing behaviour)."""
+    monkeypatch.setattr(
+        manual_ingest, "extract_one",
+        lambda record, **_: (dict(EXTRACTION_UNKNOWN_ROLE), dict(USAGE)),
+    )
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    r = client.post("/api/manual-ingest", json=_payload())
+    assert r.status_code == 200, r.text
+    assert r.json()["job_id"] in load_scores(client.settings.scored_glob)
+    assert any("role_type" in w for w in r.json()["warnings"])
 
 
 def test_manual_ingest_emits_telemetry(client, monkeypatch):

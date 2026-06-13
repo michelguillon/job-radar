@@ -559,19 +559,38 @@ def validate(record: JDRecord) -> list[str]:
     return errors
 
 
-def soft_validate(record: JDRecord) -> list[str]:
-    """Run the SAME checks as ``validate`` but as *advisory warnings*, never blocking.
+# A ``validate`` finding ending with this is a pure *enum vocabulary gap*: the field is
+# present and the right type, its value is just outside the closed vocabulary. Only
+# ``_check_enum`` and ``_check_subset``'s bad-values branch emit it — every structural
+# (wrong-type / not-a-list) finding has a different, "must be a …"-shaped message.
+_ENUM_GAP_SUFFIX = "not in allowed values"
+
+
+def soft_validate(record: JDRecord) -> tuple[list[str], list[str]]:
+    """Run the SAME checks as ``validate`` but split them into ``(hard_errors, warnings)``.
 
     ``validate``'s callers (batch labelling, ``cli.validate``, prefilter output) treat a
     non-empty list as a hard failure — the closed-vocabulary enum gate keeps the automated
     corpus clean. **Manual ingest is a deliberate human decision** (the owner has chosen to
-    add this exact role), so the enum gate must not block it: an extraction like
-    ``role_type: ["Customer Success"]`` (not in ``ROLE_TYPE``) is stored as-is, with the
-    finding surfaced as a warning rather than a 422. This is a thin, intentionally-named seam
-    over ``validate`` so the bypass is explicit at the call site — the checks (and their
-    wording) stay in one place. Never raises; ``[]`` means clean. (CLAUDE.md deviation 47.)
+    add this exact role), so the *enum* gate must not block it: an extraction like
+    ``role_type: ["Customer Success"]`` (not in ``ROLE_TYPE``) is stored as-is, surfaced as a
+    *warning*. But a **structural** error (a field of the wrong type — ``domain`` a string
+    instead of a list, ``fit_score`` a string instead of an int — or a missing required field)
+    must STILL hard-fail even in manual ingest: the scorer and serialiser tolerate unknown
+    enum values, but a malformed type silently corrupts every downstream stage. So:
+
+    - ``hard_errors`` — structural type errors / missing fields. The caller should 422.
+    - ``warnings`` — enum vocabulary gaps. The caller stores the record as-is, advisory only.
+
+    This is a thin, intentionally-named seam over ``validate`` so the bypass is explicit at the
+    call site — the checks (and their wording) stay in one place; ``soft_validate`` only
+    *classifies* their output. Never raises; ``([], [])`` means clean. (CLAUDE.md deviation 47.)
     """
-    return validate(record)
+    hard_errors: list[str] = []
+    warnings: list[str] = []
+    for finding in validate(record):
+        (warnings if finding.endswith(_ENUM_GAP_SUFFIX) else hard_errors).append(finding)
+    return hard_errors, warnings
 
 
 # ---------------------------------------------------------------------------

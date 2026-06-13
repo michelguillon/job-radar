@@ -176,10 +176,14 @@ def manual_ingest(body: ManualIngestRequest, settings: Settings = Depends(get_se
             setattr(record, field, default)
 
     # Soft validation — the owner deliberately chose to add this role, so the closed-vocabulary
-    # enum gate must not block it (deviation 47). Unlike the automated pipeline (which treats a
-    # non-empty validate() as a hard failure), findings here are advisory warnings: the record is
+    # *enum* gate must not block it (deviation 47). soft_validate splits validate()'s findings:
+    # structural type errors (e.g. domain not a list) STILL hard-fail (422) — they silently
+    # corrupt downstream stages — while enum vocabulary gaps are advisory warnings: the record is
     # stored as-is and the warnings ride back in the 200 response for the UI to surface in amber.
-    warnings = soft_validate(record)
+    hard_errors, warnings = soft_validate(record)
+    if hard_errors:
+        log.warning("manual ingest: %d structural error(s) for %s: %s", len(hard_errors), job_id, hard_errors)
+        raise HTTPException(status_code=422, detail=f"extraction produced a structurally invalid record: {hard_errors}")
     if warnings:
         log.info("manual ingest: %d soft-validation warning(s) for %s: %s", len(warnings), job_id, warnings)
 
