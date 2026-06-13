@@ -1,11 +1,20 @@
 # Cron automation — job-radar Discovery Layer (Phase 4)
 
-Two scheduled jobs keep the corpus fresh and surface new roles each morning:
+Three scheduled jobs keep the corpus fresh, surface new roles each morning, and back up
+the interactive-state DB:
 
 | Script | Schedule | What it does |
 |---|---|---|
 | `collect_weekly.sh` | Sundays 08:00 | Incremental collect → prefilter → label → validate → score → export-index |
 | `digest_daily.sh` | Weekdays 07:30 | Digest of roles scored since the last run (`--min-fit 6 --export`) |
+| `backup_db.sh` | Daily 03:30 | SQLite `.backup` of `corpus/job_radar.db` → `/var/backups/job-radar/db_*.sqlite`, prune >7d |
+
+> **Phase 6.5 deploy ordering (SPEC_DB_MIGRATION).** Interactive state (status / notes /
+> annotations / cv-tailor links) now lives in `corpus/job_radar.db`. `cli.stats
+> --export-index` defaults to `--source sqlite`, and the API overlay auto-detects the DB by
+> existence. So on the server, run the one-time backfill **before** the first weekly run or
+> any UI write: `docker compose run --rm job-radar python -m cli.db_migrate`. Creating an
+> empty DB before backfilling would hide existing interactive state.
 
 Both run the pipeline inside the Docker service (`docker compose run --rm
 job-radar …`), so the host only needs Docker + cron. Collection is **incremental
@@ -65,6 +74,9 @@ run untraced: `JR_COMPOSE_FILES="-f docker-compose.yml" ./cron/collect_weekly.sh
 
    # job-radar — daily digest (weekdays 07:30)
    30 7 * * 1-5 /opt/apps/job-radar/cron/digest_daily.sh
+
+   # job-radar — daily SQLite backup (03:30; needs host `sqlite3`)
+   30 3 * * * /opt/apps/job-radar/cron/backup_db.sh
    ```
 
    `cron` runs with a minimal environment. If `docker` is not on cron's `PATH`,
