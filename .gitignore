@@ -23,6 +23,13 @@ corpus/.digest_last_run
 # *.jsonl + corpus/**/* above, listed explicitly per job_radar_SPEC §11.3).
 corpus/cv_tailor_links.jsonl
 
+# SQLite interactive-state store + WAL/SHM sidecars (Phase 6.5, SPEC_DB_MIGRATION).
+# Personal corpus data like the JSONL state files; covered by corpus/**/* above,
+# listed explicitly for clarity.
+corpus/job_radar.db
+corpus/job_radar.db-wal
+corpus/job_radar.db-shm
+
 # Personal-data planning doc — real role URLs, job IDs, server paths, corpus
 # migration details. Lives locally + travels by scp like the corpus; never commit
 # (the repo is a public portfolio). The deploy runbook is self-contained and does

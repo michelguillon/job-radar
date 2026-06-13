@@ -2244,6 +2244,36 @@ Four independent §11.1 follow-ups, one commit each.
   the read model emits." Updated CLAUDE.md deviation 48 + api/CLAUDE.md to drop the now-false
   "not note/title" carve-out.
 
+## Phase 6.5 Step 1 — two corrections to the spec's SQLite DDL
+
+The migration build prompt (SPEC_DB_MIGRATION) shipped a literal DDL block. Two defects
+in it surfaced the moment the idempotency + dedup requirements were tested — both fixed in
+`cli/db.py` before committing Step 1, and both worth recording because they are classic
+SQLite footguns:
+
+- **`UNIQUE` with a nullable column does NOT dedupe NULL rows.** The spec wrote
+  `UNIQUE (job_id, annotation_type, field, reason)` to replace the current Python dedup
+  (`annotations.py`: 409 on same job_id + type + field + reason). But standard SQL — and
+  SQLite — treat `NULL` as *distinct from every other NULL* in a UNIQUE constraint. A
+  `rejection_reason` annotation carries `field = NULL` (deviation 39), so two identical
+  rejection_reason rows would *both* insert — silently breaking the 409 the Step-4 design
+  relies on. Python's check matched because `None == None` is `True`. Fix: a unique
+  **expression index** over `IFNULL(field, '')` collapses NULL to `''` for the key, exactly
+  reproducing the Python semantics. Lesson: when porting a Python equality dedup to a SQL
+  UNIQUE, audit every nullable column in the key.
+
+- **`INSERT OR IGNORE` only no-ops against a UNIQUE/PK constraint.** The spec's
+  `schema_version (version INTEGER NOT NULL)` had no UNIQUE on `version`, so
+  `INSERT OR IGNORE ... VALUES (1)` had nothing to conflict against and appended a fresh row
+  on every `init_db()` — making init non-idempotent (a stated requirement). Fix: make
+  `version` the PRIMARY KEY. Lesson: `OR IGNORE` is meaningless without a constraint to
+  ignore *against*; if you use it for idempotency, confirm the target column is actually
+  constrained.
+
+General principle reaffirmed: a DDL block in a spec is prose, not an executable artifact —
+trust the test (idempotency, dedup) over the literal schema, and fix the schema. (Same
+tie-break rule the project applies to SPEC-vs-`record.py`.)
+
 ---
 
 *[Claude Code: append new entries here as each step and phase completes.
