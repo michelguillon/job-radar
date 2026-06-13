@@ -284,6 +284,39 @@ def test_manual_ingest_enum_gap_still_200(client, monkeypatch):
     assert any("role_type" in w for w in r.json()["warnings"])
 
 
+# --- Item 2: prefilter bypass — pinned as a regression guard (SPEC §11.1) -------
+
+# An extraction that the automated pipeline's prefilter WOULD drop on BOTH screens:
+# role_type=["Customer Success"] → role:customer is kept, but the bare title screen and the
+# off-target/location screens would reject a New York onsite Customer Success role. Manual
+# ingest must accept it regardless — a deliberate owner add is never prefilter-screened.
+EXTRACTION_PREFILTER_REJECT = {**EXTRACTION, "role_type": ["Customer Success"], "location": "New York", "remote_policy": "onsite"}
+
+
+def test_manual_ingest_bypasses_prefilter(client, monkeypatch):
+    """Manual ingest must never run prefilter.py screens.
+
+    A JD that would be filtered as role:off_target or location:non_uk_onsite by the automated
+    pipeline must still be accepted by manual ingest (extract → soft_validate → score → store)."""
+    monkeypatch.setattr(
+        manual_ingest, "extract_one",
+        lambda record, **_: (dict(EXTRACTION_PREFILTER_REJECT), dict(USAGE)),
+    )
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    r = client.post("/api/manual-ingest", json=_payload())
+    assert r.status_code == 200, r.text  # accepted, not filtered
+    assert r.json()["job_id"] in load_scores(client.settings.scored_glob)
+
+
+def test_manual_ingest_imports_no_prefilter():
+    """Static guard: the endpoint module never imports the prefilter (can't accidentally screen)."""
+    import api.routers.manual_ingest as mi
+
+    assert not hasattr(mi, "prefilter")
+    assert not hasattr(mi, "screen")
+
+
 def test_manual_ingest_emits_telemetry(client, monkeypatch):
     """When tracing is enabled, the endpoint builds a well-formed manual_ingest trace row."""
     captured = {}
