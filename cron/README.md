@@ -17,6 +17,16 @@ it near 00:00 UTC — the date-keyed stages would split across two stamps). `lab
 Batch-API budget** on the day's new survivors (already-labelled/scored jobs are excluded by
 prefilter). `dedupe` is **not** a stage (prefilter does the dedup; `cli/dedupe.py` is a stub).
 
+**Langfuse tracing (SPEC §16, deviation 46).** `collect_weekly.sh` runs its stages through
+`-f docker-compose.yml -f docker-compose.tracing.yml`, which puts the CLI-runner `job-radar`
+service on the external `tracing` network so `cli.label` (→ `extraction_batch` trace) and
+`cli.score` (→ `scoring_run` trace) can reach `langfuse-langfuse-web-1`. This needs the
+`tracing` network to exist (prereq: `docker network create tracing`, already created for the
+Langfuse stack) **and** the `LANGFUSE_*` keys in `.env` — tracing is opt-in, so without the
+keys the run is a clean untraced no-op. On a host without the `tracing` network (local dev),
+run untraced: `JR_COMPOSE_FILES="-f docker-compose.yml" ./cron/collect_weekly.sh`.
+`digest_daily.sh` is **not** traced (`cli.digest` is a read-only view — no LLM, no scoring).
+
 > `PROJECT_DIR` is auto-derived from each script's own location, so the scripts work wherever
 > the repo is cloned (server: `/opt/apps/job-radar`; dev: `~/dev/job-radar`) — **no edit
 > needed**. Only the **crontab lines** below need your real absolute clone path. If

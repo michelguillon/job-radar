@@ -383,7 +383,12 @@ Kept in full: everything below — active operational guards Claude Code must kn
     is the zero-cost path probe (`auth_check` lives here, NEVER in `init_langfuse` — a sync probe
     would hang). (e) **Deployment:** Job Radar's OWN project keys (not cv-tailor's),
     `LANGFUSE_BASE_URL` = INTERNAL container URL (no Cloudflare hairpin), no quotes; `job-radar-api`
-    joins the external `tracing` network (server-side `.env` + compose, see `.env.example`).
+    joins the external `tracing` network (server-side `.env` + compose, see `.env.example`). The
+    CLI-runner `job-radar` service (cron: `cli.label`/`cli.score`) reaches Langfuse via a SEPARATE
+    server-only overlay **`docker-compose.tracing.yml`** (`cron/collect_weekly.sh` runs the stages
+    through it; opt out with `JR_COMPOSE_FILES="-f docker-compose.yml"` on a host without the
+    `tracing` network). Kept separate from `docker-compose.prod.yml` — it carries only the network,
+    not the api/frontend/caddy prod wiring. `cli.digest` (daily) is not traced.
     (f) **Each root span MUST set `propagate_attributes(trace_name=…)`** (mirroring cv-tailor's
     `run_trace`) — that is what stamps the `langfuse.trace.name` span attribute the **worker
     requires** to promote a trace from MinIO into ClickHouse. Without it the spans upload but the

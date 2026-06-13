@@ -1,0 +1,27 @@
+# docker-compose.tracing.yml — server-only overlay (Langfuse observability, SPEC §16).
+#
+# Puts the throwaway CLI-runner `job-radar` service on the shared external `tracing` network
+# so in-container pipeline runs export Langfuse traces to langfuse-langfuse-web-1:3000:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.tracing.yml run --rm job-radar \
+#       python -m cli.label
+#
+# This is what cron/collect_weekly.sh uses (cli.label → extraction_batch, cli.score →
+# scoring_run). It is SEPARATE from docker-compose.prod.yml on purpose: the prod overlay wires
+# the api/frontend, container_names, and the `caddy` network — none of which the CLI runner
+# needs. This overlay carries ONLY the tracing-network attachment.
+#
+# NOT for local dev: the `tracing` network only exists on the server (prereq, one-time:
+# `docker network create tracing`). Locally, run the base compose without this overlay — or
+# set JR_COMPOSE_FILES="-f docker-compose.yml" (see cron/collect_weekly.sh). Tracing is opt-in
+# by LANGFUSE_PUBLIC_KEY regardless, so a no-key run on this network is still a clean no-op.
+services:
+  job-radar:
+    networks:
+      - default      # declaring networks overrides the implicit default — keep it explicit
+      - tracing      # reach langfuse-langfuse-web-1 by name
+
+networks:
+  tracing:
+    external: true
+  default: {}

@@ -13,6 +13,14 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="${JR_LOG_DIR:-/var/log/job-radar}"   # override JR_LOG_DIR if not writable (needs mkdir perms)
 LOG_FILE="${LOG_DIR}/collect_weekly.log"
 
+# Compose files: base + the tracing overlay, so cli.label/cli.score can reach the Langfuse web
+# container (langfuse-langfuse-web-1) and export traces (SPEC §16, deviation 46). The overlay
+# needs the external `tracing` network to exist (server prereq: `docker network create tracing`).
+# Local dev / a host without that network: override to skip it —
+#   JR_COMPOSE_FILES="-f docker-compose.yml" ./cron/collect_weekly.sh
+# (tracing is opt-in by LANGFUSE_PUBLIC_KEY anyway, so dropping the overlay just runs untraced).
+COMPOSE_FILES="${JR_COMPOSE_FILES:--f docker-compose.yml -f docker-compose.tracing.yml}"
+
 mkdir -p "${LOG_DIR}"
 cd "${PROJECT_DIR}"
 
@@ -28,10 +36,10 @@ echo "=== collect_weekly start ==="
 # Do NOT move this schedule near 00:00 UTC: collect/prefilter/label/validate key off the
 # current UTC date, so a run straddling midnight would split across two date stamps.
 # (cli.dedupe is an empty stub and is intentionally omitted -- prefilter does the dedup.)
-docker compose run --rm job-radar python -m cli.collect --source all
-docker compose run --rm job-radar python -m cli.prefilter
-docker compose run --rm job-radar python -m cli.label
-docker compose run --rm job-radar python -m cli.validate
-docker compose run --rm job-radar python -m cli.score
-docker compose run --rm job-radar python -m cli.stats --export-index
+docker compose ${COMPOSE_FILES} run --rm job-radar python -m cli.collect --source all
+docker compose ${COMPOSE_FILES} run --rm job-radar python -m cli.prefilter
+docker compose ${COMPOSE_FILES} run --rm job-radar python -m cli.label
+docker compose ${COMPOSE_FILES} run --rm job-radar python -m cli.validate
+docker compose ${COMPOSE_FILES} run --rm job-radar python -m cli.score
+docker compose ${COMPOSE_FILES} run --rm job-radar python -m cli.stats --export-index
 echo "=== collect_weekly done ==="
