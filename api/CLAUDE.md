@@ -17,6 +17,11 @@ write path over the same JSONL the CLI appends to** — never a second source of
   checks as `validate`, but advisory) and stores the role regardless of enum violations — a
   deliberate owner add is not subject to the closed-vocabulary gate. Findings ride back as
   `warnings` in the 200 body (empty list when clean); it also **never runs the prefilter**.
+  **Observability (deviation 46):** because manual ingest is its own synchronous path (not the
+  batch CLIs), it emits its own `manual_ingest` Langfuse trace via `cli.telemetry.
+  record_manual_ingest` — opt-in (`LANGFUSE_PUBLIC_KEY`), best-effort, fired AFTER the corpus is
+  persisted so a tracing failure can never fail an ingest. This is the only place the thin API
+  touches `cli.telemetry`/`cli.score.build_scoring_rows`; it rides on the existing thick exception.
 - **The scorer is LOCKED.** The API reads scores (`load_scores`), it never writes a scored
   file. Annotations record disagreement with a score — they never mutate an extraction.
 - **Reuse, don't duplicate** write/validation logic. `build_event` runs

@@ -31,7 +31,9 @@ from pydantic import BaseModel
 
 from api.security import require_unlocked
 from api.settings import Settings, get_settings
+from cli import telemetry
 from cli.label import append_stats
+from cli.score import build_scoring_rows
 from cli.stats import (
     build_index_rows,
     export_index,
@@ -59,7 +61,7 @@ from models.record import (
 )
 from pipeline.clean import normalise
 from pipeline.dedupe import record_hash
-from pipeline.label import ANNOTATION_DEFAULTS, estimate_sync_cost, extract_one
+from pipeline.label import ANNOTATION_DEFAULTS, SYNC_MODEL, build_user_content, estimate_sync_cost, extract_one
 from scoring.profile import load_profile
 from scoring.scorer import score
 
@@ -207,6 +209,28 @@ def manual_ingest(body: ManualIngestRequest, settings: Settings = Depends(get_se
     append_stats({"run": ts, "step": "manual_ingest", "job_id": job_id, "records": 1, **estimate_sync_cost(usage)},
                  path=settings.stats_path)
     _rebuild_index(settings)
+
+    # Observability (opt-in, no-op without LANGFUSE_PUBLIC_KEY): one `manual_ingest` trace —
+    # the Haiku extraction generation + the scoring breakdown. Runs AFTER the corpus is persisted
+    # and is fully guarded, so a tracing hiccup can never fail an ingest the user already completed.
+    if telemetry.is_enabled():
+        try:
+            dimensions = build_scoring_rows([record], [app_record], profile)[0]["dimensions"]
+            telemetry.record_manual_ingest(job_id, {
+                "company": body.company.strip(),
+                "model": SYNC_MODEL,
+                "prompt": build_user_content(record, meta),
+                "completion": extraction,
+                "input_tokens": usage.get("input", 0),
+                "output_tokens": usage.get("output", 0),
+                "validated": not warnings,
+                "fit_label": app_record.fit_label,
+                "fit_score": app_record.fit_score,
+                "priority_score": app_record.priority_score,
+                "dimensions": dimensions,
+            }, metadata={"scored_at": scored_at})
+        except Exception:
+            log.warning("manual ingest: telemetry trace failed (non-fatal) for %s", job_id, exc_info=True)
 
     return {
         "job_id": job_id,

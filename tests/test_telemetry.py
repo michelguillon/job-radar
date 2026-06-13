@@ -36,6 +36,7 @@ def test_recorders_are_noop_when_disabled(monkeypatch):
     monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
     assert telemetry.record_extraction_batch("batch_1", [{"job_id": "x"}], {"date": "20260612"}) is None
     assert telemetry.record_scoring_run("run_1", [{"job_id": "x"}], {"run_date": "t"}) is None
+    assert telemetry.record_manual_ingest("job_1", {"company": "Co"}) is None
     telemetry.init_langfuse()   # also a no-op — must not raise
     telemetry.flush()           # also a no-op — must not raise
 

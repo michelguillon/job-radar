@@ -42,7 +42,7 @@ log = logging.getLogger("cli.telemetry")
 
 __all__ = [
     "is_enabled", "init_langfuse", "debug_trace",
-    "record_extraction_batch", "record_scoring_run", "flush",
+    "record_extraction_batch", "record_scoring_run", "record_manual_ingest", "flush",
 ]
 
 # Set once the global Langfuse singleton is live, so init_langfuse() is a true
@@ -221,6 +221,85 @@ def record_scoring_run(run_id: str, rows: list[dict], metadata: dict | None = No
         return tid
     except Exception as exc:
         log.warning("Langfuse scoring trace failed (non-fatal): %s", exc)
+        return None
+
+
+def record_manual_ingest(job_id: str, row: dict, metadata: dict | None = None) -> str | None:
+    """Create one ``manual_ingest`` trace for a synchronous UI paste-and-score.
+
+    Distinct from the two CLI-driven recorders above: the manual-ingest path
+    (`POST /api/manual-ingest`) runs INSIDE the long-lived FastAPI process, not a batch
+    CLI — one Haiku extraction + one scorer pass per request. So one POST = one trace.
+
+    ``row`` keys::
+
+        company, model, prompt, completion, input_tokens, output_tokens, validated (bool),
+        fit_label, fit_score, priority_score, dimensions: [{dimension, score, rationale}, …]
+
+    Trace shape: root ``manual_ingest`` span → a ``claude_extraction`` generation (Haiku,
+    token usage) → a ``jd_scoring`` span (fit metadata) → one ``dimension_score`` span per
+    dimension → a ``validation_passed`` score on the trace. ``propagate_attributes(trace_name)``
+    stamps ``langfuse.trace.name`` (worker ingestion requirement). Best-effort — never raises.
+    """
+    if not is_enabled():
+        return None
+    metadata = metadata or {}
+    try:
+        from langfuse import Langfuse, get_client, propagate_attributes
+        init_langfuse()
+        lf = get_client()
+        tid = Langfuse.create_trace_id(seed=f"manual_{job_id}")
+        with lf.start_as_current_observation(
+            as_type="span", name="manual_ingest",
+            trace_context={"trace_id": tid},
+            input={"job_id": job_id, "company": row.get("company")},
+        ), propagate_attributes(trace_name="manual_ingest", metadata=_strmeta({
+            "job_id": job_id,
+            "company": row.get("company"),
+            "source": "manual_ingest",
+            "scored_at": metadata.get("scored_at"),
+        })):
+            with lf.start_as_current_observation(
+                as_type="generation", name="claude_extraction",
+                model=row.get("model"), input=row.get("prompt"),
+            ) as gen:
+                gen.update(
+                    output=row.get("completion"),
+                    usage_details={
+                        "input": int(row.get("input_tokens") or 0),
+                        "output": int(row.get("output_tokens") or 0),
+                    },
+                )
+            with lf.start_as_current_observation(
+                as_type="span", name="jd_scoring",
+                metadata=_strmeta({
+                    "fit_label": row.get("fit_label"),
+                    "fit_score": row.get("fit_score"),
+                    "priority_score": row.get("priority_score"),
+                }),
+            ):
+                for dim in row.get("dimensions", []):
+                    with lf.start_as_current_observation(
+                        as_type="span", name="dimension_score",
+                        metadata=_strmeta({
+                            "dimension": dim.get("dimension"),
+                            "score": dim.get("score"),
+                            "rationale": dim.get("rationale"),
+                        }),
+                    ):
+                        pass                           # leaf span — metadata only
+            # Trace-level score (the root span is still open, so trace_id resolves).
+            try:
+                lf.create_score(name="validation_passed",
+                                value=1.0 if row.get("validated") else 0.0,
+                                trace_id=tid, data_type="NUMERIC")
+            except Exception:
+                log.debug("langfuse manual-ingest score failed", exc_info=True)
+        lf.flush()
+        log.warning("Langfuse manual-ingest trace created: job_id=%s trace_id=%s", job_id, tid)
+        return tid
+    except Exception as exc:
+        log.warning("Langfuse manual-ingest trace failed (non-fatal): %s", exc)
         return None
 
 

@@ -221,6 +221,45 @@ def test_validate_record_still_strict():
     assert soft_validate(rec) == errors
 
 
+def test_manual_ingest_emits_telemetry(client, monkeypatch):
+    """When tracing is enabled, the endpoint builds a well-formed manual_ingest trace row."""
+    captured = {}
+    monkeypatch.setattr(manual_ingest.telemetry, "is_enabled", lambda: True)
+    monkeypatch.setattr(
+        manual_ingest.telemetry, "record_manual_ingest",
+        lambda job_id, row, metadata=None: captured.update(job_id=job_id, row=row, metadata=metadata),
+    )
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    r = client.post("/api/manual-ingest", json=_payload())
+    assert r.status_code == 200, r.text
+
+    assert captured["job_id"] == r.json()["job_id"]
+    row = captured["row"]
+    assert row["model"] == "claude-haiku-4-5"          # the synchronous Haiku extraction model
+    assert row["completion"] == EXTRACTION             # the extraction dict (generation output)
+    assert row["fit_label"] == r.json()["fit_label"]
+    assert row["validated"] is True                    # default EXTRACTION is schema-clean (no warnings)
+    assert "[ATS METADATA]" in row["prompt"]           # prompt rebuilt with the metadata block
+    assert {d["dimension"] for d in row["dimensions"]} == {
+        "role", "domain", "technical_depth", "seniority", "location"
+    }
+    assert captured["metadata"]["scored_at"]
+
+
+def test_manual_ingest_telemetry_failure_is_nonfatal(client, monkeypatch):
+    """A telemetry error never fails an ingest the user already completed (record persisted)."""
+    monkeypatch.setattr(manual_ingest.telemetry, "is_enabled", lambda: True)
+    def _boom(*a, **k):
+        raise RuntimeError("langfuse down")
+    monkeypatch.setattr(manual_ingest.telemetry, "record_manual_ingest", _boom)
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    r = client.post("/api/manual-ingest", json=_payload())
+    assert r.status_code == 200, r.text
+    assert r.json()["job_id"] in load_scores(client.settings.scored_glob)  # persisted despite the error
+
+
 def test_scorer_unknown_role_type():
     """The scorer scores an unknown role_type as 0 for the role dimension, never raising."""
     from scoring.profile import load_profile

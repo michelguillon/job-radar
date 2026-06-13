@@ -369,10 +369,15 @@ Kept in full: everything below — active operational guards Claude Code must kn
     pops the key so the suite runs untraced, escape hatch `JR_TRACE_TESTS=1`). Notable points:
     (a) **Post-hoc spans** — the Batch API is async, so the two recorders build their trace tree
     AFTER results arrive, let the root span CLOSE, then `flush()` (the CLI exits with no periodic
-    exporter — flush-before-close loses the trace; `langfuse_LEARNINGS.md` §7/§8). (b) Two targets:
-    `record_extraction_batch` (`cli/label.py`, after `merge_results`) and `record_scoring_run`
-    (`cli/score.py`). Rows assembled by **pure** builders (`build_trace_rows`/`build_scoring_rows`);
-    the scoring breakdown is re-derived with `stage1_fit` (read-only — scorer untouched). (c) No
+    exporter — flush-before-close loses the trace; `langfuse_LEARNINGS.md` §7/§8). (b) **Three**
+    targets: `record_extraction_batch` (`cli/label.py`, after `merge_results`), `record_scoring_run`
+    (`cli/score.py`), and `record_manual_ingest` (`api/routers/manual_ingest.py` — the synchronous
+    UI paste-and-score is a SEPARATE code path from the batch CLIs, so it needs its own trace; one
+    POST = one `manual_ingest` trace with the Haiku extraction generation + scoring breakdown).
+    **Gotcha that caused "debug trace shows but my real ingest doesn't":** instrumenting only the
+    CLIs leaves the manual-ingest endpoint untraced — it never calls `cli.label`/`cli.score`. Rows
+    assembled by **pure** builders (`build_trace_rows`/`build_scoring_rows`); the scoring breakdown
+    is re-derived with `stage1_fit` (read-only — scorer untouched). (c) No
     business-logic/prompt/schema change (`SCHEMA_VERSION` unchanged); observability never raises
     into the pipeline (every recorder guards + swallows). (d) `python -m cli.telemetry debug-trace`
     is the zero-cost path probe (`auth_check` lives here, NEVER in `init_langfuse` — a sync probe
