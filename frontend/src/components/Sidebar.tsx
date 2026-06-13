@@ -54,13 +54,14 @@ function Checks({
 }
 
 export function Sidebar({
-  records, filters, setFilters, onReset, onAdded,
+  records, filters, setFilters, onReset, onAdded, onOpenRole,
 }: {
   records: Job[];
   filters: Filters;
   setFilters: (next: Filters) => void;
   onReset: () => void;
   onAdded: () => Promise<void>;
+  onOpenRole: (jobId: string) => void;
 }) {
   const patch = (mut: (f: Filters) => void) => { mut(filters); setFilters({ ...filters }); };
   const toggleIn = (set: Set<string>, v: string) => patch(() => (set.has(v) ? set.delete(v) : set.add(v)));
@@ -168,7 +169,7 @@ export function Sidebar({
       </a>
 
       {/* Manual JD entry (job_radar_SPEC §11.1) — owner-only; the modal hides itself unless unlocked. */}
-      <AddRoleModal onAdded={onAdded} />
+      <AddRoleModal onAdded={onAdded} onOpenRole={onOpenRole} />
     </aside>
   );
 }

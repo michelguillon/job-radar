@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 const FIELD = "w-full rounded-md border border-line px-[9px] py-[6px] text-[13px] focus:border-brand focus:outline-none disabled:opacity-50";
 const LABEL = "block text-[11px] text-ink-soft mb-[3px]";
 
-export function AddRoleModal({ onAdded }: { onAdded: () => Promise<void> }) {
+export function AddRoleModal({ onAdded, onOpenRole }: { onAdded: () => Promise<void>; onOpenRole: (jobId: string) => void }) {
   const { unlocked, requestUnlock } = useUnlock();
   const [open, setOpen] = useState(false);
   const [company, setCompany] = useState("");
@@ -38,6 +38,12 @@ export function AddRoleModal({ onAdded }: { onAdded: () => Promise<void> }) {
     if (busy) return; // never close mid-flight
     setOpen(false);
     reset();
+  }
+  function openRole() {
+    if (!result) return;
+    const id = result.job_id; // capture before close() clears the result
+    close();
+    onOpenRole(id); // close the modal, then open the detail panel for the new role
   }
   async function openModal() {
     if (!(await requestUnlock())) return;
@@ -104,7 +110,8 @@ export function AddRoleModal({ onAdded }: { onAdded: () => Promise<void> }) {
             <p className="text-[12px] text-ink-faint">It now appears in Browse.</p>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={reset}>Add another</Button>
-              <Button onClick={close}>Done</Button>
+              <Button variant="outline" onClick={close}>Close</Button>
+              <Button onClick={openRole}>Open role →</Button>
             </div>
           </div>
         ) : (

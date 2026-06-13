@@ -112,7 +112,7 @@ function Shell() {
       </div>
 
       <main className="flex min-h-0 flex-1">
-        <Sidebar records={records} filters={filters} setFilters={setFilters} onReset={() => setFilters(emptyFilters())} onAdded={refetch} />
+        <Sidebar records={records} filters={filters} setFilters={setFilters} onReset={() => setFilters(emptyFilters())} onAdded={refetch} onOpenRole={setSelectedId} />
         <section className="flex-1 overflow-auto px-[18px] pb-10 pt-[14px]">
           {view === "browse"
             ? <BrowseView rows={filtered} sort={sort} onSort={toggleSort} onOpen={(j) => setSelectedId(j.job_id)} />
