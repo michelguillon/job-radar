@@ -2321,10 +2321,12 @@ bottom of the sidebar (owner-only; the component returns `null` unless `unlocked
 10–20 seconds" state while the POST is in flight, never closes mid-flight, surfaces 409/422 inline,
 and on success shows the scored result + refetches the index.
 
-**UX follow-up (backlog — small):** the success state after submission shows the fit result
-but has no way to open the role directly. Add an "Open role →" button to the success card
-that closes the modal and opens the detail panel for the newly-added `job_id`. Frontend-only
-change — the `job_id` is already in the POST response.
+**UX follow-up — "Open role →" button ✅ built:** the manual-ingest success card now has an
+"Open role →" button (alongside "Add another" / "Close") that closes the modal and opens the
+detail panel for the newly-added `job_id`. Frontend-only — `App.tsx` threads its
+`setSelectedId` down as `onOpenRole` through `Sidebar` → `AddRoleModal`; the `job_id` comes
+from the POST response (`result.job_id`). The index was already refetched on submit success,
+so the new role is present when the panel opens.
 
 ### cv-tailor calibration report ✅ built (deviation 45)
 
@@ -2339,20 +2341,47 @@ corpus appear as `(not in corpus)` rows rather than being silently dropped.
 `GET /api/report/cv_tailor` endpoint + "CV-Tailor calibration" download button in
 React sidebar. Delta definition: `round(cvt_fit_score × 100 − jr_fit_score × 10)`.
 
-**`soft_validate` structural vs enum split (backlog — small follow-up):** currently
-`soft_validate` treats all `validate()` findings as warnings — both enum vocabulary
-gaps (e.g. unknown `role_type`) and structural type errors (e.g. `domain` is not a
-list). These should be split: structural errors (wrong type, missing required field)
-should still hard-fail even in manual ingest because they would silently corrupt
-downstream pipeline stages. Enum vocabulary gaps should remain advisory warnings. The
-scorer and serialiser tolerate unknown enum values; they do not tolerate malformed types.
+**`soft_validate` structural vs enum split ✅ built (deviation 47):** `soft_validate` now
+returns `(hard_errors, warnings)` instead of one flat list. It runs the SAME `validate()`
+checks and *classifies* their output: a finding ending `"not in allowed values"` (an enum
+vocabulary gap — the field is present and the right type, the value is just off-vocabulary,
+e.g. an unknown `role_type`) is a **warning**; everything else (wrong type — `domain` a
+string not a list — or a missing field) is a **hard error**. `POST /api/manual-ingest` 422s
+on `hard_errors` (a malformed type silently corrupts every downstream stage) and stores the
+record with advisory `warnings` otherwise. `validate()` is unchanged — still the hard gate
+for the automated pipeline; `soft_validate` only re-buckets its findings, keeping the checks
+in one place. The scorer and serialiser tolerate unknown enum values; they do not tolerate
+malformed types.
 
-**Prefilter bypass (backlog — bug fix):** manually-added roles currently go through
-`prefilter.py` and can be rejected for role bucket or location — defeating the entire purpose
-of manual entry. A role added manually has already passed a human judgement call; it should
-bypass the prefilter entirely and go straight to extract → validate → score. Fix: `POST
-/api/manual-ingest` skips `pipeline/prefilter.py` completely. The SHA-256 dedup check
-(already in the endpoint) is sufficient — that's the only gate that should apply.
+**Prefilter bypass ✅ verified + pinned (deviation 44):** `POST /api/manual-ingest` already
+bypasses `pipeline/prefilter.py` entirely (it imports nothing from it — a deliberate owner
+add is never screened on role-bucket/location); the SHA-256 dedup is the only gate that
+applies. Pinned with two regression tests: `test_manual_ingest_bypasses_prefilter` (a JD that
+would be dropped as `role:off_target` / `location:non_uk_onsite` by the automated pipeline is
+still accepted at 200) and `test_manual_ingest_imports_no_prefilter` (a static guard that the
+endpoint module never imports the prefilter).
+
+**SSE-based live updates ✅ built:** after a write (a manual ingest, a cv-tailor callback, a
+status/outcome/fit-override/annotation change) the UI used to show stale data until a manual
+refresh. Two complementary signals now keep it current:
+
+- **Tab-focus re-fetch (frontend only)** — `useIndex` listens for `visibilitychange` and
+  re-fetches `GET /api/index` when the tab regains visibility. Covers the primary case
+  (switch to cv-tailor, run a job, switch back → current immediately) with no backend.
+- **`GET /api/events` SSE stream (backend + frontend)** — a public, read-only
+  `text/event-stream` (`api/routers/events.py`) emits an `index_updated` frame after every
+  write; `useIndex` connects on mount via `EventSource` and re-fetches on each event, so a
+  tab left open updates in the background (incl. from the cv-tailor machine-to-machine
+  callback). The bus is an **in-process** set of per-connection `asyncio.Queue`s
+  (`api/events.py`) — no Redis/external pub-sub, since this is a single-process FastAPI app.
+  Write endpoints are sync (run in Starlette's threadpool), so `emit_index_updated` hops onto
+  the event loop captured at startup (FastAPI `lifespan` handler) via `call_soon_threadsafe`; with no loop bound or no
+  subscribers it is a clean no-op, so a write is never coupled to the bus being live. A
+  keepalive comment every 30s keeps proxies (Caddy/Cloudflare) from cutting an idle stream.
+  Emitted after: `POST /api/status`, `/api/manual-ingest`, `/api/cv-tailor-results`,
+  `/api/fit-override`, `/api/outcome`, `/api/annotations`. The `GET /api/events` *contract* is
+  portable — the §11.5 Cursor-rebuilt UI reconnects to it unchanged (where it becomes the
+  "something changed" trigger for a targeted DB query rather than a full reload).
 
 **Fuzzy duplicate warning (backlog — small):** the existing SHA-256 dedup catches identical
 JD text but not near-duplicates — same role pasted from different sources (LinkedIn vs

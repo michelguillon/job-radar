@@ -24,5 +24,25 @@ export function useIndex() {
     void refetch();
   }, [refetch]);
 
+  // Live updates (job_radar_SPEC §11.1), two complementary signals:
+  //  A. Tab focus — re-fetch when the tab regains visibility (e.g. switching back from
+  //     cv-tailor after recording a result). Covers the primary "came back" case instantly.
+  //  B. SSE — GET /api/events emits index_updated after any write (here or from the cv-tailor
+  //     callback), so a tab left open refreshes in the background without a manual reload.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refetch();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    const es = new EventSource("/api/events");
+    es.addEventListener("index_updated", () => void refetch());
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      es.close();
+    };
+  }, [refetch]);
+
   return { data, error, loading, refetch };
 }

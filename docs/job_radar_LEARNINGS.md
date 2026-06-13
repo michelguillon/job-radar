@@ -2191,5 +2191,52 @@ A sixth read-only report, comparing Job Radar's fit verdict against cv-tailor's 
 
 ---
 
+## Small debt clearance — soft_validate split, prefilter pin, Open-role button, SSE live updates
+
+Four independent §11.1 follow-ups, one commit each.
+
+- **`soft_validate` now classifies, it doesn't re-implement.** Splitting structural errors
+  (hard-fail) from enum gaps (advisory) was tempting to do by duplicating `validate`'s checks
+  into two functions — exactly what CLAUDE.md warns against. Instead `soft_validate` runs
+  `validate()` unchanged and buckets each finding by message suffix: `"not in allowed values"`
+  (emitted only by `_check_enum` / `_check_subset`'s bad-value branch — a value that's the right
+  type but off-vocabulary) → warning; everything else (the "must be a …"-shaped type/missing
+  findings) → hard error. The checks and their wording stay in one place; `soft_validate` only
+  decides what blocks. Known limit: `_check_enum` is membership-only, so a *list* handed to a
+  scalar enum field would be mis-bucketed as a warning — rare model output, and the scorer
+  tolerates it. See CLAUDE.md deviation 47 (revised).
+
+- **The prefilter bypass was already real — the work was *pinning* it.** Manual ingest never
+  imported `pipeline/prefilter`, so a deliberate owner add was already never screened. Rather
+  than trust the comment, two regression guards now fail loudly if that regresses: a behavioural
+  test (a JD the automated pipeline would drop on both role and location screens still returns
+  200) and a static one (`not hasattr(manual_ingest, "prefilter")`). Cheap insurance on an
+  invariant that's invisible by absence.
+
+- **SSE live updates: in-process bus, no Redis, sync-endpoint thread hop.** The architecture
+  decision worth recording. (a) **No external broker.** This is a single-process FastAPI app, so
+  the event bus is just a `set` of per-connection `asyncio.Queue`s in `api/events.py`; a write
+  calls `emit_index_updated()`, which fans an `index_updated` notice out to every open
+  `GET /api/events` stream. Redis/pub-sub is deferred to the §11.4 PostgreSQL/multi-process step
+  — and only that one module changes; the *contract* doesn't. (b) **The sync-endpoint gotcha.**
+  All write endpoints are `def` (not `async def`), so Starlette runs them in a threadpool — they
+  cannot touch an `asyncio.Queue` directly (`put_nowait` schedules loop callbacks and is
+  thread-unsafe off-loop). Fix: capture the loop at app startup (`bind_loop` in the FastAPI
+  `lifespan` handler) and have `emit_index_updated` hop onto it via
+  `call_soon_threadsafe`. No loop bound / no subscribers → clean no-op, so a write is never
+  coupled to the bus being live (existing tests that POST writes stayed green untouched).
+  (c) **Two complementary frontend signals.** `visibilitychange` re-fetch (covers "came back from
+  cv-tailor" instantly, zero backend) *and* the SSE `EventSource` (covers a tab left open,
+  including the cv-tailor callback). (d) **Portability.** `GET /api/events` is a backend contract;
+  the §11.5 Cursor rebuild reconnects unchanged, where the event becomes a targeted-query trigger
+  rather than a full reload. See CLAUDE.md deviation 48 + SPEC §11.1.
+
+- **The "Open role →" button** was a pure wiring change: `App.tsx` already owned the detail-panel
+  selection (`setSelectedId`); threading it down as `onOpenRole` through `Sidebar` → `AddRoleModal`
+  reused the exact mechanism Browse/Pipeline rows use. The only subtlety: capture `result.job_id`
+  *before* `close()` (which resets `result` to null), then open the panel.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

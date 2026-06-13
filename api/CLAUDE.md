@@ -13,10 +13,13 @@ write path over the same JSONL the CLI appends to** — never a second source of
   deviation 44) DOES run the live pipeline — single-JD synchronous extract (`pipeline.label.
   extract_one`, Haiku 4.5) → `soft_validate` → `score` → append corpus files → rebuild
   `index.json`. It is the documented thick endpoint; do not copy its shape to the other (thin)
-  write routes. **Soft validation (deviation 47):** it uses `models.record.soft_validate` (same
-  checks as `validate`, but advisory) and stores the role regardless of enum violations — a
-  deliberate owner add is not subject to the closed-vocabulary gate. Findings ride back as
-  `warnings` in the 200 body (empty list when clean); it also **never runs the prefilter**.
+  write routes. **Soft validation (deviation 47):** it uses `models.record.soft_validate`, which
+  runs the same checks as `validate` but returns `(hard_errors, warnings)`. Enum vocabulary gaps
+  (off-vocabulary but right-type values) are advisory `warnings` — the role is stored regardless
+  (a deliberate owner add is not subject to the closed-vocabulary gate) and they ride back in the
+  200 body (empty list when clean). Structural type errors (wrong type / missing field) are
+  `hard_errors` → **422** (they'd corrupt downstream stages). It also **never runs the
+  prefilter** (pinned by tests — deviation 47).
   **Observability (deviation 46):** because manual ingest is its own synchronous path (not the
   batch CLIs), it emits its own `manual_ingest` Langfuse trace via `cli.telemetry.
   record_manual_ingest` — opt-in (`LANGFUSE_PUBLIC_KEY`), best-effort, fired AFTER the corpus is
@@ -41,6 +44,15 @@ write path over the same JSONL the CLI appends to** — never a second source of
   writes `*_manual_{ts}.jsonl` + rebuilds the index, deviation 44). `outcome` validates against
   `OUTCOME`; the UI pairs it with a `/api/status` call to move the workflow lane (the two are
   orthogonal under model C).
+- **SSE live-update bus (deviation 48).** `GET /api/events` (events.py — **public**,
+  `text/event-stream`, no auth) emits an `index_updated` frame after every write so the UI
+  re-fetches `/api/index` instead of going stale. The bus is `api/events.py` (in-process set of
+  per-connection `asyncio.Queue`s — NO Redis). After a successful write, call
+  `emit_index_updated()` (it's safe from a sync/threadpool endpoint — hops onto the startup-bound
+  loop via `call_soon_threadsafe`, no-op if no loop/subscribers). Emitted by status / outcome /
+  fit-override / annotations / cv-tailor-results / manual-ingest — **not** note/title (per SPEC
+  §11.1's list). When you add a new write endpoint, decide whether it changes the read model; if
+  so, `emit_index_updated()` after the append.
 
 ## Endpoint security — per-route gating rule
 

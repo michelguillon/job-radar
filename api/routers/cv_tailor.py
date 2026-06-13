@@ -18,6 +18,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+from api.events import emit_index_updated
 from api.security import WRITE_COOKIE, has_valid_service_token, verify_token
 from api.settings import Settings, get_settings
 from cli.stats import _location_for
@@ -82,6 +83,7 @@ def record_cv_tailor_result(
     if errors:
         raise HTTPException(status_code=422, detail=f"invalid cv-tailor link: {errors}")
     append_event(settings.cv_tailor_links_path, record)
+    emit_index_updated()
     return record
 
 

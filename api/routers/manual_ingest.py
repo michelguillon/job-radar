@@ -29,6 +29,7 @@ import os
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from api.events import emit_index_updated
 from api.security import require_unlocked
 from api.settings import Settings, get_settings
 from cli import telemetry
@@ -213,6 +214,7 @@ def manual_ingest(body: ManualIngestRequest, settings: Settings = Depends(get_se
     append_stats({"run": ts, "step": "manual_ingest", "job_id": job_id, "records": 1, **estimate_sync_cost(usage)},
                  path=settings.stats_path)
     _rebuild_index(settings)
+    emit_index_updated()  # notify any open SSE connection so the new role appears live
 
     # Observability (opt-in, no-op without LANGFUSE_PUBLIC_KEY): one `manual_ingest` trace —
     # the Haiku extraction generation + the scoring breakdown. Runs AFTER the corpus is persisted

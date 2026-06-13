@@ -623,6 +623,77 @@ def test_index_overlays_live_cv_tailor(client, monkeypatch):
     assert rec["cv_tailor"]["fit_score"] == 0.5 and rec["cv_tailor"]["cv_quality_score"] == 7.4
 
 
+# --- SSE live updates (Item 4, SPEC §11.1) -------------------------------------
+# The endpoint streams an *infinite* generator, which a sync TestClient can't drain
+# cleanly (it deadlocks on teardown), so we assert the response shape by calling the
+# handler directly and exercise the bus end-to-end via the async generator.
+
+def test_events_endpoint_returns_stream():
+    """GET /api/events returns a public text/event-stream response (no auth dependency)."""
+    from api.routers.events import events, router
+
+    resp = events()
+    assert resp.media_type == "text/event-stream"
+    assert resp.headers["cache-control"] == "no-cache"
+    # No auth: the route carries no require_unlocked dependency.
+    route = next(r for r in router.routes if getattr(r, "path", None) == "/api/events")
+    assert route.dependencies == []
+
+
+def test_event_stream_delivers_on_emit():
+    """The bus end-to-end: a connected stream gets a frame on connect AND on each emit."""
+    import asyncio
+
+    from api import events as ev
+
+    async def drive():
+        ev.bind_loop(asyncio.get_running_loop())
+        agen = ev.event_stream()
+        try:
+            assert "index_updated" in await agen.__anext__()       # one frame on connect
+            ev.emit_index_updated()                                # schedules a fan-out
+            nxt = await asyncio.wait_for(agen.__anext__(), timeout=2)
+            assert "index_updated" in nxt
+        finally:
+            await agen.aclose()                                    # deregisters the subscriber
+
+    asyncio.run(drive())
+    assert ev._subscribers == set()  # the stream cleaned up after itself
+
+
+def test_emit_with_no_loop_is_noop():
+    """emit_index_updated never raises when no loop is bound (e.g. a plain unit test)."""
+    from api import events as ev
+
+    saved = ev._loop
+    ev._loop = None
+    try:
+        ev.emit_index_updated()  # must not raise
+    finally:
+        ev._loop = saved
+
+
+def test_emit_index_updated_after_status_write(client, monkeypatch):
+    """A successful POST /api/status fans an index_updated notice out to the SSE bus."""
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    calls: list[int] = []
+    monkeypatch.setattr("api.routers.workflow.emit_index_updated", lambda: calls.append(1))
+    r = client.post("/api/status", json={"job_id": "sha256:j1", "status": "shortlisted"})
+    assert r.status_code == 200
+    assert calls == [1]  # event emitted exactly once after the append
+
+
+def test_no_event_emitted_on_failed_write(client, monkeypatch):
+    """A write that 404s (unknown job_id) must NOT emit — nothing changed."""
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    calls: list[int] = []
+    monkeypatch.setattr("api.routers.workflow.emit_index_updated", lambda: calls.append(1))
+    assert client.post("/api/status", json={"job_id": "sha256:ghost", "status": "review"}).status_code == 404
+    assert calls == []
+
+
 # --- health --------------------------------------------------------------------
 
 def test_health(client):

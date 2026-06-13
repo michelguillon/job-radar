@@ -398,16 +398,39 @@ Kept in full: everything below — active operational guards Claude Code must kn
 47. *(→ SPEC §11.1 + deviation 44)* **Manual ingest uses SOFT validation, not the pipeline's
     hard enum gate.** `POST /api/manual-ingest` is a deliberate owner decision to add a specific
     role, so the closed-vocabulary gate must not block it. `models.record.soft_validate` runs the
-    SAME checks as `validate` but the endpoint treats the result as **advisory warnings** (logged +
-    returned in the 200 response as `warnings`, surfaced in amber by `AddRoleModal`), storing the
-    record as-is. An extraction like `role_type: ["Customer Success"]` (not in `ROLE_TYPE`) is
-    kept, not 422'd. Notable points: (a) `validate` is **unchanged** and still the hard gate for the
-    automated pipeline (batch label, `cli.validate`, prefilter output) — `ROLE_TYPE` is **not**
-    expanded. (b) Manual ingest **never runs the prefilter** (it imports no `prefilter`; confirmed)
-    — a deliberate add is not screened on role-bucket/location. (c) The scorer already tolerates an
+    SAME checks as `validate` and **returns `(hard_errors, warnings)`** — it *classifies*
+    `validate()`'s findings, never re-implements them. A finding ending `"not in allowed values"`
+    (an enum vocabulary gap — right type, off-vocabulary value, e.g. `role_type:
+    ["Customer Success"]`) is a **warning** (logged + returned in the 200 body as `warnings`,
+    surfaced amber by `AddRoleModal`, record stored as-is). Everything else (a wrong *type* —
+    `domain` a string not a list — or a missing field) is a **hard error**: the endpoint **422s**
+    on `hard_errors` because a malformed type silently corrupts every downstream stage. Notable
+    points: (a) `validate` is **unchanged** and still the hard gate for the automated pipeline
+    (batch label, `cli.validate`, prefilter output) — `ROLE_TYPE` is **not** expanded. (b) Manual
+    ingest **never runs the prefilter** (it imports no `prefilter`; **pinned** by
+    `test_manual_ingest_bypasses_prefilter` + `test_manual_ingest_imports_no_prefilter`) — a
+    deliberate add is not screened on role-bucket/location. (c) The scorer already tolerates an
     off-vocabulary `role_type` (set-intersection → role dimension scores 0, never raises) — no
     scorer change. (d) `soft_validate` is a thin, intentionally-named seam over `validate` so the
-    bypass is explicit at the call site; no schema bump (`SCHEMA_VERSION` unchanged).
+    bypass is explicit at the call site; no schema bump (`SCHEMA_VERSION` unchanged). (e) Known
+    limit: `_check_enum` is membership-only, so a *list* passed to a scalar enum field is bucketed
+    as a warning, not a hard error — rare model output, scorer-tolerant.
+
+48. *(→ SPEC §11.1)* **SSE live updates — in-process bus, no Redis.** `GET /api/events`
+    (`api/routers/events.py`, **public**, `text/event-stream`) emits an `index_updated` frame after
+    every write so the UI re-fetches `GET /api/index` instead of going stale. The bus
+    (`api/events.py`) is an **in-process** `set` of per-connection `asyncio.Queue`s — single-process
+    FastAPI app, so no Redis/external pub-sub (deferred to the §11.4 PostgreSQL/multi-process step;
+    only that module changes, the `GET /api/events` *contract* is stable). **Sync-endpoint gotcha:**
+    write endpoints are `def` (threadpool), so they can't touch an `asyncio.Queue` directly —
+    `emit_index_updated` hops onto the event loop captured at startup (`bind_loop` in the FastAPI
+    `lifespan` handler) via `call_soon_threadsafe`; no loop bound / no subscribers → clean
+    no-op, so a write is never coupled to the bus. Emitted after `POST /api/status`,
+    `/api/manual-ingest`, `/api/cv-tailor-results`, `/api/fit-override`, `/api/outcome`,
+    `/api/annotations` (NOT `/api/note` or `/api/title` — per the build spec's list). Frontend
+    (`useIndex`) pairs the SSE `EventSource` with a `visibilitychange` re-fetch (the latter covers
+    "came back from cv-tailor" with zero backend). A 30s keepalive comment keeps proxies from
+    cutting an idle stream. No schema/scorer change.
 
 
 ## Schema summary

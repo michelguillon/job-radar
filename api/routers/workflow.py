@@ -14,6 +14,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from api.events import emit_index_updated
 from api.security import require_unlocked
 from api.settings import Settings, get_settings
 from cli.track import (
@@ -82,6 +83,7 @@ def set_status(body: StatusRequest, settings: Settings = Depends(get_settings)) 
     current = project(load_events(settings.log_path)).get(body.job_id, _default_state())["status"]
     warning = transition_warning(current, body.status)
     _append(settings.log_path, body.job_id, event="status", value=body.status, notes=body.notes or "")
+    emit_index_updated()
     return {"ok": True, "job_id": body.job_id, "status": body.status, "warning": warning}
 
 
@@ -108,6 +110,7 @@ def set_outcome(body: OutcomeRequest, settings: Settings = Depends(get_settings)
     also POSTs /api/status to move the lane. Invalid outcome → 422 (build_event validates)."""
     _require_scored(body.job_id, settings.scored_glob)
     _append(settings.log_path, body.job_id, event="outcome", value=body.outcome, notes=body.notes or "")
+    emit_index_updated()
     return {"ok": True, "job_id": body.job_id, "outcome": body.outcome}
 
 
@@ -119,4 +122,5 @@ def set_fit_override(body: FitOverrideRequest, settings: Settings = Depends(get_
     override; an invalid fit_label → 422 (build_event runs validate_activity_event)."""
     _require_scored(body.job_id, settings.scored_glob)
     _append(settings.log_path, body.job_id, event="fit_override", value=body.fit_label, notes=body.reason or "")
+    emit_index_updated()
     return {"ok": True, "job_id": body.job_id, "fit_label": body.fit_label}

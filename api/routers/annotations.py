@@ -16,6 +16,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from api.events import emit_index_updated
 from api.security import require_unlocked
 from api.settings import Settings, get_settings
 from cli.track import _clock, append_event, load_events, load_scores
@@ -75,4 +76,5 @@ def flag(body: AnnotationRequest, settings: Settings = Depends(get_settings)) ->
     if errors:
         raise HTTPException(status_code=422, detail=f"invalid annotation: {errors}")
     append_event(settings.annotations_path, record)
+    emit_index_updated()
     return {"ok": True, "job_id": body.job_id, "annotation_type": body.annotation_type}
