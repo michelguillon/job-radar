@@ -379,6 +379,11 @@ Kept in full: everything below — active operational guards Claude Code must kn
     would hang). (e) **Deployment:** Job Radar's OWN project keys (not cv-tailor's),
     `LANGFUSE_BASE_URL` = INTERNAL container URL (no Cloudflare hairpin), no quotes; `job-radar-api`
     joins the external `tracing` network (server-side `.env` + compose, see `.env.example`).
+    (f) **Each root span MUST set `propagate_attributes(trace_name=…)`** (mirroring cv-tailor's
+    `run_trace`) — that is what stamps the `langfuse.trace.name` span attribute the **worker
+    requires** to promote a trace from MinIO into ClickHouse. Without it the spans upload but the
+    trace silently never appears in the UI (diagnosed by diffing MinIO payloads vs cv-tailor). All
+    three entry points set it: `extraction_batch`, `scoring_run`, and the `debug-trace` probe.
 
 47. *(→ SPEC §11.1 + deviation 44)* **Manual ingest uses SOFT validation, not the pipeline's
     hard enum gate.** `POST /api/manual-ingest` is a deliberate owner decision to add a specific

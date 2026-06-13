@@ -121,19 +121,22 @@ def record_extraction_batch(batch_id: str, rows: list[dict], metadata: dict | No
         return None
     metadata = metadata or {}
     try:
-        from langfuse import Langfuse, get_client
+        from langfuse import Langfuse, get_client, propagate_attributes
         init_langfuse()
         lf = get_client()
         tid = Langfuse.create_trace_id(seed=batch_id)
+        # propagate_attributes(trace_name=…) is what stamps `langfuse.trace.name` onto the spans —
+        # the attribute the Langfuse worker REQUIRES to ingest a trace into ClickHouse (without it
+        # the spans land in MinIO but never surface in the UI). Mirrors tailor/telemetry.run_trace:
+        # open the root span, then wrap the body in propagate_attributes so every child carries it.
         with lf.start_as_current_observation(
             as_type="span", name="extraction_batch",
             trace_context={"trace_id": tid}, input=metadata,
-        ) as batch_span:
-            batch_span.update(metadata=_strmeta({
-                "batch_id": batch_id,
-                "date": metadata.get("date"),
-                "jd_count": len(rows),
-            }))
+        ), propagate_attributes(trace_name="extraction_batch", metadata=_strmeta({
+            "batch_id": batch_id,
+            "date": metadata.get("date"),
+            "jd_count": len(rows),
+        })):
             for row in rows:
                 with lf.start_as_current_observation(
                     as_type="span", name="jd_extraction",
@@ -179,18 +182,19 @@ def record_scoring_run(run_id: str, rows: list[dict], metadata: dict | None = No
         return None
     metadata = metadata or {}
     try:
-        from langfuse import Langfuse, get_client
+        from langfuse import Langfuse, get_client, propagate_attributes
         init_langfuse()
         lf = get_client()
         tid = Langfuse.create_trace_id(seed=run_id)
+        # trace_name=… stamps `langfuse.trace.name`, which the worker needs to ingest the trace
+        # (see record_extraction_batch). Mirrors tailor/telemetry.run_trace.
         with lf.start_as_current_observation(
             as_type="span", name="scoring_run",
             trace_context={"trace_id": tid}, input=metadata,
-        ) as run_span:
-            run_span.update(metadata=_strmeta({
-                "run_date": metadata.get("run_date"),
-                "jd_count": len(rows),
-            }))
+        ), propagate_attributes(trace_name="scoring_run", metadata=_strmeta({
+            "run_date": metadata.get("run_date"),
+            "jd_count": len(rows),
+        })):
             for row in rows:
                 with lf.start_as_current_observation(
                     as_type="span", name="jd_scoring",
@@ -251,7 +255,7 @@ def debug_trace(name: str = "debug_trace") -> dict:
         return info
     try:
         import time
-        from langfuse import Langfuse, get_client
+        from langfuse import Langfuse, get_client, propagate_attributes
         init_langfuse()                                # ensure the singleton exists (idempotent)
         lf = get_client()
         # The decisive probe: does the SDK reach the host AND do the keys authenticate?
@@ -263,8 +267,12 @@ def debug_trace(name: str = "debug_trace") -> dict:
         seed = f"{name}_{int(time.time() * 1000)}"     # unique per call → a fresh trace each hit
         tid = Langfuse.create_trace_id(seed=seed)
         info["trace_id"] = tid
+        # propagate_attributes(trace_name=…) stamps `langfuse.trace.name` — the attribute the worker
+        # needs to ingest the trace into ClickHouse (without it the probe span lands in MinIO but the
+        # trace never appears in the UI). Mirrors the real recorders + tailor/telemetry.run_trace.
         with lf.start_as_current_observation(as_type="span", name=name,
-                                             trace_context={"trace_id": tid}):
+                                             trace_context={"trace_id": tid}), \
+                propagate_attributes(trace_name=name):
             pass                                       # empty root span — no children, no LLM call
         lf.create_score(name="debug_score", value=1.0, trace_id=tid, data_type="NUMERIC")
         lf.flush()
