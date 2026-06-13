@@ -6,11 +6,11 @@
 
 **Project:** 4 — Job Radar
 **Repository:** job-radar (renamed from jd-refinery)
-**Status:** Phases 1–6 complete — 468 tests. **Deployed + operational** at
+**Status:** Phases 1–6 complete — 481 tests. **Deployed + operational** at
 job-radar.michel-portfolio.co.uk (Caddy + Cloudflare, SPEC §10.9). Discovery now runs the
 **81-company universe v2** (§11.1) via a working weekly cron; first real server run: 5,498
 collected → 65 new survivors → **117 scored, $3.18** labelling to date.
-**Last updated:** 2026-06-12
+**Last updated:** 2026-06-13
 **Deployment target:** M720q home server, Ubuntu Server 24.04, Docker + Caddy + Cloudflare
 **Schema version:** 1.3 (ApplicationRecord added Phase 2; annotation constants added Phase 6)
 **Predecessor:** jd-refinery (renamed; Phase 1 complete, 95 tests, commit efb8d41)
@@ -2378,8 +2378,9 @@ refresh. Two complementary signals now keep it current:
   the event loop captured at startup (FastAPI `lifespan` handler) via `call_soon_threadsafe`; with no loop bound or no
   subscribers it is a clean no-op, so a write is never coupled to the bus being live. A
   keepalive comment every 30s keeps proxies (Caddy/Cloudflare) from cutting an idle stream.
-  Emitted after: `POST /api/status`, `/api/manual-ingest`, `/api/cv-tailor-results`,
-  `/api/fit-override`, `/api/outcome`, `/api/annotations`. The `GET /api/events` *contract* is
+  Emitted after: `POST /api/status`, `/api/note`, `/api/title`, `/api/manual-ingest`,
+  `/api/cv-tailor-results`, `/api/fit-override`, `/api/outcome`, `/api/annotations` — every
+  write that changes the read model. The `GET /api/events` *contract* is
   portable — the §11.5 Cursor-rebuilt UI reconnects to it unchanged (where it becomes the
   "something changed" trigger for a targeted DB query rather than a full reload).
 
