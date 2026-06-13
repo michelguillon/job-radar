@@ -100,7 +100,7 @@ function CvTailorSection({ job, onChanged }: { job: Job; onChanged: () => Promis
   // exists → open it; none yet → start one pre-seeded with this job_id (cv-tailor fetches the
   // JD via the public GET /api/jobs/{job_id} built in Phase 1).
   const cvTailorUrl = cv.has_output
-    ? `https://cv-tailor.michel-portfolio.co.uk/runs/${cv.run_id}`
+    ? `https://cv-tailor.michel-portfolio.co.uk/api/runs/${cv.run_id}/report`
     : `https://cv-tailor.michel-portfolio.co.uk/new?source=job_radar&job_id=${job.job_id}`;
   const cvTailorLabel = cv.has_output ? "Open in cv-tailor ↗" : "Create CV in cv-tailor ↗";
   const [editing, setEditing] = useState(false);

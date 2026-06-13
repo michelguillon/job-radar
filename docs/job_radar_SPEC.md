@@ -2658,7 +2658,7 @@ for owner). "Add CV-Tailor metrics" control owner-gated same as all writes.
 
 **Status (Job Radar side):** Built — a frontend-only smart button at the bottom of
 `CvTailorSection`. Visible to all (public + owner), never lock-gated, opens in a new
-tab: `has_output` → `Open in cv-tailor ↗` (`/runs/<run_id>`), else `Create CV in
+tab: `has_output` → `Open in cv-tailor ↗` (`/api/runs/<run_id>/report`), else `Create CV in
 cv-tailor ↗` (`/new?source=job_radar&job_id=<job_id>`). No backend/endpoint/schema
 change — `GET /api/jobs/{job_id}` and the `cv_tailor.*` index fields shipped in Phase 1.
 The cv-tailor `/new`-route fetch/prefill (INTEGRATION_SPEC §5.2) remains a cv-tailor build.

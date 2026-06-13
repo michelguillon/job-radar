@@ -230,7 +230,7 @@ whether a cv-tailor run already exists for the role.
 **Status:** Built (frontend-only — no backend/endpoint/schema change). The smart
 handoff button lives at the bottom of `CvTailorSection` (`frontend/src/components/
 DetailPanel.tsx`): always visible (public + owner), never lock-gated, opens in a new
-tab. `has_output` → `Open in cv-tailor ↗` (→ `/runs/<run_id>`); else `Create CV in
+tab. `has_output` → `Open in cv-tailor ↗` (→ `/api/runs/<run_id>/report`); else `Create CV in
 cv-tailor ↗` (→ `/new?source=job_radar&job_id=<job_id>`). The cv-tailor `/new`-route
 handling (§5.2) remains a cv-tailor build. `tsc -b` clean; 430 pytest unchanged.
 
@@ -248,13 +248,13 @@ not a mutation. cv-tailor's own key gate handles access control.
 **State 2 — Run exists (`cv_tailor.has_output === true`):**
 ```
 [Open in cv-tailor ↗]
-→ https://cv-tailor.michel-portfolio.co.uk/runs/<cv_tailor.run_id>
+→ https://cv-tailor.michel-portfolio.co.uk/api/runs/<cv_tailor.run_id>/report
 ```
 
 Logic:
 ```typescript
 const url = job.cv_tailor.has_output
-  ? `https://cv-tailor.michel-portfolio.co.uk/runs/${job.cv_tailor.run_id}`
+  ? `https://cv-tailor.michel-portfolio.co.uk/api/runs/${job.cv_tailor.run_id}/report`
   : `https://cv-tailor.michel-portfolio.co.uk/new?source=job_radar&job_id=${job.job_id}`
 
 const label = job.cv_tailor.has_output
