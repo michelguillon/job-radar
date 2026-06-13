@@ -199,7 +199,6 @@ function CvTailorSection({ job, onChanged }: { job: Job; onChanged: () => Promis
             {cv.tailoring_mode && <span>Mode: {cv.tailoring_mode}</span>}
           </div>
           {cv.notes && <p className="mb-[4px] text-[12.5px] text-ink-soft">Notes: {cv.notes}</p>}
-          {cv.output_link && <a className="text-[12px] text-brand hover:underline" href={cv.output_link} target="_blank" rel="noopener">↗ Open output</a>}
           {unlocked && (
             <div className="mt-[10px]">
               <button className={BTN} onClick={() => { resetForm(); setEditing(true); }} disabled={busy}>Edit</button>
