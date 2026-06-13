@@ -365,65 +365,74 @@ Build after cv-tailor instrumentation is confirmed working.
 
 One Langfuse project: `job-radar`. Separate from cv-tailor.
 
-### 3.2 Trace structure
+### 3.2 Trace structure — AS BUILT
 
-Unchanged from original spec — see section 3.2 in previous version.
-Two targets: extraction batch and scoring run.
+> **As-built note (2026-06-13).** This section was rewritten to match the shipped
+> code (`cli/telemetry.py`) after several deviations from the original sketch were
+> discovered live. The trace *shapes* are as designed; the code below reflects the
+> real SDK surface and the worker-ingestion requirement the sketch missed.
 
-### 3.3 Batch API pattern
+**THREE trace targets, not two** — the original spec had extraction + scoring, both
+CLI-driven. The synchronous **manual ingest** (`POST /api/manual-ingest`) is a *separate
+code path* in the FastAPI process (it runs `extract_one` + `score` inline, never the
+CLIs), so it needs its own recorder or it is silently untraced:
 
-The Batch API is async — spans must be created after results arrive.
-In v4, use `start_observation()` (manual, no context shift) for the
-post-hoc pattern:
+| Target | Where | Trace name | Shape |
+|---|---|---|---|
+| `extraction_batch` | `cli/label.py` after `merge_results` | `extraction_batch` | root → `jd_extraction` span per JD → `claude_extraction` generation (Opus, tokens) → `validation_passed` score |
+| `scoring_run` | `cli/score.py` | `scoring_run` | root → `jd_scoring` span per JD → `dimension_score` span per dimension |
+| `manual_ingest` | `api/routers/manual_ingest.py` after persist | `manual_ingest` | root → `claude_extraction` generation (Haiku, tokens) → `jd_scoring` span → `dimension_score` spans → `validation_passed` score |
+
+### 3.3 Three corrections the sketch missed (the load-bearing facts)
+
+1. **`langfuse.trace.name` is REQUIRED for the worker to ingest a trace.** The original
+   sketch set no trace name. A trace whose spans lack the `langfuse.trace.name` attribute
+   uploads to MinIO but the worker never promotes it into ClickHouse — it silently never
+   appears in the UI (diagnosed by diffing MinIO payloads against cv-tailor's working
+   spans). Every root span MUST be wrapped in `propagate_attributes(trace_name=…)`,
+   mirroring `tailor/telemetry.run_trace`. `start_as_current_observation` has **no**
+   `trace_name` parameter (confirmed by introspection) — `propagate_attributes` is the
+   mechanism.
+
+2. **Use the proven SDK surface, not `lf.trace()` / `lf.api.scores.create()`.** The shipped
+   code mirrors cv-tailor's verified-live calls: `Langfuse.create_trace_id(seed=…)` for a
+   deterministic id, the root span claiming it via `trace_context={"trace_id": tid}`, and
+   `lf.create_score(name=, value=, trace_id=, observation_id=, data_type="NUMERIC")` for
+   scores. The langfuse SDK is imported lazily *inside* functions so `import cli.telemetry`
+   works uninstalled, and `is_enabled()` gates every recorder to a clean no-op.
+
+3. **Flush AFTER the root span closes.** The Batch API is async and the CLI exits
+   immediately — there is no periodic exporter to fall back on. Each recorder builds its
+   whole tree inside the root `with`, lets it close, then `lf.flush()`. (Manual ingest runs
+   in the long-lived API process, but flushes the same way so the trace shows promptly.)
+
+The canonical shape (see `cli/telemetry.record_extraction_batch` for the full version):
 
 ```python
-from langfuse import get_client
-from cli.telemetry import is_enabled
-
-def record_extraction_batch(batch_id: str, batch_results: list, metadata: dict):
-    if not is_enabled():
-        return
-    lf = get_client()
-
-    # Root trace span for the whole batch
-    with lf.start_as_current_observation(
-        as_type="span",
-        name="extraction_batch",
-        input=metadata,
-    ) as batch_span:
-        with propagate_attributes(metadata={
-            "batch_id": batch_id,
-            "date": metadata["date"],
-            "jd_count": str(len(batch_results)),
-        }):
-            for result in batch_results:
-                with lf.start_as_current_observation(
-                    as_type="span",
-                    name="jd_extraction",
-                    input={"job_id": result.job_id, "company": result.company},
-                ) as jd_span:
-                    with lf.start_as_current_observation(
-                        as_type="generation",
-                        name="claude_extraction",
-                        model="claude-opus-4-8",
-                        input=result.prompt,
-                    ) as gen:
-                        gen.update(
-                            output=result.completion,
-                            usage_details={
-                                "input_tokens": result.usage.input,
-                                "output_tokens": result.usage.output,
-                            }
-                        )
-                    # Attach validation score
-                    lf.api.scores.create(
-                        trace_id=batch_id,
-                        observation_id=jd_span.id,
-                        name="validation_passed",
-                        value=1 if result.validated else 0,
-                        data_type="NUMERIC",
-                    )
+from langfuse import Langfuse, get_client, propagate_attributes
+lf = get_client()
+tid = Langfuse.create_trace_id(seed=batch_id)
+with lf.start_as_current_observation(
+    as_type="span", name="extraction_batch",
+    trace_context={"trace_id": tid}, input=metadata,
+), propagate_attributes(trace_name="extraction_batch", metadata={...}):   # ← trace_name = worker requirement
+    for row in rows:
+        with lf.start_as_current_observation(as_type="span", name="jd_extraction", ...) as jd_span:
+            with lf.start_as_current_observation(as_type="generation", name="claude_extraction",
+                                                 model=row["model"], input=row["prompt"]) as gen:
+                gen.update(output=row["completion"],
+                           usage_details={"input": ..., "output": ...})
+            lf.create_score(name="validation_passed", value=1.0 if row["validated"] else 0.0,
+                            trace_id=tid, observation_id=jd_span.id, data_type="NUMERIC")
+lf.flush()   # AFTER the root closes — CLI is about to exit
 ```
+
+Rows are assembled by **pure** builders (`cli.label.build_trace_rows`,
+`cli.score.build_scoring_rows`) that re-derive the scorer breakdown with `stage1_fit`
+(read-only) — no business logic, prompt, or schema touched, and unit-testable without the
+SDK. A `debug-trace` CLI/probe (`python -m cli.telemetry debug-trace`) exercises the full
+init→trace→score→flush path at zero cost (it carries `auth_check`; `init_langfuse` never
+does, as that sync probe would hang).
 
 ### 3.4 Cross-system linkage
 
@@ -484,12 +493,21 @@ queryable and joinable via IDs stored in `corpus/cv_tailor_links.jsonl`.
 2. Tracing disabled cleanly when `LANGFUSE_PUBLIC_KEY` is absent
 3. All existing cv-tailor tests pass unchanged
 
-## 7. Definition of Done — Job Radar (Phase B)
+## 7. Definition of Done — Job Radar (Phase B) ✅ shipped 2026-06-13
 
-1. Completed extraction batch produces trace with child spans per JD
-2. Scoring run produces trace with dimension breakdown per JD
-3. All existing Job Radar tests pass unchanged (440)
-4. Traces queryable alongside cv-tailor traces in Langfuse UI
+1. ✅ Completed extraction batch produces trace with child spans per JD (`extraction_batch`)
+2. ✅ Scoring run produces trace with dimension breakdown per JD (`scoring_run`)
+3. ✅ **Manual ingest produces a `manual_ingest` trace** (extraction generation + scoring
+   breakdown) — the separate API path, instrumented after it was found untraced
+4. ✅ Every trace sets `langfuse.trace.name` via `propagate_attributes` — without it the
+   worker drops the trace (does not reach ClickHouse / the UI)
+5. ✅ All existing Job Radar tests pass with no `LANGFUSE_PUBLIC_KEY` (468; was 440 at spec time)
+6. ✅ Traces queryable alongside cv-tailor traces in the Langfuse UI
+
+**Forward work (post-close): refine *what* we trace.** The plumbing is done and verified;
+the next iteration tunes granularity from real usage — e.g. capturing cost/latency on the
+batch generations, trimming low-value metadata, and deciding whether dimension-level spans
+earn their keep. Add granularity only where gaps appear (see §1) — don't pre-instrument.
 
 ---
 

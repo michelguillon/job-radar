@@ -2165,5 +2165,31 @@ A sixth read-only report, comparing Job Radar's fit verdict against cv-tailor's 
 
 ---
 
+## Langfuse Phase B — two bugs that only showed up live (and a doc-pointer correction)
+
+- **`langfuse.trace.name` is what the worker ingests on.** Traces uploaded to MinIO but never
+  appeared in the UI. Diffing the MinIO payloads against cv-tailor's working spans showed the
+  difference: cv-tailor spans carry a `langfuse.trace.name` attribute; ours didn't. The worker
+  needs it to promote a trace from MinIO into ClickHouse. Fix: wrap every root span in
+  `propagate_attributes(trace_name=…)` (mirroring `tailor/telemetry.run_trace`).
+  `start_as_current_observation` has no `trace_name` param — `propagate_attributes` is the only
+  way. Lesson: "the SDK accepted the calls and uploaded blobs" is not "it works" — verify the
+  trace reaches the store the UI reads.
+- **Instrumenting the CLIs left the *manual ingest* path dark.** After the trace-name fix the
+  debug probe appeared but a real manual ingest still didn't. `POST /api/manual-ingest` runs its
+  own inline `extract_one` + `score` in the API process — it never calls `cli.label`/`cli.score`,
+  where the recorders live, so it emitted no trace at all (the tell: no "trace created" WARNING in
+  `job-radar-api` logs). Fix: a third recorder, `record_manual_ingest`, called from the endpoint
+  after persistence and fully guarded. Lesson: instrument by *code path actually executed*, not by
+  *conceptual stage* — two paths that both "extract and score" can share zero lines.
+- **Doc-pointer correction.** The earlier Phase-B entry above points to `langfuse_LEARNINGS.md §8`
+  and `SPEC §16`; both were removed during SPEC review. The current homes are
+  `docs/SPEC_LANGFUSE_INSTRUMENTATION.md §3` (as-built: three trace targets + the trace-name
+  requirement + flush-after-close) and CLAUDE.md deviation 46. 468 tests; `debug-trace` + a real
+  manual ingest both verified live in the job-radar project. Forward work: refine *what* we trace
+  from real usage (cost/latency on generations, prune low-value metadata) — not more plumbing.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*
