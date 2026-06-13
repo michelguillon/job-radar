@@ -6,7 +6,7 @@
 
 **Project:** 4 — Job Radar
 **Repository:** job-radar (renamed from jd-refinery)
-**Status:** Phases 1–6 complete — 440 tests. **Deployed + operational** at
+**Status:** Phases 1–6 complete — 468 tests. **Deployed + operational** at
 job-radar.michel-portfolio.co.uk (Caddy + Cloudflare, SPEC §10.9). Discovery now runs the
 **81-company universe v2** (§11.1) via a working weekly cron; first real server run: 5,498
 collected → 65 new survivors → **117 scored, $3.18** labelling to date.
@@ -2192,8 +2192,8 @@ lane counts, review/shortlist/apply rates, stale-application list); **companies*
 jobs/strong/blocked/reviewed/shortlisted, shortlist-rate ranking, "zero-shortlist despite a
 real sample"); **gaps** (top blocking constraints across blocked roles + top requirement gaps
 across all and within strong-fit roles, plus rejection reasons section when data exists);
-**yield** (the company yield report — see below); and **cv_tailor** (the cv-tailor
-calibration report — see below). `--report all` runs all six, header-separated.
+**yield** (the company yield report — see below); and **cv_tailor** (calibration report —
+see below). `--report all` runs all six, header-separated.
 
 ### Company metadata + yield tracking ✅ built 2026-06-11
 
@@ -2242,25 +2242,6 @@ if invalid); existing 409-duplicate behaviour unchanged. Frontend shows the cont
 section (reason frequency + most-rejected companies with breakdown), shown only when ≥1
 exists. Deviation 39: the UI mock showed an optional free-text notes field but the annotation
 record has no destination for it — omitted to avoid silently dropping input.
-
-### CV-Tailor calibration report ✅ built 2026-06-12
-
-`python -m cli.analyse --report cv_tailor` compares Job Radar's fit verdict against
-cv-tailor's, per role with a recorded cv-tailor run. It reads `corpus/cv_tailor_links.jsonl`
-(via a new `cli.stats.load_all_cv_tailor_links`, which returns **all** runs, not the
-latest-per-job that `load_cv_tailor_links` keeps — so multiple runs of one role can be shown)
-joined to the scored corpus ⨝ validated JDs. Same read-only, pure-functions shape as the other
-reports; no corpus write. **Delta (Δ) is the calibration signal:** both scores normalise to
-0–100 — `Δ = CVT_fit% − (JR_fit_score × 10)`; negative means cv-tailor rated lower (expected,
-especially in demo mode). Sections: a main table (latest run per role, sorted by JR fit desc,
-with Δ); a divergence summary (mean Δ, most-aligned, most-divergent by |Δ|); a per-`tailoring_mode`
-breakdown (demo/full counts + CVT-fit/coverage means); a multiple-runs section (roles with >1
-run, latest flagged); and a notes block on demo-vs-full bias. Runs whose `job_id` is **not** in
-the scored corpus are surfaced as a diagnostic "(not in corpus)" line rather than silently
-dropped. **`GET /api/report/cv_tailor`** (read-only, no auth) returns the *same* report as a
-`text/plain` attachment via the same pure functions; a "CV-Tailor calibration" download button
-sits in the React sidebar beside the yield-report button. Empty/absent links file → a clean
-"No cv-tailor runs recorded yet." message.
 
 ### Production Company Universe v1.1 ✅ committed 2026-06-11
 
@@ -2339,6 +2320,82 @@ bottom of the sidebar (owner-only; the component returns `null` unless `unlocked
 (company / title / source URL / notes / JD textarea) shows an "Extracting and scoring role…
 10–20 seconds" state while the POST is in flight, never closes mid-flight, surfaces 409/422 inline,
 and on success shows the scored result + refetches the index.
+
+**UX follow-up (backlog — small):** the success state after submission shows the fit result
+but has no way to open the role directly. Add an "Open role →" button to the success card
+that closes the modal and opens the detail panel for the newly-added `job_id`. Frontend-only
+change — the `job_id` is already in the POST response.
+
+### cv-tailor calibration report ✅ built (deviation 45)
+
+`python -m cli.analyse --report cv_tailor` — shows every role that has gone through
+both Job Radar and cv-tailor side by side, with a **Δ column** (CVT fit% − JR fit%,
+both normalised to 0–100; negative = cv-tailor lower, expected in demo mode),
+divergence summary (mean Δ, most/least aligned), mode breakdown (demo vs full counts
++ mean scores per mode), and full run history for roles with multiple cv-tailor runs
+(latest flagged). Roles in `cv_tailor_links.jsonl` whose `job_id` isn't in the scored
+corpus appear as `(not in corpus)` rows rather than being silently dropped.
+`load_all_cv_tailor_links()` added to `cli/stats.py` (un-deduplicated, for history).
+`GET /api/report/cv_tailor` endpoint + "CV-Tailor calibration" download button in
+React sidebar. Delta definition: `round(cvt_fit_score × 100 − jr_fit_score × 10)`.
+
+**`soft_validate` structural vs enum split (backlog — small follow-up):** currently
+`soft_validate` treats all `validate()` findings as warnings — both enum vocabulary
+gaps (e.g. unknown `role_type`) and structural type errors (e.g. `domain` is not a
+list). These should be split: structural errors (wrong type, missing required field)
+should still hard-fail even in manual ingest because they would silently corrupt
+downstream pipeline stages. Enum vocabulary gaps should remain advisory warnings. The
+scorer and serialiser tolerate unknown enum values; they do not tolerate malformed types.
+
+**Prefilter bypass (backlog — bug fix):** manually-added roles currently go through
+`prefilter.py` and can be rejected for role bucket or location — defeating the entire purpose
+of manual entry. A role added manually has already passed a human judgement call; it should
+bypass the prefilter entirely and go straight to extract → validate → score. Fix: `POST
+/api/manual-ingest` skips `pipeline/prefilter.py` completely. The SHA-256 dedup check
+(already in the endpoint) is sufficient — that's the only gate that should apply.
+
+**Fuzzy duplicate warning (backlog — small):** the existing SHA-256 dedup catches identical
+JD text but not near-duplicates — same role pasted from different sources (LinkedIn vs
+Ashby), copy-pasted with different formatting, emojis stripped, sections reordered.
+
+A duplicate requires **all three** conditions to be true simultaneously:
+
+1. **Same company** — case-insensitive exact match
+2. **Title token overlap ≥ 70%** — tokenise on whitespace/punctuation, ignore stopwords.
+   Catches "AI Deployment Engineer (UK)" vs "AI Deployment Engineer - London".
+3. **Requirements overlap ≥ 70–80%** — extract key phrases from the requirements section
+   only (not company description, not benefits, not boilerplate). Focus on:
+   `required_technologies` + `required_competencies` as extracted fields if the role is
+   already in corpus; or a pre-extraction scan of the submitted text for bullet-point
+   requirement phrases if comparing against a new submission. Token overlap on these
+   phrases, not the full JD body.
+
+All three AND'd together — any two alone is insufficient. Company + title catches two
+different PM roles at the same company. Adding requirements overlap confirms the actual
+job content matches, not just the framing.
+
+The requirements-only focus is deliberate: company description, culture sections, and
+benefits paragraphs are often copy-pasted boilerplate that varies between sources. The
+requirements section is what actually defines the role and is the most stable signal
+across different copies of the same posting.
+
+If all three conditions match, return a **warning** (not a hard rejection) before paying
+extraction cost:
+```json
+{
+  "warning": "possible_duplicate",
+  "message": "A similar role already exists in your corpus",
+  "match": {
+    "job_id": "sha256:abc123",
+    "company": "Writer",
+    "title": "AI Deployment Engineer",
+    "fit_label": "blocked_fit",
+    "fit_score": 9
+  }
+}
+```
+The UI shows the warning inline with "Add anyway" and "Cancel" buttons. Resubmit with
+`proceed_anyway: true` to skip the check. Never blocks — always the owner's call.
 
 ### cv-tailor integration signal (post-deployment design decision)
 
@@ -2500,7 +2557,7 @@ Phase 1 data proves which metrics are worth tracking.
 `GET /api/index` overlay, like annotations); `POST /api/cv-tailor-results`
 (owner-gated) + `GET /api/jobs/{job_id}` (public, returns `raw_text` for the
 Phase 2 handoff); React detail-panel CV-Tailor section (read-only for all,
-owner add/edit). 430 tests. See CLAUDE.md deviation 41 + LEARNINGS.
+owner add/edit). 468 tests. See CLAUDE.md deviation 41 + LEARNINGS.
 
 **Trigger:** Unblocked now. Build after rejection reasons and yield tracking
 are stable.
@@ -2554,15 +2611,6 @@ GET  /api/jobs/{job_id}        # read-only, public — returns job detail for
 `job_id`, exposes `cv_tailor.has_output`, `cv_tailor.fit_score`,
 `cv_tailor.coverage_score`, `cv_tailor.cv_quality_score`, etc. If none:
 `cv_tailor: {has_output: false}`.
-
-**Downstream consumer — calibration report.** The same sink feeds the
-`cli.analyse --report cv_tailor` calibration report (§11.1, "CV-Tailor calibration
-report"), which compares cv-tailor's fit verdict against Job Radar's per role. That
-report reads the **full** run history via `cli.stats.load_all_cv_tailor_links` (not the
-latest-per-job `load_cv_tailor_links` used here) so it can surface multiple runs of one
-role; `GET /api/report/cv_tailor` serves it as a download. This is the local,
-score-only counterpart to the cross-system Langfuse evidence layer (INTEGRATION_SPEC §7)
-that will eventually answer the divergence questions per run rather than per snapshot.
 
 **UI:** Detail panel shows cv-tailor metrics (read-only for public, add/edit
 for owner). "Add CV-Tailor metrics" control owner-gated same as all writes.
@@ -2668,6 +2716,122 @@ Once enough applications exist, this linkage enables:
 
 The immediate reason is simpler: Job Radar should know whether a shortlisted
 role has already gone through cv-tailor.
+
+---
+
+## 11.4 — PostgreSQL migration (after Langfuse)
+
+**Trigger:** Langfuse instrumentation stable. Do not start before tracing
+is live — visibility into what breaks during a major refactor is essential.
+
+**Why now, not later:** Every feature built on JSONL is another migration
+unit. The longer the deferral, the higher the cost. The multi-user use
+case (friends using the same tooling) is not viable on JSONL files. The
+research phase next month — complex queries across scoring, cv-tailor
+metrics, outcomes — needs SQL, not Python scripts over flat files.
+
+**What changes:**
+
+The JSONL files become the migration source, then are archived. Every
+read path (`load_scores`, `load_jdrecords`, `load_events`, `project()`,
+`load_cv_tailor_links`, `load_annotations`) becomes a SQL query.
+Every write path (append to JSONL) becomes `INSERT INTO`. The `index.json`
+join and live overlay disappear — replaced by parameterised `SELECT`
+with joins. The FastAPI layer queries PostgreSQL directly.
+
+**DB choice: PostgreSQL** (not SQLite):
+- Single-writer limitation of SQLite conflicts with concurrent API writes
+  + CLI pipeline writes
+- PostgreSQL already running on M720q for Langfuse — same operational
+  pattern, same backup approach
+- Multi-user / multi-tenant straightforward when needed
+- `pgvector` extension available when embeddings are needed for research
+- Alembic handles schema migrations alongside app code
+- Production-grade from day one, not a stepping stone
+
+**Schema (high level):**
+
+```sql
+-- Core extraction
+jd_records          -- JDRecord fields, indexed by job_id + company + source_ats
+application_records -- ApplicationRecord fields, FK to jd_records
+
+-- Activity / state
+activity_log        -- append-only events (status, outcome, fit_override, note, title)
+annotations         -- scoring flags + rejection reasons
+cv_tailor_links     -- cv-tailor run metrics per job_id
+
+-- Pipeline metadata
+raw_jobs            -- collected raw records (pre-extraction)
+corpus_stats        -- cost tracking per run
+
+-- Reference
+company_seeds       -- company universe with metadata
+```
+
+**Migration plan (high level):**
+1. Design full schema + Alembic baseline migration
+2. Write migration script: JSONL → PostgreSQL (one-shot, idempotent)
+3. Port read paths first (CLI loaders → SQL queries) — run both in
+   parallel, assert identical output
+4. Port write paths (JSONL appends → INSERTs)
+5. Remove JSONL write paths once all tests pass against PostgreSQL
+6. Archive JSONL files (keep for audit trail, remove from hot path)
+
+**Relationship to SSE / live updates:** once PostgreSQL is the store,
+the SSE "something changed" event triggers a lightweight DB query rather
+than a full corpus join. The live overlay pattern disappears — the API
+always queries live data.
+
+**Relationship to multi-app integration:** PostgreSQL as the shared
+store is the foundation for connecting Job Radar, cv-tailor metrics,
+and future apps (career stories, etc.) under one queryable data layer.
+Each app owns its write path; shared reads via SQL joins.
+
+**Full spec:** to be written as a standalone `SPEC_DB_MIGRATION.md`
+before Claude Code touches any code. This is the most significant
+architectural change in the project — spec first, build second.
+
+---
+
+## 11.5 — UI overhaul (after PostgreSQL migration)
+
+**Trigger:** PostgreSQL migration complete. The UI overhaul depends on
+the DB migration because the new frontend will query a proper API rather
+than loading a monolithic `index.json` blob.
+
+**Why a full overhaul rather than incremental improvements:**
+- The current React UI was built incrementally on top of a static SPA.
+  It works but carries structural debt from that origin.
+- The PostgreSQL migration changes the data contract fundamentally —
+  the frontend will query specific endpoints rather than loading one
+  joined blob. A clean rewrite is cheaper than adapting the current UI
+  to the new API shape.
+- A UI overhaul is a good experiment in Cursor (the AI-assisted IDE)
+  as part of the AI learning track — building familiarity with a
+  different AI coding environment on a project where the domain and
+  data model are fully understood.
+
+**What the new UI should do better:**
+- Proper pagination / virtual scroll (Browse table with 500+ roles)
+- Richer filtering (multi-select company, domain, fit_label, status,
+  has cv-tailor run, date range)
+- Faster detail panel open (no full index reload)
+- Better cv-tailor integration display (calibration delta visible inline)
+- SSE-based live updates (index_updated event → targeted refetch, not
+  full reload)
+- Mobile-friendly layout (recruiters may check on phone)
+- Potentially multi-user foundation (auth layer, user-specific workflow
+  state)
+
+**Platform:** Cursor for the build experiment. Stack TBD — keep React
+or evaluate a lighter alternative (SvelteKit, Next.js). Decision to be
+made when the PostgreSQL migration spec is written and the API contract
+is clear.
+
+**Full spec:** `SPEC_UI_OVERHAUL.md` — to be written after the DB
+migration spec is drafted. The two specs inform each other (API shape
+from DB migration determines what the UI can query).
 
 ---
 
@@ -2870,48 +3034,3 @@ a single labelling run. Cost tracked per run. Fine-tuning deferred
 until the corpus justifies it. These are the decisions of someone
 who has thought about production constraints, not someone building
 a demo.
-
----
-
-## 16. Observability — Langfuse instrumentation (Phase B) ✅ built 2026-06-13
-
-Full design: `docs/SPEC_LANGFUSE_INSTRUMENTATION.md` (§3 = Job Radar) +
-`docs/SPEC_LANGFUSE_DEPLOYMENT.md`; the *why* lives in `docs/langfuse_LEARNINGS.md`.
-This section records what was built on the Job Radar side.
-
-**Opt-in, fail-open, single import surface.** `cli/telemetry.py` is the ONE module
-that imports the langfuse SDK (lazily, inside functions — so `import cli.telemetry`
-works with langfuse uninstalled). Tracing is gated entirely by `LANGFUSE_PUBLIC_KEY`:
-unset → every recorder is a clean no-op (the default, and how the 462-test suite runs;
-`conftest.py` pops the key, escape hatch `JR_TRACE_TESTS=1`). Observability never raises
-into the pipeline — each recorder guards on `is_enabled()` and swallows its own errors.
-
-**Post-hoc, not real-time (the Batch-API difference from cv-tailor).** Job Radar's
-extraction uses the Claude Batch API — results arrive asynchronously, so spans are
-created *after* the batch ends, from already-collected data. The CLI then exits, so
-there is no periodic exporter to fall back on: each recorder builds its tree, lets the
-root span CLOSE, then `flush()`es (flushing before the root closes loses the trace —
-the bug that bit cv-tailor, `langfuse_LEARNINGS.md` §7).
-
-**Two trace targets** (deterministic trace id from `batch_id` / run id; a WARNING log
-line correlates `batch_id → trace_id`):
-- `extraction_batch` (`cli/label.py`, after `merge_results`): root span → one
-  `jd_extraction` span per JD → a `claude_extraction` generation (model + token usage)
-  → a `validation_passed` numeric score per JD. Rows assembled by `build_trace_rows`
-  (pure) — the prompt rebuilt with the same `build_user_content` the batch used.
-- `scoring_run` (`cli/score.py`): root span → one `jd_scoring` span per JD (fit
-  metadata) → one `dimension_score` span per dimension (role/domain/technical_depth +
-  the seniority/location gates). The breakdown is re-derived with `stage1_fit` (pure,
-  read-only — the scorer is never touched), assembled by `build_scoring_rows`.
-
-**Debug toolkit first (§11).** `python -m cli.telemetry debug-trace` creates a minimal
-trace + score with NO LLM call and returns `{enabled, host, trace_id, auth_check, error}`
-— a zero-cost end-to-end path check to run from inside the container before spending any
-tokens. `auth_check` lives here (request-time), never in `init_langfuse` (a sync,
-no-timeout probe would hang startup).
-
-**Deployment (server-side, M720q).** Job Radar uses its OWN Langfuse project keys (not
-cv-tailor's — shared keys land traces in the wrong dashboard), `LANGFUSE_BASE_URL` set to
-the INTERNAL container URL (a container can't hairpin to its own Cloudflare URL), no
-quotes around values. The `job-radar-api` service joins the external `tracing` network.
-Env vars documented in `.env.example`. No business-logic, prompt, or schema change.

@@ -1,10 +1,10 @@
 # SPEC_LANGFUSE_INSTRUMENTATION.md
 ## Langfuse Instrumentation — cv-tailor + Job Radar
 
-**Status:** Specced — not yet built
+**Status:** Phase A (cv-tailor) ✅ verified live 2026-06-12 · Phase B (Job Radar) ✅ verified live 2026-06-13
 **Prerequisite:** `SPEC_LANGFUSE_DEPLOYMENT.md` complete and healthy ✅
-**Build order:** cv-tailor first, Job Radar second
-**SDK version:** langfuse v4 (current as of June 2026 — `pip install langfuse` installs 4.7.x)
+**Build order:** cv-tailor first ✅, Job Radar second ✅
+**SDK version:** langfuse v4 — confirmed `langfuse==4.7.1` in both built images (`requirements.txt`: `langfuse>=4.0.0`)
 
 > **Note:** This spec was originally written against SDK v2. All code blocks
 > have been rewritten for SDK v4. The v4 SDK is OTel-based — the API is
@@ -531,3 +531,47 @@ Once both systems are instrumented and 20+ linked runs exist:
 
 This is the raw material for the Phase 4 redesign — multi-agent scoring
 orchestration grounded in evidence rather than assumption.
+
+---
+
+## 12. Critical operational finding — `langfuse.trace.name` required by worker
+
+Discovered during Job Radar Phase B. The Langfuse v3 worker uses
+`langfuse.trace.name` as a routing signal to process OTel spans from MinIO
+into ClickHouse. Spans without this attribute sit in MinIO indefinitely —
+no error is logged anywhere.
+
+**How it gets set:**
+- `start_as_current_observation(name="your_name")` → sets it automatically ✅
+- `lf.trace(name="...")` low-level API → does NOT set it ✗
+
+Always use `start_as_current_observation` with an explicit name on the root
+observation. Never use `lf.trace()` as the root span.
+
+**Diagnostic — read the raw MinIO payload:**
+
+```bash
+docker exec langfuse-langfuse-minio-1 sh -c \
+  "mc alias set local http://localhost:9000 \$MINIO_ROOT_USER \$MINIO_ROOT_PASSWORD \
+   && mc cat local/langfuse/otel/<project_id>/<path>.json" 2>/dev/null
+```
+
+Look for `{"key":"langfuse.trace.name",...}` in the span attributes.
+If absent — spans will not be processed into ClickHouse.
+
+**Updated triage order (supersedes §11.3 step 2):**
+
+1. Debug probe → `enabled` → `auth_check` → `trace_id`
+2. Confirm `trace_id` in UI in the **right project**
+3. Read raw MinIO JSON → confirm `langfuse.trace.name` present
+4. Only now run one real job (token-spending step)
+5. If debug traces land but real runs don't → flush/scope bug (§10.6)
+
+---
+
+## 13. Audit every pipeline entry point
+
+During Job Radar Phase B, the manual job addition path was not instrumented
+in the initial build — only the automated batch path was. Always check every
+route that produces traceable work, not just the primary path. In Job Radar:
+both `cli/label.py` (batch) and the manual addition path are instrumented.
