@@ -2236,6 +2236,14 @@ Four independent §11.1 follow-ups, one commit each.
   reused the exact mechanism Browse/Pipeline rows use. The only subtlety: capture `result.job_id`
   *before* `close()` (which resets `result` to null), then open the panel.
 
+## SSE: emit on /api/note and /api/title too
+
+- The first SSE build omitted `note`/`title` from the emit list, but both change the read model
+  (notes render in the detail panel, title overrides in Browse), so a tab left open went stale on
+  those writes. Added `emit_index_updated()` to both — the rule is simply "every write that changes
+  the read model emits." Updated CLAUDE.md deviation 48 + api/CLAUDE.md to drop the now-false
+  "not note/title" carve-out.
+
 ---
 
 *[Claude Code: append new entries here as each step and phase completes.

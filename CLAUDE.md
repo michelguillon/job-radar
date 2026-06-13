@@ -425,9 +425,11 @@ Kept in full: everything below — active operational guards Claude Code must kn
     write endpoints are `def` (threadpool), so they can't touch an `asyncio.Queue` directly —
     `emit_index_updated` hops onto the event loop captured at startup (`bind_loop` in the FastAPI
     `lifespan` handler) via `call_soon_threadsafe`; no loop bound / no subscribers → clean
-    no-op, so a write is never coupled to the bus. Emitted after `POST /api/status`,
-    `/api/manual-ingest`, `/api/cv-tailor-results`, `/api/fit-override`, `/api/outcome`,
-    `/api/annotations` (NOT `/api/note` or `/api/title` — per the build spec's list). Frontend
+    no-op, so a write is never coupled to the bus. Emitted after **every** write that changes the
+    read model: `POST /api/status`, `/api/note`, `/api/title`, `/api/manual-ingest`,
+    `/api/cv-tailor-results`, `/api/fit-override`, `/api/outcome`, `/api/annotations`. (`note`/
+    `title` were added after the first build — notes show in the detail panel, title overrides in
+    Browse — so they emit too.) Frontend
     (`useIndex`) pairs the SSE `EventSource` with a `visibilitychange` re-fetch (the latter covers
     "came back from cv-tailor" with zero backend). A 30s keepalive comment keeps proxies from
     cutting an idle stream. No schema/scorer change.

@@ -49,10 +49,10 @@ write path over the same JSONL the CLI appends to** — never a second source of
   re-fetches `/api/index` instead of going stale. The bus is `api/events.py` (in-process set of
   per-connection `asyncio.Queue`s — NO Redis). After a successful write, call
   `emit_index_updated()` (it's safe from a sync/threadpool endpoint — hops onto the startup-bound
-  loop via `call_soon_threadsafe`, no-op if no loop/subscribers). Emitted by status / outcome /
-  fit-override / annotations / cv-tailor-results / manual-ingest — **not** note/title (per SPEC
-  §11.1's list). When you add a new write endpoint, decide whether it changes the read model; if
-  so, `emit_index_updated()` after the append.
+  loop via `call_soon_threadsafe`, no-op if no loop/subscribers). Emitted by **every** write that
+  changes the read model: status / note / title / outcome / fit-override / annotations /
+  cv-tailor-results / manual-ingest. When you add a new write endpoint, decide whether it changes
+  the read model; if so, `emit_index_updated()` after the append.
 
 ## Endpoint security — per-route gating rule
 

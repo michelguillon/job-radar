@@ -92,6 +92,7 @@ def add_note(body: NoteRequest, settings: Settings = Depends(get_settings)) -> d
     """Attach a pure note (no status change)."""
     _require_scored(body.job_id, settings.scored_glob)
     _append(settings.log_path, body.job_id, event="note", value=None, notes=body.text)
+    emit_index_updated()
     return {"ok": True, "job_id": body.job_id}
 
 
@@ -100,6 +101,7 @@ def set_title(body: TitleRequest, settings: Settings = Depends(get_settings)) ->
     """Set a display-title override (presentation only — never scored)."""
     _require_scored(body.job_id, settings.scored_glob)
     _append(settings.log_path, body.job_id, event="title", value=body.title, notes="")
+    emit_index_updated()
     return {"ok": True, "job_id": body.job_id, "title": body.title}
 
 

@@ -694,6 +694,26 @@ def test_no_event_emitted_on_failed_write(client, monkeypatch):
     assert calls == []
 
 
+def test_note_emits_index_updated(client, monkeypatch):
+    """A successful POST /api/note fans an index_updated notice out (notes show in detail)."""
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    calls: list[int] = []
+    monkeypatch.setattr("api.routers.workflow.emit_index_updated", lambda: calls.append(1))
+    assert client.post("/api/note", json={"job_id": "sha256:j1", "text": "recruiter emailed"}).status_code == 200
+    assert calls == [1]
+
+
+def test_title_emits_index_updated(client, monkeypatch):
+    """A successful POST /api/title fans an index_updated notice out (title shows in Browse)."""
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    calls: list[int] = []
+    monkeypatch.setattr("api.routers.workflow.emit_index_updated", lambda: calls.append(1))
+    assert client.post("/api/title", json={"job_id": "sha256:j1", "title": "New Title"}).status_code == 200
+    assert calls == [1]
+
+
 # --- health --------------------------------------------------------------------
 
 def test_health(client):
