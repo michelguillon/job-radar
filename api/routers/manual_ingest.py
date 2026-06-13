@@ -8,9 +8,11 @@ pipeline, same detail-panel experience.
 ``POST /api/manual-ingest`` (owner-gated) runs ONE pasted JD through the live pipeline
 **synchronously** (~10–20s): ``build_manual_record`` → single-call Claude extraction
 (``pipeline.label.extract_one``, Haiku 4.5 — the *one* sanctioned non-batch extraction, see
-CLAUDE.md deviation 44) → ``validate`` → ``score`` → append validated + scored + meta sidecar
-files (``*_manual_{ts}.jsonl``, ``ats="manual"``) → cost to ``stats.json`` → rebuild
-``index.json``. It NEVER touches the automated collection pipeline, the scorer, or the schema.
+CLAUDE.md deviation 44) → ``soft_validate`` (advisory, never blocks — deviation 47) → ``score``
+→ append validated + scored + meta sidecar files (``*_manual_{ts}.jsonl``, ``ats="manual"``) →
+cost to ``stats.json`` → rebuild ``index.json``. It NEVER runs the prefilter screen (a
+deliberate owner add is not a candidate to reject on role-bucket/location), and never touches
+the automated collection pipeline, the scorer, or the schema.
 
 Deduplication is the same SHA-256 the pipeline uses: ``record_hash(normalise(raw_text))`` (NOT
 the raw text — the automated pipeline normalises before hashing, so normalising here keeps a
@@ -53,7 +55,7 @@ from models.record import (
     _ANNOTATION_FIELDS,
     _EXTRACTION_FIELDS,
     JDRecord,
-    validate,
+    soft_validate,
 )
 from pipeline.clean import normalise
 from pipeline.dedupe import record_hash
@@ -122,8 +124,10 @@ def _rebuild_index(settings: Settings) -> None:
 def manual_ingest(body: ManualIngestRequest, settings: Settings = Depends(get_settings)) -> dict:
     """Owner-gated synchronous ingest of one pasted JD. See module docstring for the pipeline.
 
-    200 → ``{job_id, company, title, fit_label, fit_score, priority_score}``; 409 duplicate;
-    422 too-short / extraction-invalid; 500 unexpected pipeline error."""
+    200 → ``{job_id, company, title, fit_label, fit_score, priority_score, warnings}``; 409
+    duplicate; 422 too-short / unparseable / incomplete extraction; 500 unexpected pipeline
+    error. ``warnings`` carries advisory soft-validation findings (e.g. an off-vocabulary
+    ``role_type``) — the role is stored regardless (deviation 47); ``[]`` when clean."""
     text = body.raw_text.strip()
     if not text:
         raise HTTPException(status_code=422, detail="JD text is required")
@@ -169,9 +173,13 @@ def manual_ingest(body: ManualIngestRequest, settings: Settings = Depends(get_se
         if getattr(record, field) is None:
             setattr(record, field, default)
 
-    errors = validate(record)
-    if errors:
-        raise HTTPException(status_code=422, detail=f"extraction did not validate: {errors}")
+    # Soft validation — the owner deliberately chose to add this role, so the closed-vocabulary
+    # enum gate must not block it (deviation 47). Unlike the automated pipeline (which treats a
+    # non-empty validate() as a hard failure), findings here are advisory warnings: the record is
+    # stored as-is and the warnings ride back in the 200 response for the UI to surface in amber.
+    warnings = soft_validate(record)
+    if warnings:
+        log.info("manual ingest: %d soft-validation warning(s) for %s: %s", len(warnings), job_id, warnings)
 
     # --- score (locked scorer, same as the pipeline) ---
     try:
@@ -207,4 +215,5 @@ def manual_ingest(body: ManualIngestRequest, settings: Settings = Depends(get_se
         "fit_label": app_record.fit_label,
         "fit_score": app_record.fit_score,
         "priority_score": app_record.priority_score,
+        "warnings": warnings,
     }

@@ -380,6 +380,20 @@ Kept in full: everything below — active operational guards Claude Code must kn
     `LANGFUSE_BASE_URL` = INTERNAL container URL (no Cloudflare hairpin), no quotes; `job-radar-api`
     joins the external `tracing` network (server-side `.env` + compose, see `.env.example`).
 
+47. *(→ SPEC §11.1 + deviation 44)* **Manual ingest uses SOFT validation, not the pipeline's
+    hard enum gate.** `POST /api/manual-ingest` is a deliberate owner decision to add a specific
+    role, so the closed-vocabulary gate must not block it. `models.record.soft_validate` runs the
+    SAME checks as `validate` but the endpoint treats the result as **advisory warnings** (logged +
+    returned in the 200 response as `warnings`, surfaced in amber by `AddRoleModal`), storing the
+    record as-is. An extraction like `role_type: ["Customer Success"]` (not in `ROLE_TYPE`) is
+    kept, not 422'd. Notable points: (a) `validate` is **unchanged** and still the hard gate for the
+    automated pipeline (batch label, `cli.validate`, prefilter output) — `ROLE_TYPE` is **not**
+    expanded. (b) Manual ingest **never runs the prefilter** (it imports no `prefilter`; confirmed)
+    — a deliberate add is not screened on role-bucket/location. (c) The scorer already tolerates an
+    off-vocabulary `role_type` (set-intersection → role dimension scores 0, never raises) — no
+    scorer change. (d) `soft_validate` is a thin, intentionally-named seam over `validate` so the
+    bypass is explicit at the call site; no schema bump (`SCHEMA_VERSION` unchanged).
+
 
 ## Schema summary
 

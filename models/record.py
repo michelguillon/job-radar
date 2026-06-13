@@ -559,6 +559,21 @@ def validate(record: JDRecord) -> list[str]:
     return errors
 
 
+def soft_validate(record: JDRecord) -> list[str]:
+    """Run the SAME checks as ``validate`` but as *advisory warnings*, never blocking.
+
+    ``validate``'s callers (batch labelling, ``cli.validate``, prefilter output) treat a
+    non-empty list as a hard failure — the closed-vocabulary enum gate keeps the automated
+    corpus clean. **Manual ingest is a deliberate human decision** (the owner has chosen to
+    add this exact role), so the enum gate must not block it: an extraction like
+    ``role_type: ["Customer Success"]`` (not in ``ROLE_TYPE``) is stored as-is, with the
+    finding surfaced as a warning rather than a 422. This is a thin, intentionally-named seam
+    over ``validate`` so the bypass is explicit at the call site — the checks (and their
+    wording) stay in one place. Never raises; ``[]`` means clean. (CLAUDE.md deviation 47.)
+    """
+    return validate(record)
+
+
 # ---------------------------------------------------------------------------
 # ApplicationRecord — Phase 2 scoring output (schema v1.3, Option A).
 #

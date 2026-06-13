@@ -91,6 +91,16 @@ export function AddRoleModal({ onAdded }: { onAdded: () => Promise<void> }) {
               </span>
               <span className="text-ink-soft">fit {result.fit_score} · priority {result.priority_score}</span>
             </div>
+            {result.warnings?.length > 0 && (
+              <div className={cn("space-y-1 rounded-md px-3 py-2 text-[12px]", TOAST.warn)}>
+                <p className="font-semibold">⚠ Extraction warnings — stored as-is:</p>
+                <ul className="list-disc space-y-[2px] pl-4">
+                  {result.warnings.map((w, i) => (
+                    <li key={i}>{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <p className="text-[12px] text-ink-faint">It now appears in Browse.</p>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={reset}>Add another</Button>

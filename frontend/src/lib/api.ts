@@ -205,6 +205,7 @@ export interface ManualIngestResult {
   fit_label: string;
   fit_score: number;
   priority_score: number;
+  warnings: string[]; // advisory soft-validation findings (e.g. off-vocabulary role_type); [] when clean
 }
 
 export const api = {

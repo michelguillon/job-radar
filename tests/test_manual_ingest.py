@@ -172,3 +172,64 @@ def test_manual_ingest_ats_manual(client, monkeypatch):
         index = json.load(fh)
     row = next(r for r in index["records"] if r["job_id"] == job_id)
     assert row["source_ats"] == "manual"
+
+
+# --- soft validation (deviation 47) --------------------------------------------
+
+# An extraction whose role_type is OFF the ROLE_TYPE vocabulary — the case the owner
+# deliberately wants to add anyway (e.g. a Customer Success role outside target_roles).
+EXTRACTION_UNKNOWN_ROLE = {**EXTRACTION, "role_type": ["Customer Success"]}
+
+
+def test_manual_ingest_unknown_role_type(client, monkeypatch):
+    """An off-vocabulary role_type is stored (200), not rejected (422), with a warning."""
+    monkeypatch.setattr(
+        manual_ingest, "extract_one",
+        lambda record, **_: (dict(EXTRACTION_UNKNOWN_ROLE), dict(USAGE)),
+    )
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    r = client.post("/api/manual-ingest", json=_payload())
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # The record was stored and scored despite the enum violation.
+    scores = load_scores(client.settings.scored_glob)
+    assert body["job_id"] in scores
+    assert isinstance(body["fit_score"], int)
+    # The violation comes back as an advisory warning, not an error.
+    assert any("role_type" in w and "Customer Success" in w for w in body["warnings"])
+
+
+def test_manual_ingest_warnings_in_response(client, monkeypatch):
+    """The response always carries a `warnings` list — empty when the extraction is clean."""
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    body = client.post("/api/manual-ingest", json=_payload()).json()  # default EXTRACTION is clean
+    assert body["warnings"] == []
+
+
+def test_validate_record_still_strict():
+    """The automated-pipeline validator still REPORTS an unknown role_type (batch unaffected)."""
+    from models.record import soft_validate, validate
+    from tests.factories import make_record
+
+    rec = make_record()
+    rec.role_type = ["Customer Success"]  # role_type lives in the nested extraction; set directly
+    errors = validate(rec)
+    assert any("role_type" in e for e in errors)
+    # soft_validate runs the SAME checks — it just doesn't block the caller.
+    assert soft_validate(rec) == errors
+
+
+def test_scorer_unknown_role_type():
+    """The scorer scores an unknown role_type as 0 for the role dimension, never raising."""
+    from scoring.profile import load_profile
+    from scoring.scorer import _role_score, score
+    from tests.factories import make_record
+
+    profile = load_profile("candidate_profile.yaml")
+    rec = make_record(raw_text=JD_TEXT)
+    rec.role_type = ["Customer Success"]
+    assert _role_score(rec, profile) == 0.0  # no primary/secondary/conditional match
+    app_record = score(rec, profile, "2026-06-13T00:00:00Z")  # must not raise
+    assert isinstance(app_record.fit_score, int)

@@ -11,8 +11,12 @@ write path over the same JSONL the CLI appends to** — never a second source of
   stage. A write = `require_unlocked` → `build_event`/`validate_*` → `append_event` → 200.
   **The one exception:** `POST /api/manual-ingest` (`routers/manual_ingest.py`, SPEC §11.1,
   deviation 44) DOES run the live pipeline — single-JD synchronous extract (`pipeline.label.
-  extract_one`, Haiku 4.5) → `validate` → `score` → append corpus files → rebuild `index.json`.
-  It is the documented thick endpoint; do not copy its shape to the other (thin) write routes.
+  extract_one`, Haiku 4.5) → `soft_validate` → `score` → append corpus files → rebuild
+  `index.json`. It is the documented thick endpoint; do not copy its shape to the other (thin)
+  write routes. **Soft validation (deviation 47):** it uses `models.record.soft_validate` (same
+  checks as `validate`, but advisory) and stores the role regardless of enum violations — a
+  deliberate owner add is not subject to the closed-vocabulary gate. Findings ride back as
+  `warnings` in the 200 body (empty list when clean); it also **never runs the prefilter**.
 - **The scorer is LOCKED.** The API reads scores (`load_scores`), it never writes a scored
   file. Annotations record disagreement with a score — they never mutate an extraction.
 - **Reuse, don't duplicate** write/validation logic. `build_event` runs

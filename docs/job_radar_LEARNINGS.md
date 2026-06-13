@@ -2145,5 +2145,25 @@ A sixth read-only report, comparing Job Radar's fit verdict against cv-tailor's 
 
 ---
 
+## Manual ingest: soft validation — a human add isn't subject to the pipeline's enum gate
+
+- **The closed-vocabulary gate exists for the *automated* pipeline, not for deliberate human
+  decisions.** `validate`'s enum checks (`role_type ∈ ROLE_TYPE`, etc.) keep the batch-labelled
+  corpus clean — but when the owner pastes a role via `POST /api/manual-ingest`, hard-failing on
+  `role_type: ["Customer Success"]` (not in the enum) throws away a deliberate choice. Manual
+  ingest now uses `models.record.soft_validate` (same checks, advisory): the record is stored
+  as-is and the findings ride back as `warnings` in the 200 body (amber in the UI), instead of a
+  422. `validate` itself is unchanged — the automated path still treats a non-empty result as a
+  hard failure, and `ROLE_TYPE` is **not** expanded (the enum still benefits the pipeline).
+- **The fix was a call-site decision, not a new validator.** `validate` already *returned* a list
+  (callers decide whether to raise); the build prompt assumed it raised. `soft_validate` is a
+  thin, intentionally-named seam over it so the bypass is explicit where it happens. The scorer
+  needed no guard — set-intersection role matching already scores an unknown `role_type` as 0
+  without raising — and the endpoint already skipped the prefilter entirely (confirmed, not
+  assumed). Lesson: read what the code does before adding a layer the prompt presumes is missing.
+  See CLAUDE.md deviation 47 + SPEC §11.1. 466 tests; `tsc -b` clean.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*
