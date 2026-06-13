@@ -313,55 +313,73 @@ not before."
 
 ---
 
-## 8. Job Radar (Phase B) — reuse the proven SDK surface, not the spec sketch
+## 8. `langfuse.trace.name` is what the worker ingests on — blobs in MinIO ≠ a trace in the UI
 
 **Context.**
-With cv-tailor instrumented and verified live, Job Radar was next. The
-instrumentation spec's §3 carried a Job-Radar code sketch — but it used a
-different langfuse API shape than the cv-tailor module that was actually
-working against the same server (`lf.trace()` / `lf.score()` /
-`lf.api.scores.create()` in the sketch vs `create_trace_id` /
-`start_as_current_observation` / `create_score` proven in `tailor/telemetry.py`).
+Job Radar (the second app on the stack) uploaded traces to MinIO — the JSON
+blobs were visibly landing in the bucket — but they never appeared in the UI.
+The zero-cost `debug-trace` probe worked; real pipeline runs didn't. Same silent
+"no traces" symptom as #5, a different root cause.
 
-**What we found / decided.**
-The proven module wins over the spec sketch. The sketch was written against an
-earlier API reading; `tailor/telemetry.py` is what verifiably exported traces
-to this exact Langfuse v4.7.1 server. Job Radar's `cli/telemetry.py` mirrors its
-proven choices: deterministic trace id via `Langfuse.create_trace_id(seed=…)`,
-the root span claiming it via `trace_context`, `create_score(trace_id=,
-observation_id=, data_type="NUMERIC")` for per-JD scores, lazy in-function SDK
-imports, and the `is_enabled()` no-op gate. Before wiring, the real SDK surface
-was introspected in-container (`inspect.signature`) to confirm every method and
-keyword exists in 4.7.1 — `create_score` does take `observation_id`,
-`start_as_current_observation` does take `trace_context`/`as_type`/`model`/
-`usage_details`. Guards make a wrong call non-fatal, but verifying first means
-the happy path actually works rather than silently logging and continuing.
-
-The one genuine Job-Radar difference from cv-tailor is structural, not API: the
-**Batch API is async**, so spans are post-hoc (built from downloaded results
-after the batch ends), and the CLI exits immediately with no periodic exporter —
-so §7's flush-after-root-closes rule is not a nicety here, it is the only thing
-that exports the trace. The two recorders (`record_extraction_batch`,
-`record_scoring_run`) each build their whole tree inside one `with`, let it
-close, then `flush()`. Trace rows are assembled by **pure** builders
-(`build_trace_rows`, `build_scoring_rows`) that re-derive the scorer breakdown
-with `stage1_fit` (read-only) — no business logic, prompt, or schema touched, and
-the builders are unit-testable without the SDK.
+**What we found.**
+Diffing the raw OTel payloads in MinIO against cv-tailor's working spans showed a
+single difference: cv-tailor's spans carry a `langfuse.trace.name` attribute and
+Job Radar's did not. The worker requires that attribute to promote a trace from
+MinIO blob storage into ClickHouse — the store the UI actually queries. The fix
+was to wrap every root span in `propagate_attributes(trace_name=…)`, exactly what
+cv-tailor's `run_trace` already did. `start_as_current_observation` has **no**
+`trace_name` parameter (confirmed by introspecting the v4.7.1 SDK) —
+`propagate_attributes` is the only way to set it.
 
 **What it teaches.**
-When a spec and a verified implementation disagree on an API, trust the artifact
-that actually ran (the same tie-break rule this repo applies to its own schema).
-And introspect the live SDK before relying on a method signature — a five-second
-`inspect.signature` in the target image beats a guarded call that fails silently
-in production.
+"The SDK accepted the calls and the blobs uploaded" is not "it works." Ingestion
+has two hops — app → MinIO, then worker → ClickHouse — and a trace can clear the
+first and silently fail the second. When traces don't show, diff a known-good
+payload against the broken one *at the storage layer*; the missing field is
+usually sitting right there.
 
 **Interview angle.**
-"Instrumenting the second app, the spec's code sketch used a different langfuse
-API than the module I'd already verified live against the same server. I treated
-the working code as the source of truth, introspected the installed SDK to
-confirm every signature, and only then wired it in. The app-specific twist was
-the Batch API: results are async, so spans are post-hoc and the CLI dies before
-any background exporter runs — which makes 'flush after the root span closes' the
-difference between traces existing and not."
+"Traces were uploading to object storage but never reaching the UI. I diffed the
+raw OTel blobs against a working app's and found one missing attribute —
+`langfuse.trace.name` — that the ingestion worker keys on. The lesson I keep
+relearning with observability: verify the signal reaches the store the UI reads,
+not just that the client didn't throw."
+
+---
+
+## 9. Instrument the path that runs, not the stage you picture — it bit three times
+
+**Context.**
+After the trace-name fix (#8), traces from `python -m cli.label` worked. But a
+manual ingest from the UI still produced nothing, and later the scheduled weekly
+cron also produced nothing — both silently, both "extract and score" work that I
+assumed was already covered.
+
+**What we found.**
+Three entry points do the same *logical* work but share almost no *execution* path,
+so each had to be handled on its own terms:
+- the batch CLIs (`cli.label` / `cli.score`) — where the recorders were first wired;
+- `POST /api/manual-ingest` — runs its own inline `extract_one` + `score` inside the
+  FastAPI process, calling neither CLI, so it was untraced until it got its own
+  `record_manual_ingest`;
+- the weekly cron — runs `docker compose run --rm job-radar`, a *different container*
+  that wasn't on the `tracing` network, so its traces had nowhere to export (fixed
+  with a server-only `docker-compose.tracing.yml` overlay).
+The tell each time was the absence of the per-run `… trace created` WARNING line in
+that path's own logs.
+
+**What it teaches.**
+"It extracts and scores" is a stage in your head; the trace follows the code path —
+and the container — that actually run. Two flows doing the same logical work can
+share zero lines of code and zero network config. Enumerate the real entry points
+(CLI, API, cron) and confirm each one emits; a cheap per-path confirmation log makes
+the gap obvious instead of silent.
+
+**Interview angle.**
+"Same feature, three entry points — a batch CLI, a synchronous API endpoint, and a
+cron container — and instrumenting one left the other two dark, each for a different
+reason: a separate code path, then the wrong Docker network. I learned to instrument
+by execution path rather than by the stage I picture, and to give each path a
+confirmation log so a miss shows up immediately."
 
 ---
