@@ -203,7 +203,17 @@ No app changes yet. Just the schema + init function.
 **Verify:** `python -m cli.db init` creates the DB, tables exist,
 schema_version = 1.
 
-### Step 2 — Backfill from existing JSONL
+### Step 2 — Backfill from existing JSONL ✅ built
+
+> Idempotency note: `annotations` dedupes on the UNIQUE expression index
+> (`INSERT OR IGNORE`), but `activity_log` and `cv_tailor_links` have no DB
+> constraint (an append log may legitimately repeat), so their backfill is
+> idempotent via a NULL-safe content pre-check (`_row_exists`, `col IS ?`) on a
+> natural key — `(ts, job_id, event, value, notes)` and `(ts, job_id,
+> cv_tailor_run_id)` respectively. The JSONL↔SQL row mapping lives once in
+> `cli/db.py` (`insert_*` + `_enc`/`_dec`/`_bool_to_int`) so backfill, dual-write
+> and dual-read share it. cv-tailor records are run through
+> `_migrate_cv_tailor_fields` (deviation 43) before insert.
 
 Create `cli/db_migrate.py`:
 - `backfill_activity_log()` — reads `corpus/activity_log.jsonl`,

@@ -17,6 +17,7 @@ can run simultaneously without file-lock contention (SPEC_DB_MIGRATION §7).
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from pathlib import Path
@@ -35,11 +36,15 @@ def get_db_path() -> Path:
 DB_PATH = get_db_path()
 
 
-def get_db() -> sqlite3.Connection:
-    """Open a connection with row access by name, WAL mode, and FKs enabled."""
-    path = get_db_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+def get_db(path: str | Path | None = None) -> sqlite3.Connection:
+    """Open a connection with row access by name, WAL mode, and FKs enabled.
+
+    ``path`` overrides the resolved DB path (used by the backfill's ``db_path`` arg);
+    when None it falls back to ``get_db_path()`` (``JR_DB_PATH`` env or the default).
+    """
+    db_path = Path(path) if path is not None else get_db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -119,6 +124,96 @@ def init_db() -> None:
             INSERT OR IGNORE INTO schema_version (version) VALUES (1);
             """
         )
+
+
+# ---------------------------------------------------------------------------
+# Row I/O — one home for the JSONL-dict <-> SQL-row mapping so backfill
+# (Step 2), dual-write (Step 4), and dual-read (Step 3/5) cannot drift apart.
+# ---------------------------------------------------------------------------
+
+def _enc(value):
+    """JSON-encode a complex column value (annotations observed/expected) for TEXT.
+
+    None maps to SQL NULL (not the string ``"null"``) so it round-trips to None and
+    matches the JSONL loaders, which return None for an absent/null field. Lists, dicts
+    and scalars are JSON-encoded and decoded by ``_dec`` on read.
+    """
+    return None if value is None else json.dumps(value, ensure_ascii=False)
+
+
+def _dec(text):
+    """Inverse of ``_enc``: SQL NULL -> None, else ``json.loads``."""
+    return None if text is None else json.loads(text)
+
+
+def _bool_to_int(value):
+    """SQLite has no bool: True/False -> 1/0, None stays NULL."""
+    return None if value is None else int(bool(value))
+
+
+def insert_activity_event(conn: sqlite3.Connection, event: dict) -> None:
+    """INSERT one activity-log event (plain INSERT — append-only, no dedup).
+
+    ``value`` is a scalar (str|None) per ``validate_activity_event``, stored raw so it
+    stays human-readable in the ``sqlite3`` CLI; ``notes`` defaults to ''.
+    """
+    conn.execute(
+        "INSERT INTO activity_log (ts, job_id, event, value, notes, v) VALUES (?,?,?,?,?,?)",
+        (
+            event.get("ts"),
+            event.get("job_id"),
+            event.get("event"),
+            event.get("value"),
+            event.get("notes", "") or "",
+            event.get("v", 1),
+        ),
+    )
+
+
+def insert_annotation(conn: sqlite3.Connection, rec: dict) -> None:
+    """INSERT one annotation. Raises ``sqlite3.IntegrityError`` on a duplicate
+    (the IFNULL(field,'') unique index) — the dual-write path maps that to a 409."""
+    conn.execute(
+        "INSERT INTO annotations "
+        "(ts, job_id, annotation_type, field, observed, expected, reason, "
+        " scorer_label, scorer_fit_score, v) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (
+            rec.get("ts"),
+            rec.get("job_id"),
+            rec.get("annotation_type"),
+            rec.get("field"),
+            _enc(rec.get("observed")),
+            _enc(rec.get("expected")),
+            rec.get("reason"),
+            rec.get("scorer_label"),
+            rec.get("scorer_fit_score"),
+            rec.get("v", 1),
+        ),
+    )
+
+
+def insert_cv_tailor_link(conn: sqlite3.Connection, rec: dict) -> None:
+    """INSERT one cv-tailor link (plain INSERT — multiple runs per job_id are kept)."""
+    conn.execute(
+        "INSERT INTO cv_tailor_links "
+        "(ts, job_id, cv_tailor_run_id, fit_score, coverage_score, cv_quality_score, "
+        " cvcm_enabled, tailoring_mode, output_link, notes, source, v) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            rec.get("ts"),
+            rec.get("job_id"),
+            rec.get("cv_tailor_run_id"),
+            rec.get("fit_score"),
+            rec.get("coverage_score"),
+            rec.get("cv_quality_score"),
+            _bool_to_int(rec.get("cvcm_enabled")),
+            rec.get("tailoring_mode"),
+            rec.get("output_link"),
+            rec.get("notes") or "",
+            rec.get("source", "manual") or "manual",
+            rec.get("v", 1),
+        ),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
