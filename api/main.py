@@ -18,15 +18,19 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api import events
 from api.routers import annotations, auth, cv_tailor, events as events_router, index, manual_ingest, reports, workflow
-from cli.db import init_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Capture the running loop so sync (threadpool) write endpoints can publish SSE events
-    onto it via call_soon_threadsafe (api/events.py), and ensure the SQLite schema exists
-    (Phase 6.5 — dual-write/dual-read; idempotent)."""
-    init_db()
+    onto it via call_soon_threadsafe (api/events.py).
+
+    NOTE (Phase 6.5): the SQLite schema is NOT created here. ``use_sqlite()`` is
+    existence-based, so creating an empty DB at boot would flip reads onto an empty store
+    before the deploy-time backfill (``python -m cli.db_migrate``) has run, hiding all
+    interactive state. The DB is created by the backfill, by the first dual-write
+    (``cli.db.write_*`` → ``init_db``), or by ``--source sqlite/both`` — never by merely
+    booting the API. Deploy ordering: run the backfill before serving writes."""
     events.bind_loop(asyncio.get_running_loop())
     yield
 

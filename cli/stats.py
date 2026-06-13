@@ -41,9 +41,11 @@ from cli.track import (
 from cli.db import (
     get_db,
     init_db,
+    load_all_cv_tailor_links_sqlite,
     load_annotations_sqlite,
     load_cv_tailor_links_sqlite,
     load_events_sqlite,
+    use_sqlite,
 )
 from models.record import JDRECORD_SCHEMA_VERSION, SCHEMA_VERSION, JDRecord
 
@@ -202,6 +204,41 @@ def load_all_cv_tailor_links(path: str = CV_TAILOR_LINKS_PATH) -> list[dict]:
         _migrate_cv_tailor_fields(event)
         records.append(event)
     return records
+
+
+# Source-aware variants (Phase 6.5 Step 5). The bare ``load_*`` above stay PURE JSONL —
+# they are the comparison baseline for ``--export-index --source both`` and the
+# ``interactive_from_jsonl`` path. The ``*_auto`` wrappers read SQLite when the DB exists
+# (else JSONL); the API overlay and the CLI tools use these so they auto-detect the store.
+
+def load_annotations_auto(path: str = ANNOTATIONS_PATH) -> dict[str, list[dict]]:
+    if use_sqlite():
+        conn = get_db()
+        try:
+            return load_annotations_sqlite(conn)
+        finally:
+            conn.close()
+    return load_annotations(path)
+
+
+def load_cv_tailor_links_auto(path: str = CV_TAILOR_LINKS_PATH) -> dict[str, dict]:
+    if use_sqlite():
+        conn = get_db()
+        try:
+            return load_cv_tailor_links_sqlite(conn)
+        finally:
+            conn.close()
+    return load_cv_tailor_links(path)
+
+
+def load_all_cv_tailor_links_auto(path: str = CV_TAILOR_LINKS_PATH) -> list[dict]:
+    if use_sqlite():
+        conn = get_db()
+        try:
+            return load_all_cv_tailor_links_sqlite(conn)
+        finally:
+            conn.close()
+    return load_all_cv_tailor_links(path)
 
 
 def _migrate_cv_tailor_fields(record: dict) -> None:
@@ -431,10 +468,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cv-tailor-links", default=CV_TAILOR_LINKS_PATH, dest="cv_tailor_links", help=f"cv-tailor run links embedded by --export-index (default: {CV_TAILOR_LINKS_PATH})")
     parser.add_argument("--stats-file", default=STATS_PATH, dest="stats_file", help=f"Cost ledger for cost-to-date (default: {STATS_PATH})")
     parser.add_argument(
-        "--source", choices=("jsonl", "sqlite", "both"), default="jsonl",
+        "--source", choices=("jsonl", "sqlite", "both"), default="sqlite",
         help="Where --export-index reads interactive state (workflow/annotations/cv-tailor): "
-             "jsonl (default), sqlite, or both (compare the two, exit non-zero on any divergence). "
-             "Pipeline artefacts (scores/JDs/metadata) are always JSONL.",
+             "sqlite (default, Phase 6.5 Step 5), jsonl, or both (compare the two, exit non-zero "
+             "on any divergence). Pipeline artefacts (scores/JDs/metadata) are always JSONL.",
     )
     args = parser.parse_args(argv)
 

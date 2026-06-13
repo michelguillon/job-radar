@@ -2324,6 +2324,38 @@ non-obvious and would have silently corrupted state in the test suite:
   test tmp path, a fresh deploy before the lifespan hook runs — never throws "no such table".
   The API also inits at lifespan startup; belt and suspenders, both cheap.
 
+## Phase 6.5 Step 5 — an existence-based read switch is a loaded gun; and "auto" must not poison the comparison
+
+Switching reads to SQLite via `use_sqlite() == get_db_path().exists()` is elegant (no flag,
+CLI tools just work) but had two traps that shaped the implementation:
+
+- **Existence-as-switch + lazy-create = silent state loss.** Because the read source flips
+  the instant the DB file appears, anything that creates an *empty* DB before the backfill
+  runs would make the overlay read an empty store and the entire UI would go blank. The
+  original Step-4 plan put `init_db()` in the API lifespan — meaning a simple API restart on
+  a not-yet-backfilled host would zero the displayed state. Removed it: the lifespan no longer
+  touches the DB. The DB is now created only by the backfill, the first dual-write, or an
+  explicit `--source sqlite/both`. Deploy ordering is documented: backfill BEFORE serving.
+  Lesson: if file-existence is your cutover signal, no code path may create the file empty
+  ahead of the data — make creation and population the same act, or don't create on the read path.
+- **Auto-detect must not collapse the dual-read comparison.** `--source both` only means
+  something if one side is provably JSONL and the other provably SQLite. So the bare
+  `load_annotations` / `load_cv_tailor_links` / `load_events` stay PURE JSONL (the comparison
+  baseline + `interactive_from_jsonl`), and auto-detection lives in *separate* `_auto`
+  wrappers (`load_activity_events`, `load_*_auto`) that the API overlay and CLI tools call. A
+  single auto-detecting `load_events` (as the migration sketch suggested) would have made both
+  sides of `--source both` read SQLite — a comparison that can never fail. Two-named-functions
+  (pure vs auto) is the cost of keeping the safety gate honest.
+- **`load_events` is overloaded, so it can't be the auto seam.** `cli.stats` reuses
+  `cli.track.load_events` as a generic JSONL line reader for *annotations* and *cv-tailor
+  links* too — so making `load_events` itself auto-detect to the `activity_log` table (the
+  sketch's suggestion) would have made the annotation/cv-tailor loaders read the wrong table.
+  The auto seam had to be a new, activity-log-specific function.
+
+index.json decision: **Option A** — keep it as the pre-built *pipeline* cache (scored ⨝ JD ⨝
+meta); the overlay supplies interactive state live from SQLite. Dropping it (Option B) waits
+for the PostgreSQL/multi-process step, if it ever happens.
+
 ---
 
 *[Claude Code: append new entries here as each step and phase completes.

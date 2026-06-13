@@ -40,15 +40,15 @@ from cli.stats import (
     build_index_rows,
     export_index,
     index_stats,
-    load_annotations,
+    load_annotations_auto,
     load_cost_to_date,
-    load_cv_tailor_links,
+    load_cv_tailor_links_auto,
 )
 from cli.track import (
     _clock,
     append_event,
     build_event,
-    load_events,
+    load_activity_events,
     load_jdrecords,
     load_meta,
     load_scores,
@@ -116,9 +116,9 @@ def _rebuild_index(settings: Settings) -> None:
     scores = load_scores(settings.scored_glob)
     jds = load_jdrecords(settings.validated_glob)
     metas = load_meta(settings.meta_glob)
-    workflow = project(load_events(settings.log_path))
-    annotations = load_annotations(settings.annotations_path)
-    cv_links = load_cv_tailor_links(settings.cv_tailor_links_path)
+    workflow = project(load_activity_events(settings.log_path))
+    annotations = load_annotations_auto(settings.annotations_path)
+    cv_links = load_cv_tailor_links_auto(settings.cv_tailor_links_path)
     rows = build_index_rows(scores, jds, metas, workflow, annotations, cv_links)
     stats = index_stats(rows, cost_to_date=load_cost_to_date(settings.stats_path))
     export_index(rows, stats, path=settings.index_path, generated_at=_clock())

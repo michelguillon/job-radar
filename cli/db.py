@@ -32,6 +32,14 @@ def get_db_path() -> Path:
     return Path(os.getenv("JR_DB_PATH", _DEFAULT_DB_PATH))
 
 
+def use_sqlite() -> bool:
+    """True once the SQLite DB exists. The auto-detect switch for the API overlay and the
+    CLI tools (Step 5 / SPEC_DB_MIGRATION §6): if the DB is present, read interactive state
+    from it; otherwise fall back to the JSONL files. After Step 6 it is always True in prod.
+    Resolved live (not cached) so tests that create/redirect the DB mid-run are honoured."""
+    return get_db_path().exists()
+
+
 # Back-compat module attribute for call sites / docs that reference DB_PATH.
 DB_PATH = get_db_path()
 
@@ -287,6 +295,14 @@ def _cv_tailor_row_to_record(r: sqlite3.Row) -> dict:
         "notes": r["notes"],
         "source": r["source"],
     }
+
+
+def load_all_cv_tailor_links_sqlite(conn: sqlite3.Connection) -> list[dict]:
+    """Every cv-tailor link (NOT deduplicated), in file/insertion order — a drop-in for
+    ``cli.stats.load_all_cv_tailor_links`` (the calibration report needs full run history).
+    Field migration already applied at backfill, so rows carry the new names."""
+    rows = conn.execute("SELECT * FROM cv_tailor_links ORDER BY id ASC").fetchall()
+    return [_cv_tailor_row_to_record(r) for r in rows]
 
 
 def load_cv_tailor_links_sqlite(conn: sqlite3.Connection) -> dict[str, dict]:

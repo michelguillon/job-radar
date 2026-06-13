@@ -48,7 +48,7 @@ from cli.track import (
     _default_state,
     _title_for,
     _truncate,
-    load_events,
+    load_activity_events,
     load_jdrecords,
     load_meta,
     load_scores,
@@ -257,7 +257,7 @@ def cmd_digest(argv: list[str], *, now=_now, out=print) -> int:
     scores = load_scores(args.scored)
     jds = load_jdrecords(args.validated)
     metas = load_meta(args.meta)
-    workflow = project(load_events(args.log))
+    workflow = project(load_activity_events(args.log))
 
     rows = build_digest_rows(scores, jds, metas, workflow, since=since)
     shown = sort_rows(filter_digest(rows, min_fit=args.min_fit, include_tracked=args.include_tracked))

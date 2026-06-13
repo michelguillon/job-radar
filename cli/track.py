@@ -281,6 +281,9 @@ def format_table(rows: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 
 def load_events(path: str) -> list[dict]:
+    """Read activity-log events from a JSONL file (the pure reader). Also reused as a generic
+    line reader by cli.stats for annotations / cv-tailor links — so it must NOT auto-detect
+    to the activity_log table; use ``load_activity_events`` for the source-aware variant."""
     if not os.path.exists(path):
         return []
     events: list[dict] = []
@@ -293,6 +296,21 @@ def load_events(path: str) -> list[dict]:
             except json.JSONDecodeError as exc:
                 log.warning("skipping %s:%d — %s", path, n, exc)
     return events
+
+
+def load_activity_events(path: str = LOG_PATH) -> list[dict]:
+    """Source-aware activity-log read (Phase 6.5 Step 5): SQLite when the DB exists,
+    else the JSONL file. Drop-in for ``project(load_events(path))`` call sites that read
+    the *activity log* specifically (not the annotations / cv-tailor reuse of load_events)."""
+    from cli.db import get_db, load_events_sqlite, use_sqlite
+
+    if use_sqlite():
+        conn = get_db()
+        try:
+            return load_events_sqlite(conn)
+        finally:
+            conn.close()
+    return load_events(path)
 
 
 def append_event(path: str, event: dict) -> None:
@@ -388,7 +406,7 @@ def cmd_update(argv: list[str], *, now=_clock, out=print) -> int:
         return 1
 
     if args.status:
-        current = project(load_events(args.log)).get(args.job_id, _default_state())["status"]
+        current = project(load_activity_events(args.log)).get(args.job_id, _default_state())["status"]
         warning = transition_warning(current, args.status)
         if warning:
             out(f"  ⚠ {warning}")
@@ -427,7 +445,7 @@ def cmd_list(argv: list[str], *, out=print) -> int:
     scores = load_scores(args.scored)
     jds = load_jdrecords(args.validated)
     metas = load_meta(args.meta)
-    workflow = project(load_events(args.log))
+    workflow = project(load_activity_events(args.log))
 
     rows = build_rows(scores, jds, metas, workflow)
     shown = sort_rows(

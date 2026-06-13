@@ -790,3 +790,29 @@ def test_annotation_duplicate_uses_sqlite_constraint(client, monkeypatch):
     # exactly one row in BOTH stores (the rejected dup left no orphan line)
     assert len(_db_rows("annotations")) == 1
     assert len(track.load_events(client.settings.annotations_path)) == 1
+
+
+# --- Phase 6.5 Step 5: API reads come from SQLite ------------------------------
+
+def test_index_overlay_reads_from_sqlite(client):
+    """Write an event straight to SQLite (NOT via the API, so the JSONL log stays empty),
+    then GET /api/index — the overlay must reflect the SQLite-only state, proving it reads
+    from SQLite once the DB exists (auto-detect)."""
+    from cli.db import write_activity_event
+    write_activity_event({"v": 1, "ts": "2026-06-12T00:00:00Z", "job_id": "sha256:j1",
+                          "event": "status", "value": "applied", "notes": ""})
+    assert track.load_events(client.settings.log_path) == []   # JSONL has nothing
+    rec = client.get("/api/index").json()["records"][0]
+    assert rec["application_status"] == "applied"              # …but the overlay shows it
+
+
+def test_full_roundtrip_write_sqlite_read_sqlite(client, monkeypatch):
+    """Write a status via the API (dual-write), re-fetch the index, confirm the new status
+    is present — and that the SQLite store carries it."""
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    assert client.post("/api/status", json={"job_id": "sha256:j1", "status": "shortlisted"}).status_code == 200
+    rec = client.get("/api/index").json()["records"][0]
+    assert rec["application_status"] == "shortlisted"
+    rows = _db_rows("activity_log")
+    assert rows[-1]["event"] == "status" and rows[-1]["value"] == "shortlisted"

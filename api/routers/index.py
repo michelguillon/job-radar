@@ -21,8 +21,8 @@ from fastapi import APIRouter, Depends, Request
 
 from api.security import verify_token, write_configured, WRITE_COOKIE
 from api.settings import Settings, get_settings
-from cli.stats import cv_tailor_view, load_annotations, load_cv_tailor_links
-from cli.track import load_events, project
+from cli.stats import cv_tailor_view, load_annotations_auto, load_cv_tailor_links_auto
+from cli.track import load_activity_events, project
 
 router = APIRouter(prefix="/api", tags=["index"])
 
@@ -57,9 +57,9 @@ def overlay_workflow(
     embedded annotations are refreshed from the live log so a freshly submitted flag shows;
     likewise ``cv_tailor_links_path`` refreshes the ``cv_tailor`` section (job_radar_SPEC §11.3).
     """
-    states = project(load_events(log_path))
-    annotations = load_annotations(annotations_path) if annotations_path else None
-    cv_tailor_links = load_cv_tailor_links(cv_tailor_links_path) if cv_tailor_links_path else None
+    states = project(load_activity_events(log_path))
+    annotations = load_annotations_auto(annotations_path) if annotations_path else None
+    cv_tailor_links = load_cv_tailor_links_auto(cv_tailor_links_path) if cv_tailor_links_path else None
     for rec in index.get("records", []):
         job_id = rec.get("job_id")
         if annotations is not None:

@@ -97,10 +97,17 @@ settings-resolved corpus paths. New settings: `seeds_path` (`JR_SEEDS_PATH`) + `
 ## Live overlay (the one non-obvious read)
 
 `GET /api/index` serves the pre-built `corpus/index.json` (the heavy scoring+extraction
-join from `cli.stats --export-index`) **and re-projects the live activity log over it**
-(`load_events` → `project`, cheap), patching `application_status`/`outcome`/
-`application_date`/`notes`/`title` per `job_id`. A write therefore shows on reload without
-a re-score/re-export. Annotations do **not** affect the read model.
+join from `cli.stats --export-index`) **and re-projects the live interactive state over it**
+(`load_activity_events` → `project`, cheap), patching `application_status`/`outcome`/
+`application_date`/`notes`/`title` + annotations + cv-tailor per `job_id`. A write therefore
+shows on reload without a re-score/re-export.
+
+> **Phase 6.5 read source (Step 5).** The overlay reads interactive state via the
+> *auto-detecting* loaders (`cli.track.load_activity_events`,
+> `cli.stats.load_{annotations,cv_tailor_links}_auto`): SQLite when the DB exists, else
+> JSONL. So once the DB is backfilled, the overlay reads SQLite; on a fresh host it
+> still serves correct JSONL state. The bare `load_*` stay pure JSONL (the `--source
+> both` comparison baseline) — use the `_auto` variants in API read paths.
 
 ## Paths
 

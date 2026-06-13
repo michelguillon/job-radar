@@ -23,7 +23,7 @@ from cli.track import (
     _default_state,
     append_event,
     build_event,
-    load_events,
+    load_activity_events,
     load_scores,
     project,
     transition_warning,
@@ -88,7 +88,7 @@ def set_status(body: StatusRequest, settings: Settings = Depends(get_settings)) 
     """Move a job to a workflow status. Surfaces a (non-blocking) transition warning —
     real searches skip and backtrack stages (cli.track precedent: warn, never block)."""
     _require_scored(body.job_id, settings.scored_glob)
-    current = project(load_events(settings.log_path)).get(body.job_id, _default_state())["status"]
+    current = project(load_activity_events(settings.log_path)).get(body.job_id, _default_state())["status"]
     warning = transition_warning(current, body.status)
     _append(settings.log_path, body.job_id, event="status", value=body.status, notes=body.notes or "")
     emit_index_updated()

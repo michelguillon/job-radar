@@ -24,8 +24,8 @@ from cli.analyse import (
     load_cost_and_jobs,
     load_yield_seeds,
 )
-from cli.stats import load_all_cv_tailor_links, load_annotations
-from cli.track import load_events, load_jdrecords, load_meta, load_scores, project
+from cli.stats import load_all_cv_tailor_links_auto, load_annotations_auto
+from cli.track import load_activity_events, load_jdrecords, load_meta, load_scores, project
 
 router = APIRouter(prefix="/api/report", tags=["reports"])
 
@@ -35,8 +35,8 @@ def yield_report(settings: Settings = Depends(get_settings)) -> PlainTextRespons
     """Build the company yield report and return it as a downloadable .txt file."""
     scores = load_scores(settings.scored_glob)
     jds = load_jdrecords(settings.validated_glob)
-    workflow = project(load_events(settings.log_path))
-    annotations = load_annotations(settings.annotations_path)
+    workflow = project(load_activity_events(settings.log_path))
+    annotations = load_annotations_auto(settings.annotations_path)
     seeds = load_yield_seeds(settings.seeds_path)
 
     cost, jobs = load_cost_and_jobs(settings.stats_path)
@@ -58,8 +58,8 @@ def cv_tailor_report(settings: Settings = Depends(get_settings)) -> PlainTextRes
     scores = load_scores(settings.scored_glob)
     jds = load_jdrecords(settings.validated_glob)
     metas = load_meta(settings.meta_glob)
-    workflow = project(load_events(settings.log_path))
-    cv_tailor_links = load_all_cv_tailor_links(settings.cv_tailor_links_path)
+    workflow = project(load_activity_events(settings.log_path))
+    cv_tailor_links = load_all_cv_tailor_links_auto(settings.cv_tailor_links_path)
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     data = build_cv_tailor_report(cv_tailor_links, scores, jds, metas, workflow)

@@ -36,8 +36,8 @@ from cli.stats import (
     ANNOTATIONS_PATH,
     CV_TAILOR_LINKS_PATH,
     STATS_PATH,
-    load_all_cv_tailor_links,
-    load_annotations,
+    load_all_cv_tailor_links_auto,
+    load_annotations_auto,
     load_cost_to_date,
 )
 from cli.track import (
@@ -48,7 +48,7 @@ from cli.track import (
     _default_state,
     _title_for,
     _truncate,
-    load_events,
+    load_activity_events,
     load_jdrecords,
     load_meta,
     load_scores,
@@ -951,10 +951,10 @@ def cmd_analyse(argv: list[str], *, now=_now, out=print) -> int:
     scores = load_scores(args.scored)
     jds = load_jdrecords(args.validated)
     metas = load_meta(args.meta)
-    workflow = project(load_events(args.log))
-    annotations = load_annotations(args.annotations)
+    workflow = project(load_activity_events(args.log))
+    annotations = load_annotations_auto(args.annotations)
     seeds = load_yield_seeds(args.seeds)
-    cv_tailor_links = load_all_cv_tailor_links(args.cv_tailor_links)
+    cv_tailor_links = load_all_cv_tailor_links_auto(args.cv_tailor_links)
 
     if not scores:
         out("(no scored jobs found — run the pipeline first)")

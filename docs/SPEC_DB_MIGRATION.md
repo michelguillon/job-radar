@@ -272,7 +272,24 @@ match" to a SQL UNIQUE constraint violation (409 on IntegrityError).
 **Verify:** make a write via the UI, confirm the record appears in
 both SQLite (via `sqlite3` CLI) and the JSONL file.
 
-### Step 5 — Switch API reads to SQLite
+### Step 5 — Switch API reads to SQLite ✅ built
+
+> Done via **auto-detect**, not a hard switch. `cli.db.use_sqlite()` returns
+> `get_db_path().exists()`. Source-aware read entry points were added so the
+> auto-detect doesn't disturb the pure JSONL loaders the `--source both`
+> comparison depends on: `cli.track.load_activity_events` and
+> `cli.stats.load_{annotations,cv_tailor_links,all_cv_tailor_links}_auto` (the bare
+> `load_*` stay pure JSONL). The API overlay (`index.py`), `reports.py`,
+> `workflow.py`'s current-status read, `manual_ingest.py`'s rebuild, and the CLI
+> tools (`track list`, `analyse`, `digest`) all call the auto variants;
+> `cli.stats --export-index` default `--source` flipped to `sqlite`.
+> **index.json — Option A chosen** (§5): keep it as the pre-built *pipeline* cache;
+> the live overlay supplies interactive state from SQLite on every request.
+> **Deploy ordering (important):** `use_sqlite()` is existence-based, so an empty
+> DB created before the backfill would hide all interactive state. The API lifespan
+> deliberately does NOT create the DB. On deploy, run `python -m cli.db_migrate`
+> (backfill) **before** serving writes / running the sqlite-default export.
+> Verified: `--source both` still reports 0 divergences across the 53-job corpus.
 
 Update the loaders called by `GET /api/index` live overlay:
 - `load_events()` → query `activity_log`
