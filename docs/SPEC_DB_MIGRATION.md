@@ -246,7 +246,17 @@ proceeding.
 **Verify:** `python -m cli.stats --export-index --source both` exits
 cleanly with "0 divergences" for the full live corpus.
 
-### Step 4 — Switch API writes to SQLite
+### Step 4 — Switch API writes to SQLite ✅ built
+
+> Every write endpoint now writes BOTH stores via thin `cli/db.py` helpers
+> (`write_activity_event` / `write_annotation` / `write_cv_tailor_link`:
+> open → INSERT → commit → close; each `init_db()`s defensively, and the API
+> inits at lifespan startup). `workflow.py` funnels all five events through
+> `_append`; `manual_ingest.py` dual-writes its owner-note event too.
+> **Annotations 409 now comes from the SQLite UNIQUE index (IntegrityError),
+> replacing the load-JSONL-and-scan check** — SQLite is written first so a dup is
+> rejected before any JSONL append (no orphan line). Test isolation: an autouse
+> `conftest._isolate_db` fixture points `JR_DB_PATH` at a per-test tmp DB.
 
 Update the write endpoints to write to SQLite **and** continue writing
 to JSONL (dual-write for safety):

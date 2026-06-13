@@ -18,12 +18,15 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api import events
 from api.routers import annotations, auth, cv_tailor, events as events_router, index, manual_ingest, reports, workflow
+from cli.db import init_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Capture the running loop so sync (threadpool) write endpoints can publish SSE events
-    onto it via call_soon_threadsafe (api/events.py)."""
+    onto it via call_soon_threadsafe (api/events.py), and ensure the SQLite schema exists
+    (Phase 6.5 — dual-write/dual-read; idempotent)."""
+    init_db()
     events.bind_loop(asyncio.get_running_loop())
     yield
 

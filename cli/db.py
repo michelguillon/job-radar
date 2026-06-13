@@ -303,6 +303,45 @@ def load_cv_tailor_links_sqlite(conn: sqlite3.Connection) -> dict[str, dict]:
     return latest
 
 
+# ---------------------------------------------------------------------------
+# Convenience writers — open, INSERT, commit, close. Used by the dual-write API
+# endpoints (Step 4) so a write touches SQLite without leaking connections.
+# ---------------------------------------------------------------------------
+
+def write_activity_event(event: dict) -> None:
+    """INSERT one activity event into SQLite (commits, then closes the connection)."""
+    init_db()  # idempotent (CREATE TABLE IF NOT EXISTS) — safe on a fresh/absent DB
+    conn = get_db()
+    try:
+        with conn:
+            insert_activity_event(conn, event)
+    finally:
+        conn.close()
+
+
+def write_annotation(rec: dict) -> None:
+    """INSERT one annotation into SQLite. Raises ``sqlite3.IntegrityError`` on a duplicate
+    (the caller maps that to a 409). Commits on success, always closes the connection."""
+    init_db()
+    conn = get_db()
+    try:
+        with conn:
+            insert_annotation(conn, rec)
+    finally:
+        conn.close()
+
+
+def write_cv_tailor_link(rec: dict) -> None:
+    """INSERT one cv-tailor link into SQLite (commits, then closes the connection)."""
+    init_db()
+    conn = get_db()
+    try:
+        with conn:
+            insert_cv_tailor_link(conn, rec)
+    finally:
+        conn.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry: ``python -m cli.db init`` creates/upgrades the DB."""
     import sys

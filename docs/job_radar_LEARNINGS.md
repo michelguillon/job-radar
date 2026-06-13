@@ -2298,6 +2298,32 @@ gate trustworthy rather than theatre:
 The JSONL↔SQL mapping (`insert_*` + `_enc`/`_dec`/`_bool_to_int`) and both read paths all
 live in `cli/db.py` so write (backfill/dual-write) and read can't drift apart.
 
+## Phase 6.5 Step 4 — dual-write, and the test-isolation trap of an env-resolved DB path
+
+Switching writes to dual-write (JSONL + SQLite) was mostly mechanical, but one thing was
+non-obvious and would have silently corrupted state in the test suite:
+
+- **An env-resolved store is invisible to the dependency-override test harness.** The API
+  tests inject every *path* through a `Settings` object (`app.dependency_overrides`), so
+  nothing touches the real corpus. But `cli.db.get_db()` resolves the DB from `JR_DB_PATH`,
+  which `Settings` does not cover — so the first dual-write test would have written to the
+  **real** `corpus/job_radar.db`, and worse, annotation-dedup tests would 409 against rows
+  left by previous runs. Fix: an autouse `conftest._isolate_db` fixture points `JR_DB_PATH`
+  at a per-test tmp DB for the *whole* suite. Lesson: when you add a new persistence backend
+  to an app that already has a hermetic test harness, check that the new backend's path is
+  resolved through the *same* injection seam — a second resolution mechanism (env var vs
+  injected settings) silently escapes the harness.
+- **Order the dual-write by who owns the invariant.** For annotations the 409 must come from
+  the SQLite UNIQUE index, so SQLite is written FIRST — a duplicate raises before any JSONL
+  append, leaving no orphan line. For the unconstrained logs (activity/cv-tailor) JSONL is
+  written first (it stays the read source until Step 5, so it's the safety net). The rule:
+  write the store that enforces the constraint first; write the current source-of-truth such
+  that a failure in the *other* store can't lose data.
+- **Self-healing schema beats ordering assumptions.** The `write_*` helpers each call
+  `init_db()` (idempotent `CREATE TABLE IF NOT EXISTS`) so a fresh/absent DB — a brand-new
+  test tmp path, a fresh deploy before the lifespan hook runs — never throws "no such table".
+  The API also inits at lifespan startup; belt and suspenders, both cheap.
+
 ---
 
 *[Claude Code: append new entries here as each step and phase completes.

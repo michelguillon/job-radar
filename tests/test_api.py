@@ -721,3 +721,72 @@ def test_health(client):
     assert body["status"] == "ok"
     assert body["records"] == 1
     assert body["last_indexed"] == "2026-06-09T00:00:00Z"
+
+
+# --- Phase 6.5 Step 4: dual-write (SQLite + JSONL) -----------------------------
+# The autouse conftest._isolate_db fixture points JR_DB_PATH at a per-test tmp DB,
+# so these read it back via cli.db.get_db() without touching the real corpus DB.
+
+def _db_rows(table: str) -> list[dict]:
+    from cli.db import get_db
+    conn = get_db()
+    try:
+        return [dict(r) for r in conn.execute(f"SELECT * FROM {table} ORDER BY id").fetchall()]
+    finally:
+        conn.close()
+
+
+def test_status_write_goes_to_sqlite_and_jsonl(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    assert client.post("/api/status", json={"job_id": "sha256:j1", "status": "applied", "notes": "sent"}).status_code == 200
+    # JSONL (existing safety net)
+    jsonl = track.load_events(client.settings.log_path)
+    assert jsonl[0]["event"] == "status" and jsonl[0]["value"] == "applied"
+    # SQLite (new)
+    rows = _db_rows("activity_log")
+    assert len(rows) == 1
+    assert rows[0]["event"] == "status" and rows[0]["value"] == "applied" and rows[0]["notes"] == "sent"
+
+
+def test_annotation_write_goes_to_sqlite_and_jsonl(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    payload = {"job_id": "sha256:j1", "annotation_type": "domain_incorrect", "field": "domain",
+               "observed": ["A"], "expected": ["B"], "reason": "wrong"}
+    assert client.post("/api/annotations", json=payload).status_code == 200
+    assert len(track.load_events(client.settings.annotations_path)) == 1
+    rows = _db_rows("annotations")
+    assert len(rows) == 1
+    assert rows[0]["annotation_type"] == "domain_incorrect" and rows[0]["field"] == "domain"
+    assert json.loads(rows[0]["observed"]) == ["A"]          # list round-trips via JSON text
+    assert rows[0]["scorer_fit_score"] == 7                  # captured server-side
+
+
+def test_cv_tailor_write_goes_to_sqlite_and_jsonl(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    assert client.post("/api/cv-tailor-results", json={
+        "job_id": "sha256:j1", "cv_tailor_run_id": "run_dw", "fit_score": 0.8,
+        "cv_quality_score": 7.5, "cvcm_enabled": True, "tailoring_mode": "full",
+    }).status_code == 200
+    assert track.load_events(client.settings.cv_tailor_links_path)[0]["cv_tailor_run_id"] == "run_dw"
+    rows = _db_rows("cv_tailor_links")
+    assert len(rows) == 1
+    assert rows[0]["cv_tailor_run_id"] == "run_dw" and rows[0]["fit_score"] == 0.8
+    assert rows[0]["cvcm_enabled"] == 1                      # bool -> INTEGER
+
+
+def test_annotation_duplicate_uses_sqlite_constraint(client, monkeypatch):
+    """The 409 comes from the SQLite UNIQUE index (IntegrityError), not a Python JSONL scan.
+    field=None (a rejection_reason) is the case a naive UNIQUE would miss — IFNULL(field,'')
+    handles it. The duplicate must NOT add a second JSONL line either."""
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    payload = {"job_id": "sha256:j1", "annotation_type": "rejection_reason", "field": None,
+               "observed": [], "expected": [], "reason": "too_salesy"}
+    assert client.post("/api/annotations", json=payload).status_code == 200
+    assert client.post("/api/annotations", json=payload).status_code == 409
+    # exactly one row in BOTH stores (the rejected dup left no orphan line)
+    assert len(_db_rows("annotations")) == 1
+    assert len(track.load_events(client.settings.annotations_path)) == 1

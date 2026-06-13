@@ -3,6 +3,17 @@
 Thin FastAPI layer that mediates browser writes (job_radar_SPEC §10). It is **one more
 write path over the same JSONL the CLI appends to** — never a second source of truth.
 
+> **Phase 6.5 dual-write (SPEC_DB_MIGRATION, in progress).** Interactive state
+> (`activity_log` / `annotations` / `cv_tailor_links`) is migrating JSONL → SQLite.
+> During the migration window every write endpoint writes BOTH: it appends the JSONL
+> line (unchanged) AND inserts into SQLite via the thin `cli/db.py` helpers
+> (`write_activity_event` / `write_annotation` / `write_cv_tailor_link`). The
+> annotations **409 dedup now comes from the SQLite UNIQUE index** (IntegrityError),
+> not the old load-JSONL-and-scan. `cli.db` is the single home for the JSONL↔SQL row
+> mapping; it is the one new import the routers take beyond `cli.track`/`models.record`.
+> Reads still come from JSONL until Step 5. Pipeline artefacts (scored/validated/meta/
+> stats) stay JSONL forever. When you add a new write endpoint, dual-write it.
+
 ## Hard invariants
 
 - **THIN layer.** Import `cli.track` (`build_event`, `append_event`, `load_events`,

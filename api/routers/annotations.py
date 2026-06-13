@@ -11,6 +11,7 @@ job_id; validated against ANNOTATION_TYPE before append.
 
 from __future__ import annotations
 
+import sqlite3
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,7 +20,8 @@ from pydantic import BaseModel
 from api.events import emit_index_updated
 from api.security import require_unlocked
 from api.settings import Settings, get_settings
-from cli.track import _clock, append_event, load_events, load_scores
+from cli.db import write_annotation
+from cli.track import _clock, append_event, load_scores
 from models.record import ANNOTATION_LOG_VERSION, REJECTION_REASON, validate_annotation_event
 
 router = APIRouter(prefix="/api", tags=["annotations"])
@@ -48,18 +50,6 @@ def flag(body: AnnotationRequest, settings: Settings = Depends(get_settings)) ->
     if body.annotation_type == "rejection_reason" and body.reason not in REJECTION_REASON:
         raise HTTPException(status_code=422, detail=f"reason must be one of {sorted(REJECTION_REASON)}")
 
-    # Duplicate prevention (job_radar_SPEC §10.11 Feature 2): an exact duplicate is the
-    # same job_id + annotation_type + field + reason. The UI warns client-side from the
-    # embedded annotations; the server is the backstop (409). Append-only — never edits.
-    for existing in load_events(settings.annotations_path):
-        if (
-            existing.get("job_id") == body.job_id
-            and existing.get("annotation_type") == body.annotation_type
-            and existing.get("field") == body.field
-            and existing.get("reason") == body.reason
-        ):
-            raise HTTPException(status_code=409, detail="duplicate annotation: same job_id + type + field + reason")
-
     record = {
         "v": ANNOTATION_LOG_VERSION,
         "ts": _clock(),
@@ -75,6 +65,17 @@ def flag(body: AnnotationRequest, settings: Settings = Depends(get_settings)) ->
     errors = validate_annotation_event(record)
     if errors:
         raise HTTPException(status_code=422, detail=f"invalid annotation: {errors}")
+
+    # Duplicate prevention (job_radar_SPEC §10.11 Feature 2): an exact duplicate is the
+    # same job_id + annotation_type + field + reason. Phase 6.5 Step 4: the Python "load
+    # the JSONL and scan" check is replaced by the SQLite UNIQUE(job_id, type,
+    # IFNULL(field,''), reason) index — a duplicate raises IntegrityError -> 409. SQLite is
+    # written FIRST so the constraint rejects the dup before any JSONL append (no orphan
+    # line). The JSONL append remains the dual-write safety net + audit archive.
+    try:
+        write_annotation(record)
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="duplicate annotation: same job_id + type + field + reason")
     append_event(settings.annotations_path, record)
     emit_index_updated()
     return {"ok": True, "job_id": body.job_id, "annotation_type": body.annotation_type}

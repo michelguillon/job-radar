@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from api.events import emit_index_updated
 from api.security import require_unlocked
 from api.settings import Settings, get_settings
+from cli.db import write_activity_event
 from cli.track import (
     _clock,
     _default_state,
@@ -66,12 +67,19 @@ def _require_scored(job_id: str, scored_glob: str) -> None:
 
 
 def _append(log_path: str, job_id: str, *, event: str, value, notes: str) -> dict:
-    """Build (=validate) + append one event, or 422 on a vocab violation."""
+    """Build (=validate) + append one event, or 422 on a vocab violation.
+
+    Phase 6.5 Step 4: dual-write — append to JSONL (the safety net + audit archive) AND
+    INSERT into SQLite. JSONL stays the read source until Step 5; the JSONL write is first
+    so it survives even if the SQLite write raises (the dual-read gate would then flag the
+    gap before the Step-5 cut-over).
+    """
     try:
         record = build_event(job_id, event=event, value=value, notes=notes, ts=_clock())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     append_event(log_path, record)
+    write_activity_event(record)
     return record
 
 

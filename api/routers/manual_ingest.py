@@ -33,6 +33,7 @@ from api.events import emit_index_updated
 from api.security import require_unlocked
 from api.settings import Settings, get_settings
 from cli import telemetry
+from cli.db import write_activity_event
 from cli.label import append_stats
 from cli.score import build_scoring_rows
 from cli.stats import (
@@ -207,8 +208,12 @@ def manual_ingest(body: ManualIngestRequest, settings: Settings = Depends(get_se
         fh.write(json.dumps(meta, ensure_ascii=False) + "\n")
 
     # Persist any owner note as a workflow note event (otherwise it would be silently dropped).
+    # Phase 6.5 Step 4: dual-write the note to SQLite too, so the activity_log table stays a
+    # complete mirror of the JSONL log (this is a separate write path from the workflow router).
     if body.notes.strip():
-        append_event(settings.log_path, build_event(job_id, event="note", value=None, notes=body.notes.strip(), ts=_clock()))
+        note_event = build_event(job_id, event="note", value=None, notes=body.notes.strip(), ts=_clock())
+        append_event(settings.log_path, note_event)
+        write_activity_event(note_event)
 
     # --- cost tracking (same ledger as batch runs) + index rebuild ---
     append_stats({"run": ts, "step": "manual_ingest", "job_id": job_id, "records": 1, **estimate_sync_cost(usage)},

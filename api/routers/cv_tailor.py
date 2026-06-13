@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from api.events import emit_index_updated
 from api.security import WRITE_COOKIE, has_valid_service_token, verify_token
 from api.settings import Settings, get_settings
+from cli.db import write_cv_tailor_link
 from cli.stats import _location_for
 from cli.track import (
     _clock,
@@ -82,7 +83,10 @@ def record_cv_tailor_result(
     errors = validate_cv_tailor_link(record)
     if errors:
         raise HTTPException(status_code=422, detail=f"invalid cv-tailor link: {errors}")
+    # Phase 6.5 Step 4: dual-write — JSONL (safety net + audit archive) AND SQLite. No
+    # dedup here (multiple runs per job_id are kept as history). JSONL first; SQLite second.
     append_event(settings.cv_tailor_links_path, record)
+    write_cv_tailor_link(record)
     emit_index_updated()
     return record
 
