@@ -2274,6 +2274,30 @@ General principle reaffirmed: a DDL block in a spec is prose, not an executable 
 trust the test (idempotency, dedup) over the literal schema, and fix the schema. (Same
 tie-break rule the project applies to SPEC-vs-`record.py`.)
 
+## Phase 6.5 Step 3 — dual-read is only as good as its read-path *shapes*
+
+The migration's safety hinges on a dual-read gate: build the UI index from JSONL and
+from SQLite, and refuse to advance unless they are byte-identical. Two things made that
+gate trustworthy rather than theatre:
+
+- **The SQLite loaders must return the EXACT shapes the existing consumers expect, or the
+  comparison is meaningless.** The build sketch had `load_events_sqlite` return a
+  `dict[job_id -> list]`, but the only consumer is `project()`, which folds a *flat* list
+  of events. A grouped dict would have iterated job_id strings and silently produced empty
+  state — and the dual-read would then have compared two equally-broken outputs and passed.
+  Returning a flat list (drop-in for `load_events`) is what makes the equality check
+  actually exercise `project()`. Lesson: when you add a parallel read path to validate
+  against, match the *interface*, not just the data — a wrong shape can make a comparison
+  pass for the wrong reason.
+- **Round-trip the encodings, then assert the state actually landed.** `cvcm_enabled`
+  (bool↔INTEGER 0/1) and `observed`/`expected` (list↔JSON TEXT) are the fields most likely
+  to silently differ; the dual-read test asserts not just `compare == []` but also that the
+  SQLite row carried `status="applied"`, 2 annotations, and `cvcm_enabled is True` — so a
+  "both empty, trivially equal" pass can't masquerade as success.
+
+The JSONL↔SQL mapping (`insert_*` + `_enc`/`_dec`/`_bool_to_int`) and both read paths all
+live in `cli/db.py` so write (backfill/dual-write) and read can't drift apart.
+
 ---
 
 *[Claude Code: append new entries here as each step and phase completes.

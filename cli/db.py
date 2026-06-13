@@ -216,6 +216,93 @@ def insert_cv_tailor_link(conn: sqlite3.Connection, rec: dict) -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# SQLite read paths — drop-in equivalents of the cli.track / cli.stats JSONL
+# loaders, returning the SAME shapes so project() / build_index_rows() are
+# untouched (Step 3 dual-read, Step 5 cut-over).
+# ---------------------------------------------------------------------------
+
+# Mirrors cli.stats._ANNOTATION_VIEW_FIELDS — the per-annotation view embedded on
+# an index row. Kept here as the SQLite reader's contract.
+_ANNOTATION_VIEW_FIELDS = (
+    "ts", "annotation_type", "field", "observed", "expected", "reason",
+    "scorer_label", "scorer_fit_score",
+)
+
+
+def load_events_sqlite(conn: sqlite3.Connection) -> list[dict]:
+    """Flat list of activity events — a drop-in for ``cli.track.load_events`` (fed to
+    ``project()``). NOTE: returns a FLAT list, not the per-job_id grouping the migration
+    sketch suggested — ``project()`` folds a flat list, so grouping would break it.
+    Ordered by (ts, id) for a stable fold."""
+    rows = conn.execute(
+        "SELECT v, ts, job_id, event, value, notes FROM activity_log ORDER BY ts ASC, id ASC"
+    ).fetchall()
+    return [
+        {
+            "v": r["v"],
+            "ts": r["ts"],
+            "job_id": r["job_id"],
+            "event": r["event"],
+            "value": r["value"],
+            "notes": r["notes"],
+        }
+        for r in rows
+    ]
+
+
+def load_annotations_sqlite(conn: sqlite3.Connection) -> dict[str, list[dict]]:
+    """Annotations grouped by job_id, each projected to the view fields — a drop-in for
+    ``cli.stats.load_annotations``. Ordered by id (= file/insertion order)."""
+    rows = conn.execute("SELECT * FROM annotations ORDER BY id ASC").fetchall()
+    by_job: dict[str, list[dict]] = {}
+    for r in rows:
+        view = {
+            "ts": r["ts"],
+            "annotation_type": r["annotation_type"],
+            "field": r["field"],
+            "observed": _dec(r["observed"]),
+            "expected": _dec(r["expected"]),
+            "reason": r["reason"],
+            "scorer_label": r["scorer_label"],
+            "scorer_fit_score": r["scorer_fit_score"],
+        }
+        by_job.setdefault(r["job_id"], []).append(view)
+    return by_job
+
+
+def _cv_tailor_row_to_record(r: sqlite3.Row) -> dict:
+    """A cv_tailor_links row back to the JSONL-record shape ``cv_tailor_view`` reads
+    (cvcm_enabled INTEGER -> bool|None)."""
+    return {
+        "ts": r["ts"],
+        "job_id": r["job_id"],
+        "cv_tailor_run_id": r["cv_tailor_run_id"],
+        "fit_score": r["fit_score"],
+        "coverage_score": r["coverage_score"],
+        "cv_quality_score": r["cv_quality_score"],
+        "cvcm_enabled": None if r["cvcm_enabled"] is None else bool(r["cvcm_enabled"]),
+        "tailoring_mode": r["tailoring_mode"],
+        "output_link": r["output_link"],
+        "notes": r["notes"],
+        "source": r["source"],
+    }
+
+
+def load_cv_tailor_links_sqlite(conn: sqlite3.Connection) -> dict[str, dict]:
+    """Latest cv-tailor link per job_id — a drop-in for ``cli.stats.load_cv_tailor_links``.
+    Matches its selection rule: most recent ``ts`` wins, ties to the later row (file/id
+    order) — achieved by scanning in (ts, id) ascending order and letting later rows
+    overwrite earlier ones per job_id."""
+    rows = conn.execute(
+        "SELECT * FROM cv_tailor_links ORDER BY ts ASC, id ASC"
+    ).fetchall()
+    latest: dict[str, dict] = {}
+    for r in rows:
+        latest[r["job_id"]] = _cv_tailor_row_to_record(r)
+    return latest
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry: ``python -m cli.db init`` creates/upgrades the DB."""
     import sys

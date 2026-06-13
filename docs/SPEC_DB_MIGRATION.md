@@ -226,9 +226,17 @@ Create `cli/db_migrate.py`:
 **Verify:** row counts match JSONL line counts. Run twice — second run
 is a no-op (idempotent).
 
-### Step 3 — Dual-read comparison
+### Step 3 — Dual-read comparison ✅ built
 
-Add `--source jsonl|sqlite|both` flag to `cli/stats.py --export-index`.
+> Implemented as `cli/stats.py --export-index --source {jsonl|sqlite|both}`
+> (default `jsonl` until Step 5). `both` builds the index rows from each source and
+> runs `compare_index_rows` (by job_id, per-field), printing divergences and exiting
+> non-zero if any. The SQLite read paths live in `cli/db.py`
+> (`load_events_sqlite` / `load_annotations_sqlite` / `load_cv_tailor_links_sqlite`)
+> as drop-in equivalents of the `cli.track`/`cli.stats` JSONL loaders. **Correction
+> to the sketch below:** `load_events_sqlite` returns a FLAT list (not a per-job_id
+> dict) — `project()` folds a flat list, so the grouped shape would break it.
+> Verified: `--source both` reports 0 divergences across the full 53-job live corpus.
 
 `--source both` runs both read paths, computes the joined index from
 each, and asserts they produce identical output for every `job_id`.

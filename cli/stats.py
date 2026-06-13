@@ -38,6 +38,13 @@ from cli.track import (
     load_scores,
     project,
 )
+from cli.db import (
+    get_db,
+    init_db,
+    load_annotations_sqlite,
+    load_cv_tailor_links_sqlite,
+    load_events_sqlite,
+)
 from models.record import JDRECORD_SCHEMA_VERSION, SCHEMA_VERSION, JDRecord
 
 INDEX_PATH = "corpus/index.json"
@@ -305,6 +312,65 @@ def build_index_rows(scores, jds, metas, workflow, annotations=None, cv_tailor_l
     return rows
 
 
+# ---------------------------------------------------------------------------
+# Interactive-state source selection (Phase 6.5 — SPEC_DB_MIGRATION §4 Steps 3/5).
+# The three interactive sources (workflow projection, annotations, cv-tailor links)
+# can come from JSONL or SQLite; pipeline artefacts (scores/jds/metas) are always JSONL.
+# ---------------------------------------------------------------------------
+
+def interactive_from_jsonl(activity_log: str, annotations: str, cv_tailor_links: str):
+    """(workflow, annotations, cv_tailor_links) read from the JSONL files."""
+    return (
+        project(load_events(activity_log)),
+        load_annotations(annotations),
+        load_cv_tailor_links(cv_tailor_links),
+    )
+
+
+def interactive_from_sqlite(conn=None):
+    """(workflow, annotations, cv_tailor_links) read from SQLite. Inits the DB so an
+    empty/absent DB reports clean divergences rather than crashing on a missing table."""
+    init_db()
+    conn = conn or get_db()
+    return (
+        project(load_events_sqlite(conn)),
+        load_annotations_sqlite(conn),
+        load_cv_tailor_links_sqlite(conn),
+    )
+
+
+def build_rows_for_source(source: str, scores, jds, metas, *,
+                          activity_log: str, annotations: str, cv_tailor_links: str) -> list[dict]:
+    """Build index rows joining the always-JSONL pipeline artefacts with the interactive
+    state read from ``source`` (``jsonl`` or ``sqlite``)."""
+    if source == "sqlite":
+        wf, ann, cvt = interactive_from_sqlite()
+    else:
+        wf, ann, cvt = interactive_from_jsonl(activity_log, annotations, cv_tailor_links)
+    return build_index_rows(scores, jds, metas, wf, ann, cvt)
+
+
+def compare_index_rows(rows_a: list[dict], rows_b: list[dict]) -> list[str]:
+    """Compare two index-row lists (e.g. JSONL-derived vs SQLite-derived) by job_id.
+
+    Returns a list of human-readable divergence descriptions (empty == identical). Reports
+    job_ids present in only one side, and per-field value differences for shared job_ids.
+    """
+    by_a = {r["job_id"]: r for r in rows_a}
+    by_b = {r["job_id"]: r for r in rows_b}
+    diffs: list[str] = []
+    for job_id in sorted(set(by_a) - set(by_b)):
+        diffs.append(f"{job_id}: present in A only")
+    for job_id in sorted(set(by_b) - set(by_a)):
+        diffs.append(f"{job_id}: present in B only")
+    for job_id in sorted(set(by_a) & set(by_b)):
+        a, b = by_a[job_id], by_b[job_id]
+        for key in sorted(set(a) | set(b)):
+            if a.get(key) != b.get(key):
+                diffs.append(f"{job_id}.{key}: A={a.get(key)!r} != B={b.get(key)!r}")
+    return diffs
+
+
 def load_cost_to_date(path: str = STATS_PATH) -> float:
     """Sum ``cost_usd`` across every run in ``corpus/stats.json`` (0.0 if absent)."""
     try:
@@ -364,6 +430,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--annotations", default=ANNOTATIONS_PATH, help=f"Scoring-flag log embedded by --export-index (default: {ANNOTATIONS_PATH})")
     parser.add_argument("--cv-tailor-links", default=CV_TAILOR_LINKS_PATH, dest="cv_tailor_links", help=f"cv-tailor run links embedded by --export-index (default: {CV_TAILOR_LINKS_PATH})")
     parser.add_argument("--stats-file", default=STATS_PATH, dest="stats_file", help=f"Cost ledger for cost-to-date (default: {STATS_PATH})")
+    parser.add_argument(
+        "--source", choices=("jsonl", "sqlite", "both"), default="jsonl",
+        help="Where --export-index reads interactive state (workflow/annotations/cv-tailor): "
+             "jsonl (default), sqlite, or both (compare the two, exit non-zero on any divergence). "
+             "Pipeline artefacts (scores/JDs/metadata) are always JSONL.",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -375,10 +447,23 @@ def main(argv: list[str] | None = None) -> int:
         scores = load_scores(args.scored)
         jds = load_jdrecords(args.validated)
         metas = load_meta(args.meta)
-        workflow = project(load_events(args.activity_log))
-        annotations = load_annotations(args.annotations)
-        cv_tailor_links = load_cv_tailor_links(args.cv_tailor_links)
-        rows = build_index_rows(scores, jds, metas, workflow, annotations, cv_tailor_links)
+        paths = dict(activity_log=args.activity_log, annotations=args.annotations,
+                     cv_tailor_links=args.cv_tailor_links)
+
+        if args.source == "both":
+            rows_jsonl = build_rows_for_source("jsonl", scores, jds, metas, **paths)
+            rows_sqlite = build_rows_for_source("sqlite", scores, jds, metas, **paths)
+            diffs = compare_index_rows(rows_jsonl, rows_sqlite)
+            if diffs:
+                print(f"\n❌ {len(diffs)} divergence(s) between JSONL and SQLite:")
+                for d in diffs:
+                    print(f"  - {d}")
+                return 1
+            print(f"\n✅ 0 divergences across {len(rows_jsonl)} jobs (JSONL vs SQLite)")
+            rows = rows_jsonl  # both agree; export from the JSONL source (safe default)
+        else:
+            rows = build_rows_for_source(args.source, scores, jds, metas, **paths)
+
         stats = index_stats(rows, cost_to_date=load_cost_to_date(args.stats_file))
         path = export_index(rows, stats)
         print(f"\nIndex → {path} ({len(rows)} scored job(s), ${stats['cost_to_date_usd']:.2f} to date)")
