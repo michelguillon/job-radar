@@ -217,8 +217,11 @@ def insert_cv_tailor_link(conn: sqlite3.Connection, rec: dict) -> None:
             _bool_to_int(rec.get("cvcm_enabled")),
             rec.get("tailoring_mode"),
             rec.get("output_link"),
-            rec.get("notes") or "",
-            rec.get("source", "manual") or "manual",
+            # Store notes as-is — do NOT coerce None -> '': the cv-tailor callback posts
+            # notes=null, and the JSONL read model (cv_tailor_view) preserves None, so
+            # coercing here would make every cv-tailor row diverge in --source both.
+            rec.get("notes"),
+            rec.get("source") if rec.get("source") is not None else "manual",
             rec.get("v", 1),
         ),
     )

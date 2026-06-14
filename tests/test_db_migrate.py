@@ -121,6 +121,26 @@ def test_backfill_cv_tailor_links_migrates_old_fields(tmp_db):
     assert "grounding_score" not in row.keys()
 
 
+def test_backfill_cv_tailor_links_preserves_null_notes(tmp_db):
+    # The cv-tailor callback posts notes=null; the read model preserves None. Coercing
+    # None -> '' here would diverge from JSONL in --source both (regression guard).
+    path = _write_jsonl(tmp_db / "cv_tailor_links.jsonl", [
+        {"v": 1, "ts": "2026-06-12T00:00:00Z", "job_id": "sha256:a", "cv_tailor_run_id": "run-1",
+         "fit_score": 0.4, "notes": None, "source": "cv_tailor_api"},
+    ])
+    assert migrate.backfill_cv_tailor_links(path) == 1
+    from cli.db import get_db, load_cv_tailor_links_sqlite
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT notes FROM cv_tailor_links").fetchone()
+        assert row["notes"] is None                      # stored as NULL, not ''
+        link = load_cv_tailor_links_sqlite(conn)["sha256:a"]
+    finally:
+        conn.close()
+    assert link["notes"] is None
+    assert link["source"] == "cv_tailor_api"
+
+
 def test_backfill_cv_tailor_links_idempotent(tmp_db):
     path = _write_jsonl(tmp_db / "cv_tailor_links.jsonl", [
         {"v": 1, "ts": "2026-06-10T00:00:00Z", "job_id": "sha256:a", "cv_tailor_run_id": "run-1", "fit_score": 0.8},

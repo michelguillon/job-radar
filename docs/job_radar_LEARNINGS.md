@@ -2356,6 +2356,30 @@ index.json decision: **Option A** — keep it as the pre-built *pipeline* cache 
 meta); the overlay supplies interactive state live from SQLite. Dropping it (Option B) waits
 for the PostgreSQL/multi-process step, if it ever happens.
 
+## Phase 6.5 — the dual-read gate earned its keep (None vs '' on real prod data)
+
+The first `--source both` run on the *production* corpus flagged 11 divergences: every
+cv-tailor row had `notes: None` from JSONL but `notes: ''` from SQLite. Cause: my
+`insert_cv_tailor_link` coerced `rec.get("notes") or ""`, turning the cv-tailor callback's
+`notes: null` into an empty string. The JSONL read model (`cv_tailor_view`) preserves `None`,
+so the two stores disagreed on every link.
+
+Two lessons:
+- **`x or ""` is not a null-safe default for a round-tripped column.** It collapses `None`,
+  `''`, `0`, `False` all to `''`. If the source can legitimately hold `None` and the read model
+  preserves it, store it as-is (`rec.get("notes")` → SQL NULL → reads back `None`). The
+  SQLite column's `DEFAULT ''` only applies when the column is *omitted* from the INSERT, not
+  when you pass an explicit `None` — so a faithful insert just passes the value through.
+- **Test fixtures must mirror the real payload shape, not a convenient one.** Local tests used
+  `notes=""`; production data uses `notes: null` (the cv-tailor machine callback). The bug was
+  invisible until the gate ran against real data. The dual-read comparison is exactly the
+  safety net that's supposed to catch "looked fine in tests" — and it did. Added a regression
+  test with `notes=None` so the local suite now reproduces the prod shape.
+
+Activity-log notes did NOT diverge: `build_event` always writes `notes` as a string (`notes or
+""`), so the JSONL never carries `null` there — the coercion was harmless for that sink and
+only wrong for cv-tailor links, which accept a nullable `notes`.
+
 ---
 
 *[Claude Code: append new entries here as each step and phase completes.
