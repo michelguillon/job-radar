@@ -1,7 +1,7 @@
 # SPEC_LANGFUSE_INSTRUMENTATION.md
 ## Langfuse Instrumentation — cv-tailor + Job Radar
 
-**Status:** Phase A (cv-tailor) ✅ verified live 2026-06-12 · Phase B (Job Radar) ✅ verified live 2026-06-13
+**Status:** Phase A (cv-tailor) ✅ verified live 2026-06-12 · Phase B (Job Radar) ✅ verified live 2026-06-13 · Phase C (per-role scoring traces) ✅ built 2026-06-14 (live verification pending on server)
 **Prerequisite:** `SPEC_LANGFUSE_DEPLOYMENT.md` complete and healthy ✅
 **Build order:** cv-tailor first ✅, Job Radar second ✅
 **SDK version:** langfuse v4 — confirmed `langfuse==4.7.1` in both built images (`requirements.txt`: `langfuse>=4.0.0`)
@@ -15,22 +15,36 @@
 
 ## 1. Instrumentation philosophy
 
-**Trace what matters, not everything.**
+**Every scoring decision is a first-class event.**
 
-The goal is evidence for the §7 research questions from the integration
-spec — where do Job Radar and cv-tailor scores diverge, and why? That
-means tracing at the decision boundary level: phase inputs/outputs,
-LLM calls, scores attached to traces. Not every internal function.
+The core insight: a Job Radar trace should exist independently of whether
+cv-tailor was ever run. Every scored role gets a trace — that trace is the
+permanent record of "why did Job Radar say this?" The cv-tailor callback
+enriches it later if and when it arrives. The divergence between the two
+systems' verdicts on the same role is the evidence base for Phase 4.
+
+This means two distinct trace points per role:
+
+1. **At scoring time** (`cli/score.py`) — one trace per scored role, capturing
+   the full scoring decision: all stages, all dimension scores, fit label,
+   priority score, blocking constraints, requirement gaps. This is the
+   independent Job Radar verdict, recorded whether or not cv-tailor ever runs.
+
+2. **At cv-tailor callback receipt** — the existing Job Radar trace for that
+   role is enriched with cv-tailor's scores. The divergence delta is computed
+   and stored. Same trace, same role, both systems' verdicts visible together.
+
+**What this is not:** a log of batch API calls. The batch is an implementation
+detail. What matters is the scoring decision on each role, traceable back to
+the individual stage outputs that produced it.
 
 Add granularity only where gaps appear after a few weeks of data.
 Over-instrumenting at the start adds maintenance cost before you know
 what's useful.
 
-**SDK v4 pattern used: `@observe()` decorator for cv-tailor, manual
-observations for Job Radar.** cv-tailor has a clean phase-based
-architecture that maps naturally to decorators. Job Radar uses the
-Batch API (async, not real-time) which requires manual observation
-creation after results arrive.
+**SDK v4 pattern:** `@observe()` decorator for cv-tailor. Manual post-hoc
+observations for Job Radar (Batch API — results arrive async, traced after
+the fact).
 
 ---
 
@@ -357,88 +371,228 @@ def log_hitl_input(phase: str, hitl_text: str, interpretation: str):
 
 ---
 
-## 3. Job Radar instrumentation
+## 3. Job Radar instrumentation (Phase B ✅ + Phase C ✅ built)
 
-Build after cv-tailor instrumentation is confirmed working.
+Phase B (batch infrastructure) is built and verified live 2026-06-13.
+Phase C (per-role scoring traces — this section) is **built 2026-06-14**
+(`record_role_scoring_decision()` + `on_cv_tailor_result()` in `cli/telemetry.py`,
+wired in `cli/score.py` and `api/routers/cv_tailor.py`; deviation 50). Live
+verification (steps 5–7 below) runs on the M720q server with the job-radar keys.
 
 ### 3.1 Project
 
 One Langfuse project: `job-radar`. Separate from cv-tailor.
+Never share keys with cv-tailor — auth_check returns true regardless, traces
+land in wrong project. Each app uses its own project's key pair.
 
-### 3.2 Trace structure — AS BUILT
+---
 
-> **As-built note (2026-06-13).** This section was rewritten to match the shipped
-> code (`cli/telemetry.py`) after several deviations from the original sketch were
-> discovered live. The trace *shapes* are as designed; the code below reflects the
-> real SDK surface and the worker-ingestion requirement the sketch missed.
+### 3.2 Trace point 1 — Per-role scoring decision (Phase C ✅ built)
 
-**THREE trace targets, not two** — the original spec had extraction + scoring, both
-CLI-driven. The synchronous **manual ingest** (`POST /api/manual-ingest`) is a *separate
-code path* in the FastAPI process (it runs `extract_one` + `score` inline, never the
-CLIs), so it needs its own recorder or it is silently untraced:
+**One trace per scored role. Exists independently of cv-tailor.**
 
-| Target | Where | Trace name | Shape |
-|---|---|---|---|
-| `extraction_batch` | `cli/label.py` after `merge_results` | `extraction_batch` | root → `jd_extraction` span per JD → `claude_extraction` generation (Opus, tokens) → `validation_passed` score |
-| `scoring_run` | `cli/score.py` | `scoring_run` | root → `jd_scoring` span per JD → `dimension_score` span per dimension |
-| `manual_ingest` | `api/routers/manual_ingest.py` after persist | `manual_ingest` | root → `claude_extraction` generation (Haiku, tokens) → `jd_scoring` span → `dimension_score` spans → `validation_passed` score |
+This is the core instrumentation. Every time `cli/score.py` scores a JD,
+a trace is created that permanently records why Job Radar assigned that
+fit label. The cv-tailor callback may or may not ever arrive — the scoring
+trace is complete and valuable on its own.
 
-### 3.3 Three corrections the sketch missed (the load-bearing facts)
+> **Build note (the scorer has no LLM call).** Job Radar's scorer
+> (`scoring/scorer.py`) is **purely rule-based** — deterministic regex + enum
+> lookups over the *already-extracted* JDRecord. There is **no LLM call at scoring
+> time**; the LLM ran earlier during *extraction* (traced by `extraction_batch` /
+> `manual_ingest`). The `claude_stage1` generation is therefore preserved for the
+> trace shape but populated honestly from `cli/score.py`: `model="rule_based_scorer"`,
+> zero tokens, the JD text as the prompt, the structured sub-scores as the output.
+> Dimension scores attach **raw** (`role`/`domain`/`depth` 0–2); `fit_score` and
+> `priority_score` are **normalised** 0–10→0–1. Gate scores: seniority `pass→1.0`
+> else `0.0` (the breakdown's `"miss"` maps to 0.0); location `pass→1.0` /
+> `unclear→0.5` / `fail→0.0`.
 
-1. **`langfuse.trace.name` is REQUIRED for the worker to ingest a trace.** The original
-   sketch set no trace name. A trace whose spans lack the `langfuse.trace.name` attribute
-   uploads to MinIO but the worker never promotes it into ClickHouse — it silently never
-   appears in the UI (diagnosed by diffing MinIO payloads against cv-tailor's working
-   spans). Every root span MUST be wrapped in `propagate_attributes(trace_name=…)`,
-   mirroring `tailor/telemetry.run_trace`. `start_as_current_observation` has **no**
-   `trace_name` parameter (confirmed by introspection) — `propagate_attributes` is the
-   mechanism.
+```
+Trace: role_scoring_decision
+  name = "role_scoring_decision"
+  trace_id = deterministic from job_id (Langfuse.create_trace_id(seed=job_id))
+  metadata = {
+    job_id: "sha256:...",           ← permanent cross-system lookup key
+    company: "Elastic",
+    role_title: "Staff Engineer",
+    scored_at: "2026-06-13T...",
+    fit_label: "strong_fit" | "good_fit" | "partial_fit" | "poor_fit",
+    priority_score: 8.2,
+    fit_score: 0.72,
+    blocking_constraints: [],       ← list of any hard blockers
+    requirement_gaps: []            ← list of unmet requirements
+  }
 
-2. **Use the proven SDK surface, not `lf.trace()` / `lf.api.scores.create()`.** The shipped
-   code mirrors cv-tailor's verified-live calls: `Langfuse.create_trace_id(seed=…)` for a
-   deterministic id, the root span claiming it via `trace_context={"trace_id": tid}`, and
-   `lf.create_score(name=, value=, trace_id=, observation_id=, data_type="NUMERIC")` for
-   scores. The langfuse SDK is imported lazily *inside* functions so `import cli.telemetry`
-   works uninstalled, and `is_enabled()` gates every recorder to a clean no-op.
+  Span: stage1_structural_fit
+    metadata = {
+      role_score: 0.85,
+      domain_score: 0.70,
+      depth_score: 0.80,
+      composite: 0.78
+    }
+    Generation: claude_stage1        ← the LLM call that produced these scores
+      model: "claude-opus-4-8" (or haiku)
+      input: <JD + scoring prompt>
+      output: <structured scores JSON>
+      usage: {input_tokens, output_tokens}
 
-3. **Flush AFTER the root span closes.** The Batch API is async and the CLI exits
-   immediately — there is no periodic exporter to fall back on. Each recorder builds its
-   whole tree inside the root `with`, lets it close, then `lf.flush()`. (Manual ingest runs
-   in the long-lived API process, but flushes the same way so the trace shows promptly.)
+  Span: stage2_blocking_constraints
+    metadata = {
+      seniority_gate: "pass" | "fail",
+      location_gate: "pass" | "fail",
+      blocking_constraints: [],
+      requirement_gaps: []
+    }
 
-The canonical shape (see `cli/telemetry.record_extraction_batch` for the full version):
+  Span: stage3_fit_label
+    metadata = {
+      fit_label: "strong_fit",
+      priority_score: 8.2,
+      rationale: "..."
+    }
 
-```python
-from langfuse import Langfuse, get_client, propagate_attributes
-lf = get_client()
-tid = Langfuse.create_trace_id(seed=batch_id)
-with lf.start_as_current_observation(
-    as_type="span", name="extraction_batch",
-    trace_context={"trace_id": tid}, input=metadata,
-), propagate_attributes(trace_name="extraction_batch", metadata={...}):   # ← trace_name = worker requirement
-    for row in rows:
-        with lf.start_as_current_observation(as_type="span", name="jd_extraction", ...) as jd_span:
-            with lf.start_as_current_observation(as_type="generation", name="claude_extraction",
-                                                 model=row["model"], input=row["prompt"]) as gen:
-                gen.update(output=row["completion"],
-                           usage_details={"input": ..., "output": ...})
-            lf.create_score(name="validation_passed", value=1.0 if row["validated"] else 0.0,
-                            trace_id=tid, observation_id=jd_span.id, data_type="NUMERIC")
-lf.flush()   # AFTER the root closes — CLI is about to exit
+  Score: fit_score = 0.72            (numeric, 0–1)
+  Score: priority_score = 8.2        (numeric, 0–10)
+  Score: role_score = 0.85
+  Score: domain_score = 0.70
+  Score: depth_score = 0.80
+  Score: seniority_gate = 1 | 0      (1 = pass)
+  Score: location_gate = 1 | 0
 ```
 
-Rows are assembled by **pure** builders (`cli.label.build_trace_rows`,
-`cli.score.build_scoring_rows`) that re-derive the scorer breakdown with `stage1_fit`
-(read-only) — no business logic, prompt, or schema touched, and unit-testable without the
-SDK. A `debug-trace` CLI/probe (`python -m cli.telemetry debug-trace`) exercises the full
-init→trace→score→flush path at zero cost (it carries `auth_check`; `init_langfuse` never
-does, as that sync probe would hang).
+**Key design decisions:**
 
-### 3.4 Cross-system linkage
+- **Deterministic trace ID from job_id.** `Langfuse.create_trace_id(seed=job_id)`
+  means the trace for a role is always findable by job_id. The cv-tailor callback
+  uses the same seed to locate and enrich the trace without storing a Langfuse ID.
 
-Unchanged — cv-tailor trace is looked up by `run_id` which matches
-the Langfuse trace name metadata. Both traces are independently
-queryable and joinable via IDs stored in `corpus/cv_tailor_links.jsonl`.
+- **All dimension scores as Langfuse scores, not just metadata.** Scores are
+  queryable and chartable in the UI. Metadata is searchable but not plottable.
+  Dimension scores go in both places — metadata for the span context, Langfuse
+  scores for the dashboard view.
+
+- **Blocking constraints and requirement gaps as metadata arrays.** These are
+  the "why not" signals — surfacing them on the trace makes it possible to see
+  patterns across roles (e.g. seniority gate blocking 40% of strong-looking roles).
+
+---
+
+### 3.3 Trace point 2 — cv-tailor callback enrichment (Phase C ✅ built)
+
+**Enriches the existing role_scoring_decision trace when cv-tailor results arrive.**
+
+> **Built as `on_cv_tailor_result()`** (`cli/telemetry.py`), called from
+> `POST /api/cv-tailor-results` (`api/routers/cv_tailor.py`) AFTER the snapshot is
+> persisted — best-effort, never fails the callback. `job_radar_fit_score` is read
+> from the stored `ApplicationRecord` (`load_scores(...)[job_id].fit_score`, 0–10).
+> All four cv-tailor metrics are optional, so each score is attached only when
+> non-None; `fit_score_divergence` needs both the JR fit and the cv-tailor fit.
+
+When cv-tailor completes a run for a Job Radar role, it calls back to Job Radar
+(or Job Radar polls). At that point, the existing `role_scoring_decision` trace
+is enriched:
+
+```python
+# In the cv-tailor callback handler (Job Radar side)
+def on_cv_tailor_result(job_id: str, cv_tailor_scores: dict):
+    if not is_enabled():
+        return
+    lf = get_client()
+    tid = Langfuse.create_trace_id(seed=job_id)  # same seed → same trace
+
+    # Attach cv-tailor scores to the existing trace
+    lf.create_score(trace_id=tid, name="cv_tailor_fit_score",
+                    value=cv_tailor_scores["fit_score"], data_type="NUMERIC")
+    lf.create_score(trace_id=tid, name="cv_tailor_coverage_score",
+                    value=cv_tailor_scores["coverage_score"], data_type="NUMERIC")
+    lf.create_score(trace_id=tid, name="cv_tailor_quality_score",
+                    value=cv_tailor_scores["cv_quality_score"], data_type="NUMERIC")
+
+    # Compute and store divergence delta
+    jr_fit = cv_tailor_scores.get("job_radar_fit_score", 0) / 10  # normalise to 0–1
+    ct_fit = cv_tailor_scores["fit_score"]
+    divergence = abs(jr_fit - ct_fit)
+    lf.create_score(trace_id=tid, name="fit_score_divergence",
+                    value=divergence, data_type="NUMERIC")
+    lf.flush()
+```
+
+The result: a single trace per role that shows both systems' verdicts side by side,
+plus the divergence delta. No join required — all data is on the same trace.
+
+**What the closed-loop trace enables:**
+- "Why did Job Radar rate this role strong_fit but cv-tailor scored it 0.4?"
+  → open the trace, compare stage outputs against cv-tailor phase outputs
+- Dashboard: sort roles by fit_score_divergence descending → highest disagreement first
+- Research question: is divergence systematic by company, domain, or seniority level?
+
+---
+
+### 3.4 Existing Phase B traces (already built)
+
+Phase B (built 2026-06-13) instruments the batch infrastructure:
+
+| Target | Where | Trace name | Status |
+|---|---|---|---|
+| `extraction_batch` | `cli/label.py` | `extraction_batch` | ✅ live |
+| `scoring_run` | `cli/score.py` | `scoring_run` | ✅ live — batch-level only |
+| `manual_ingest` | `api/routers/manual_ingest.py` | `manual_ingest` | ✅ live |
+| `role_scoring_decision` | `cli/score.py` (per role) | `role_scoring_decision` | ✅ built (Phase C) |
+| cv-tailor enrichment | `api/routers/cv_tailor.py` | (enriches `role_scoring_decision`) | ✅ built (Phase C) |
+
+Phase C adds the per-role scoring decision trace *alongside* the scoring run.
+The `scoring_run` batch trace continues to exist as the container; each
+`role_scoring_decision` trace is a parallel, independent record per role
+(its own deterministic trace id, seeded from `job_id`).
+
+---
+
+### 3.5 Phase C build order
+
+1. ✅ Add `record_role_scoring_decision()` to `cli/telemetry.py`
+2. ✅ Wire it into `cli/score.py` — call after each role is scored
+   (`build_role_decision_kwargs`, after the `scoring_run` batch trace)
+3. ✅ Add `on_cv_tailor_result()` enrichment to the cv-tailor callback handler
+   (`api/routers/cv_tailor.py`)
+4. ✅ Add `fit_score_divergence` computation (`telemetry._divergence`, pure + tested)
+5. ⏳ Run debug probe: `python -m cli.telemetry debug-trace` confirms connectivity
+   (on the server — locally reports `enabled: false`)
+6. ⏳ Score one role, verify `role_scoring_decision` trace appears in UI with all
+   dimension scores attached
+7. ⏳ Trigger a cv-tailor run for that role, verify the same trace is enriched
+   with cv-tailor scores and divergence delta
+
+Steps 1–4 done 2026-06-14; steps 5–7 are live verification on the M720q server
+(needs the job-radar Langfuse keys).
+
+### 3.6 Phase C Definition of Done
+
+1. ✅ Every scored role produces a `role_scoring_decision` trace with:
+   - All three stage spans (stage1, stage2, stage3)
+   - A stage1 generation with token counts (rule-based scorer → `rule_based_scorer`,
+     0 tokens, JD text as prompt, structured sub-scores as output — see §3.2 build note)
+   - All dimension scores as Langfuse scores (fit, priority, role, domain, depth,
+     seniority_gate, location_gate)
+   - blocking_constraints and requirement_gaps in metadata
+2. ✅ cv-tailor callback enriches the trace with cv_tailor_fit_score,
+   cv_tailor_coverage_score, cv_tailor_quality_score, fit_score_divergence
+3. ⏳ Traces queryable by job_id in the Langfuse UI (live verification, server)
+4. ⏳ Dashboard sortable by fit_score_divergence — highest disagreement first (server)
+5. ✅ All existing tests pass unchanged (512 pass: 506 baseline + 6 new, no key set)
+
+### 3.7 Cross-system linkage
+
+`job_id` is the permanent cross-system key. It is stored in:
+- Job Radar: `corpus/jobs.jsonl` and the trace metadata
+- cv-tailor: passed as `job_radar_source.job_id` and stored in trace metadata
+- Langfuse: both traces carry it, findable by metadata search
+
+The deterministic trace ID `Langfuse.create_trace_id(seed=job_id)` means
+neither system needs to store a Langfuse trace ID — it can always be
+recomputed from the job_id.
+
+---
 
 ---
 

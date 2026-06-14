@@ -466,6 +466,24 @@ Kept in full: everything below — active operational guards Claude Code must kn
     hermetic via an autouse `conftest._isolate_db` (per-test `JR_DB_PATH`). (h) Backup:
     `cron/backup_db.sh` (daily `.backup` + 7-day prune). `SCHEMA_VERSION` unchanged.
 
+50. *(→ SPEC_LANGFUSE_INSTRUMENTATION §3.2/§3.3 + deviation 46)* **Langfuse Phase C — per-role
+    scoring decision traces.** One **independent** `role_scoring_decision` trace per scored role
+    (`cli.telemetry.record_role_scoring_decision`, wired in `cli/score.py` per role via
+    `build_role_decision_kwargs`, after the Phase-B `scoring_run` batch trace). Deterministic
+    trace id `Langfuse.create_trace_id(seed=job_id)` so `on_cv_tailor_result` (called from
+    `POST /api/cv-tailor-results` after persist) enriches the SAME trace with cv-tailor's
+    fit/coverage/quality + the `fit_score_divergence` delta — no Langfuse id stored anywhere.
+    **Key fact: the scorer is rule-based — there is NO LLM call at scoring time** (`stage1_fit`
+    is deterministic; the LLM ran during *extraction*, traced by deviation 46). The spec's
+    `claude_stage1` generation is kept for shape but populated honestly: `model=
+    "rule_based_scorer"`, 0 tokens, JD text as prompt, sub-scores JSON as output. Dimension
+    scores attach **raw** (role/domain/depth 0–2); fit/priority **normalised** ÷10; gates
+    `pass→1.0` else 0.0 (location `unclear→0.5`) — the breakdown's `"miss"`/`"fail"` map to 0.0,
+    so raw gate strings pass straight through. Normalisation + divergence are pure helpers
+    (`telemetry._norm10`/`_divergence`, unit-tested without a live client). Best-effort
+    everywhere (every recorder guards `is_enabled()` + swallows); `on_cv_tailor_result` skips
+    None metrics. No scorer/schema change (`SCHEMA_VERSION` unchanged). 512 tests.
+
 
 ## Schema summary
 

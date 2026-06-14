@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from api.events import emit_index_updated
 from api.security import WRITE_COOKIE, has_valid_service_token, verify_token
 from api.settings import Settings, get_settings
+from cli import telemetry
 from cli.db import write_cv_tailor_link
 from cli.stats import _location_for
 from cli.track import (
@@ -63,7 +64,8 @@ def record_cv_tailor_result(
         or has_valid_service_token(request, settings.cv_tailor_service_key)
     ):
         raise HTTPException(status_code=403, detail="not authorised — owner unlock or service token required")
-    if body.job_id not in load_scores(settings.scored_glob):
+    scores = load_scores(settings.scored_glob)
+    if body.job_id not in scores:
         raise HTTPException(status_code=404, detail=f"job_id not found in scored corpus: {body.job_id}")
 
     record = {
@@ -88,6 +90,16 @@ def record_cv_tailor_result(
     append_event(settings.cv_tailor_links_path, record)
     write_cv_tailor_link(record)
     emit_index_updated()
+    # Phase C: enrich the role_scoring_decision trace (same job_id seed) with cv-tailor's
+    # verdict + the JR↔cv-tailor divergence. Opt-in, best-effort, fired AFTER persist so a
+    # tracing failure can never fail the callback (mirrors manual_ingest, deviation 46).
+    telemetry.on_cv_tailor_result(
+        job_id=body.job_id,
+        fit_score=body.fit_score,
+        coverage_score=body.coverage_score,
+        cv_quality_score=body.cv_quality_score,
+        job_radar_fit_score=scores[body.job_id].fit_score,
+    )
     return record
 
 

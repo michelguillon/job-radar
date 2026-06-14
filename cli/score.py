@@ -102,6 +102,54 @@ def build_scoring_rows(
     return rows
 
 
+def _role_title(jd: JDRecord) -> str:
+    """The JD's title — first non-empty line of raw_text (original case)."""
+    for line in jd.raw_text.splitlines():
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+def build_role_decision_kwargs(jd: JDRecord, rec, profile: Profile) -> dict:
+    """Assemble the kwargs for ``telemetry.record_role_scoring_decision`` for one role.
+
+    Pure assembly + a read-only ``stage1_fit`` re-derivation (the scorer is never
+    mutated) — the same signal sub-scores + gate outcomes the ApplicationRecord was
+    built from. **The scorer is rule-based: there is no LLM call at scoring time**, so
+    the "stage1 generation" fields describe the deterministic scorer — model
+    ``rule_based_scorer``, zero tokens, the JD text as the prompt, the structured
+    sub-scores as the response. No effect when tracing is disabled.
+    """
+    _, bd = stage1_fit(jd, profile)
+    stage1_scores = {
+        "role": bd.role, "domain": bd.domain, "technical_depth": bd.technical_depth,
+        "signal": bd.signal, "seniority_gate": bd.seniority_gate,
+        "location_gate": bd.location_gate,
+    }
+    return {
+        "job_id": rec.job_id,
+        "company": jd.company,
+        "role_title": _role_title(jd),
+        "scored_at": rec.scored_at,
+        "role_score": bd.role,
+        "domain_score": bd.domain,
+        "depth_score": bd.technical_depth,
+        "stage1_composite": bd.signal,
+        "seniority_gate": bd.seniority_gate,
+        "location_gate": bd.location_gate,
+        "blocking_constraints": rec.blocking_constraints,
+        "requirement_gaps": rec.requirement_gaps,
+        "fit_label": rec.fit_label,
+        "fit_score": rec.fit_score,
+        "priority_score": rec.priority_score,
+        "stage1_model": "rule_based_scorer",
+        "stage1_input_tokens": 0,
+        "stage1_output_tokens": 0,
+        "stage1_prompt": jd.raw_text,
+        "stage1_response": json.dumps(stage1_scores),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Score validated JDs against the candidate profile.")
     parser.add_argument("--input", default=DEFAULT_INPUT, help=f"Glob for validated JSONL (default: {DEFAULT_INPUT})")
@@ -144,6 +192,11 @@ def main(argv: list[str] | None = None) -> int:
             build_scoring_rows(records, results, profile),
             metadata={"run_date": scored_at},
         )
+        # Phase C: one independent role_scoring_decision trace per scored role,
+        # keyed by a deterministic trace id (seed=job_id) so cv-tailor can enrich it
+        # later. Best-effort per role — a failed trace never aborts the run.
+        for jd, rec in zip(records, results):
+            telemetry.record_role_scoring_decision(**build_role_decision_kwargs(jd, rec, profile))
 
     distribution = dict(sorted(Counter(r.fit_label for r in results).items()))
     shown = [r for r in results if is_shown(r.fit_label, r.fit_score, mode, args.min_fit)]

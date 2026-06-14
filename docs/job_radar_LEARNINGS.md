@@ -2382,5 +2382,56 @@ only wrong for cv-tailor links, which accept a nullable `notes`.
 
 ---
 
+## Langfuse Phase C — per-role scoring decision traces (the scorer has no LLM call)
+
+Phase B traced the batch *infrastructure* (one `scoring_run` trace per batch, a `jd_scoring`
+span per JD). Phase C adds one **independent** `role_scoring_decision` trace per scored role —
+the permanent "why did Job Radar say this?" record, keyed by a deterministic trace id
+(`Langfuse.create_trace_id(seed=job_id)`) so cv-tailor can enrich the *same* trace later
+without storing a Langfuse id. Built: `record_role_scoring_decision()` + `on_cv_tailor_result()`
+in `cli/telemetry.py`; wired in `cli/score.py` (per role, after the batch trace) and
+`api/routers/cv_tailor.py` (after persist, deviation 50).
+
+The decisive finding (the build prompt asked me to investigate it): **Job Radar's scorer is
+purely rule-based — there is NO LLM call at scoring time.** `stage1_fit()` and the whole of
+`scoring/scorer.py` are deterministic regex + enum lookups over the *already-extracted*
+JDRecord. The LLM call that produced that data ran earlier, during **extraction** (batch
+`cli.label` / synchronous `extract_one`), and is already traced by `record_extraction_batch` /
+`record_manual_ingest`. So the spec's `claude_stage1` "generation" had no real LLM behind it.
+
+Decisions that fell out of that:
+- **Kept the spec's stage1-generation shape, populated honestly.** The generation is preserved
+  (it satisfies the §3.6 DoD and the trace structure reviewers look for) but the wiring passes
+  `model="rule_based_scorer"`, zero tokens, the JD text as the prompt, and the structured
+  sub-scores JSON as the response. The docstrings say plainly that scoring is deterministic, so
+  the trace is not misread as "an LLM scored this". Faithful beats decorative.
+- **Gate vocabulary mismatch is harmless by construction.** The Breakdown uses
+  `seniority_gate ∈ {"pass","miss"}` and `location_gate ∈ {"pass","unclear","fail"}`; the spec's
+  signature said `"pass"|"fail"`. The score mapping is `1.0 if == "pass" else 0.0` (seniority)
+  and `pass→1.0 / unclear→0.5 / else→0.0` (location), so the raw breakdown strings pass straight
+  through — `"miss"` scores 0.0 correctly. Passed the raw values (metadata shows the true gate
+  outcome) rather than re-mapping.
+- **Dimension scores attach raw (0–2), fit/priority normalised (÷10).** Per §3.2: `role_score`/
+  `domain_score`/`depth_score` are the raw signal sub-scores (0–2), `fit_score`/`priority_score`
+  are normalised 0–10→0–1 so they chart on one axis. The negative-signal ceiling means the
+  trace's `fit_score` (final ApplicationRecord value) can sit below the stage-1 `composite`
+  (raw signal) — that gap is itself signal, kept visible.
+- **Divergence + normalisation extracted as pure helpers** (`_norm10`, `_divergence`) so the
+  arithmetic is unit-tested without a live Langfuse client (the suite runs with no key). The
+  recorders call the helpers; the tests assert `_divergence(9, 0.5) == 0.4`, etc.
+- **`on_cv_tailor_result` skips None metrics.** The cv-tailor request fields are all optional;
+  creating a NUMERIC score with `None` would raise and (inside the one try/except) abort the
+  remaining scores. Guarded each on `is not None`; divergence needs both the JR fit and the
+  cv-tailor fit present. Best-effort, fired AFTER persist (a tracing failure can never fail the
+  callback — same rule as manual-ingest, deviation 46).
+
+No scorer/business-logic/schema change (`SCHEMA_VERSION` unchanged); `build_role_decision_kwargs`
+re-derives the breakdown read-only via `stage1_fit`. Tests: 512 pass (506 baseline + 6 new),
+all with no `LANGFUSE_PUBLIC_KEY`. Live verification (debug-trace returning a trace_id, scoring
+a role, confirming the trace + scores in the UI — §3.5 steps 5–7) runs on the M720q server with
+the job-radar Langfuse keys; locally the probe reports `enabled: false` cleanly.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

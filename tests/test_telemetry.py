@@ -41,6 +41,47 @@ def test_recorders_are_noop_when_disabled(monkeypatch):
     telemetry.flush()           # also a no-op — must not raise
 
 
+def test_record_role_scoring_decision_noop_when_disabled(monkeypatch):
+    """Phase C: per-role recorder returns None (no langfuse import) when disabled."""
+    monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
+    assert telemetry.record_role_scoring_decision(
+        job_id="sha256:x", company="Co", role_title="SE", scored_at="t",
+        role_score=2.0, domain_score=2.0, depth_score=2.0, stage1_composite=10.0,
+        seniority_gate="pass", location_gate="pass",
+        blocking_constraints=[], requirement_gaps=[],
+        fit_label="strong_fit", fit_score=9, priority_score=9,
+        stage1_model="rule_based_scorer", stage1_input_tokens=0, stage1_output_tokens=0,
+        stage1_prompt="jd text", stage1_response="{}",
+    ) is None
+
+
+def test_on_cv_tailor_result_noop_when_disabled(monkeypatch):
+    """Phase C: cv-tailor enrichment is a clean no-op (returns None) when disabled."""
+    monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
+    assert telemetry.on_cv_tailor_result(
+        job_id="sha256:x", fit_score=0.5, coverage_score=0.5,
+        cv_quality_score=8.0, job_radar_fit_score=9,
+    ) is None
+
+
+# --- Phase C pure helpers: normalisation + divergence ----------------------
+
+
+def test_score_normalisation():
+    """0–10 scores normalise onto 0–1 (fit_score/10, priority_score/10, cv_quality/10)."""
+    assert telemetry._norm10(8) == pytest.approx(0.8)
+    assert telemetry._norm10(10) == pytest.approx(1.0)
+    assert telemetry._norm10(0) == pytest.approx(0.0)
+    assert telemetry._norm10(8.1) == pytest.approx(0.81)
+
+
+def test_divergence_delta():
+    """divergence = |JR fit (0–10 → 0–1) − cv-tailor fit (0–1)|."""
+    assert telemetry._divergence(9, 0.5) == pytest.approx(0.4)   # 0.9 vs 0.5
+    assert telemetry._divergence(5, 0.5) == pytest.approx(0.0)   # 0.5 vs 0.5 — aligned
+    assert telemetry._divergence(10, 0.4) == pytest.approx(0.6)  # 1.0 vs 0.4
+
+
 def test_debug_trace_disabled_shape(monkeypatch):
     """The debug probe returns the documented verdict dict and a null trace when disabled."""
     monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
@@ -130,3 +171,43 @@ def test_build_scoring_rows_shape():
     gate = next(d for d in row["dimensions"] if d["dimension"] == "seniority")
     assert gate["score"] <= 0
     assert gate["rationale"].startswith("gate ")
+
+
+# --- build_role_decision_kwargs (per-role scoring decision) -----------------
+
+
+def test_build_role_decision_kwargs_shape():
+    profile = load_profile("candidate_profile.yaml")
+    jd = make_record(id="sha256:r", company="RoleCo",
+                     raw_text="Director, Solutions Engineering\nLondon-based hybrid role.")
+    from scoring.scorer import score, stage1_fit
+
+    rec = score(jd, profile, "2026-06-12T00:00:00Z")
+    kw = score_cli.build_role_decision_kwargs(jd, rec, profile)
+
+    assert kw["job_id"] == "sha256:r"
+    assert kw["company"] == "RoleCo"
+    # role_title is the first non-empty line of raw_text, original case.
+    assert kw["role_title"] == "Director, Solutions Engineering"
+    assert kw["scored_at"] == rec.scored_at
+    assert kw["fit_label"] == rec.fit_label
+    assert kw["fit_score"] == rec.fit_score
+    assert kw["priority_score"] == rec.priority_score
+    assert kw["blocking_constraints"] == rec.blocking_constraints
+    assert kw["requirement_gaps"] == rec.requirement_gaps
+    # Stage-1 sub-scores match a read-only re-derivation; composite is the weighted signal.
+    _, bd = stage1_fit(jd, profile)
+    assert kw["role_score"] == bd.role
+    assert kw["domain_score"] == bd.domain
+    assert kw["depth_score"] == bd.technical_depth
+    assert kw["stage1_composite"] == bd.signal
+    assert kw["seniority_gate"] == bd.seniority_gate
+    assert kw["location_gate"] == bd.location_gate
+    # The scorer is rule-based — no LLM call at scoring time.
+    assert kw["stage1_model"] == "rule_based_scorer"
+    assert kw["stage1_input_tokens"] == 0 and kw["stage1_output_tokens"] == 0
+    assert kw["stage1_prompt"] == jd.raw_text
+    # Exactly the kwargs record_role_scoring_decision accepts (no missing / extra keys).
+    import inspect
+    params = set(inspect.signature(telemetry.record_role_scoring_decision).parameters)
+    assert set(kw) == params

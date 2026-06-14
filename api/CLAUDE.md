@@ -34,8 +34,12 @@ write path over the same JSONL the CLI appends to** — never a second source of
   **Observability (deviation 46):** because manual ingest is its own synchronous path (not the
   batch CLIs), it emits its own `manual_ingest` Langfuse trace via `cli.telemetry.
   record_manual_ingest` — opt-in (`LANGFUSE_PUBLIC_KEY`), best-effort, fired AFTER the corpus is
-  persisted so a tracing failure can never fail an ingest. This is the only place the thin API
-  touches `cli.telemetry`/`cli.score.build_scoring_rows`; it rides on the existing thick exception.
+  persisted so a tracing failure can never fail an ingest. It rides on the existing thick exception.
+  **Phase C (deviation 50)** adds a second telemetry touch-point in the thin layer:
+  `POST /api/cv-tailor-results` (cv_tailor.py) calls `cli.telemetry.on_cv_tailor_result` after
+  persist to enrich the role's `role_scoring_decision` trace (same deterministic `job_id` seed)
+  with cv-tailor's scores + the divergence delta — opt-in, best-effort, never fails the callback.
+  These two are the only places the thin API touches `cli.telemetry`.
 - **The scorer is LOCKED.** The API reads scores (`load_scores`), it never writes a scored
   file. Annotations record disagreement with a score — they never mutate an extraction.
 - **Reuse, don't duplicate** write/validation logic. `build_event` runs

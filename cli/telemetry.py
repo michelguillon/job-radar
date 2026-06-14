@@ -42,7 +42,8 @@ log = logging.getLogger("cli.telemetry")
 
 __all__ = [
     "is_enabled", "init_langfuse", "debug_trace",
-    "record_extraction_batch", "record_scoring_run", "record_manual_ingest", "flush",
+    "record_extraction_batch", "record_scoring_run", "record_manual_ingest",
+    "record_role_scoring_decision", "on_cv_tailor_result", "flush",
 ]
 
 # Set once the global Langfuse singleton is live, so init_langfuse() is a true
@@ -86,6 +87,16 @@ def _strmeta(fields: dict | None) -> dict | None:
     if not fields:
         return None
     return {k: str(v) for k, v in fields.items() if v is not None} or None
+
+
+def _norm10(value: float) -> float:
+    """Normalise a 0–10 score onto 0–1 (Langfuse scores are most useful on one scale)."""
+    return value / 10
+
+
+def _divergence(jr_fit_0_10: float, ct_fit_0_1: float) -> float:
+    """|Job Radar fit (normalised 0–1) − cv-tailor fit (0–1)| — the cross-system delta."""
+    return abs(_norm10(jr_fit_0_10) - ct_fit_0_1)
 
 
 def flush() -> None:
@@ -301,6 +312,184 @@ def record_manual_ingest(job_id: str, row: dict, metadata: dict | None = None) -
     except Exception as exc:
         log.warning("Langfuse manual-ingest trace failed (non-fatal): %s", exc)
         return None
+
+
+# --------------------------------------------------------------------------- #
+# Phase C — per-role scoring decision (one independent trace per scored role)   #
+# --------------------------------------------------------------------------- #
+
+def record_role_scoring_decision(
+    job_id: str,
+    company: str,
+    role_title: str,
+    scored_at: str,
+    # Stage 1 outputs (signal sub-scores + the weighted composite).
+    role_score: float,
+    domain_score: float,
+    depth_score: float,
+    stage1_composite: float,
+    # Stage 2 outputs (gates + constraints).
+    seniority_gate: str,          # "pass" | "miss"/"fail"
+    location_gate: str,           # "pass" | "unclear" | "fail"
+    blocking_constraints: list,
+    requirement_gaps: list,
+    # Stage 3 outputs (classification).
+    fit_label: str,
+    fit_score: float,             # 0–10 (raw scorer output, not normalised)
+    priority_score: float,        # 0–10 (raw scorer output)
+    # "Stage 1 call" details. NB: Job Radar's scorer is RULE-BASED — there is no
+    # LLM call at scoring time (the LLM ran earlier, during extraction, and is
+    # traced by record_extraction_batch / record_manual_ingest). These fields carry
+    # the deterministic-scorer inputs/outputs so the spec's stage1 generation shape
+    # is preserved; the wiring (cli/score.py) passes model="rule_based_scorer",
+    # zero tokens, the JD text as the prompt, and the structured scores as the output.
+    stage1_model: str,
+    stage1_input_tokens: int,
+    stage1_output_tokens: int,
+    stage1_prompt: str,
+    stage1_response: str,
+) -> str | None:
+    """Create one independent ``role_scoring_decision`` trace for a single scored role.
+
+    The trace is the permanent record of *why Job Radar assigned this fit label*. It
+    exists whether or not cv-tailor ever runs; ``on_cv_tailor_result`` enriches the
+    SAME trace later (same deterministic ``job_id`` seed). Trace shape (SPEC §3.2):
+    root ``role_scoring_decision`` span → ``stage1_structural_fit`` span (with a
+    ``claude_stage1`` generation) → ``stage2_blocking_constraints`` span →
+    ``stage3_fit_label`` span; every dimension/gate attached as a NUMERIC trace score
+    (queryable + chartable, unlike metadata). ``propagate_attributes(trace_name=…)``
+    stamps ``langfuse.trace.name`` (worker ingestion requirement, §12). Flush follows
+    the root close. Best-effort — any failure logs a WARNING and returns None, never
+    raising into the scoring pipeline.
+    """
+    if not is_enabled():
+        return None
+    try:
+        import json
+
+        from langfuse import Langfuse, get_client, propagate_attributes
+        init_langfuse()
+        lf = get_client()
+        tid = Langfuse.create_trace_id(seed=job_id)
+        blocking_json = json.dumps(blocking_constraints or [])
+        gaps_json = json.dumps(requirement_gaps or [])
+        with lf.start_as_current_observation(
+            as_type="span", name="role_scoring_decision",
+            trace_context={"trace_id": tid},
+            input={"job_id": job_id, "company": company, "role_title": role_title},
+        ), propagate_attributes(trace_name="role_scoring_decision", metadata=_strmeta({
+            "job_id": job_id,
+            "company": company,
+            "role_title": role_title,
+            "scored_at": scored_at,
+            "fit_label": fit_label,
+            "blocking_constraints": blocking_json,
+            "requirement_gaps": gaps_json,
+        })):
+            with lf.start_as_current_observation(
+                as_type="span", name="stage1_structural_fit",
+                metadata=_strmeta({
+                    "role_score": role_score,
+                    "domain_score": domain_score,
+                    "depth_score": depth_score,
+                    "composite": stage1_composite,
+                }),
+            ):
+                with lf.start_as_current_observation(
+                    as_type="generation", name="claude_stage1",
+                    model=stage1_model, input=stage1_prompt,
+                ) as gen:
+                    gen.update(
+                        output=stage1_response,
+                        usage_details={
+                            "input": int(stage1_input_tokens or 0),
+                            "output": int(stage1_output_tokens or 0),
+                        },
+                    )
+            with lf.start_as_current_observation(
+                as_type="span", name="stage2_blocking_constraints",
+                metadata=_strmeta({
+                    "seniority_gate": seniority_gate,
+                    "location_gate": location_gate,
+                    "blocking_constraints": blocking_json,
+                    "requirement_gaps": gaps_json,
+                }),
+            ):
+                pass                                   # leaf span — metadata only
+            with lf.start_as_current_observation(
+                as_type="span", name="stage3_fit_label",
+                metadata=_strmeta({
+                    "fit_label": fit_label,
+                    "fit_score": str(fit_score),
+                    "priority_score": str(priority_score),
+                }),
+            ):
+                pass                                   # leaf span — metadata only
+            # Dimension + gate scores as NUMERIC trace scores (chartable, not just metadata).
+            trace_scores = {
+                "fit_score": _norm10(fit_score),               # 0–10 → 0–1
+                "priority_score": _norm10(priority_score),     # 0–10 → 0–1
+                "role_score": role_score,                      # raw sub-score (0–2)
+                "domain_score": domain_score,                  # raw sub-score (0–2)
+                "depth_score": depth_score,                    # raw sub-score (0–2)
+                "seniority_gate": 1.0 if seniority_gate == "pass" else 0.0,
+                "location_gate": 1.0 if location_gate == "pass" else (
+                    0.5 if location_gate == "unclear" else 0.0),
+            }
+            for sname, svalue in trace_scores.items():
+                try:
+                    lf.create_score(name=sname, value=svalue, trace_id=tid, data_type="NUMERIC")
+                except Exception:
+                    log.debug("langfuse role-scoring score %s failed", sname, exc_info=True)
+        lf.flush()
+        log.warning("Langfuse role-scoring trace created: job_id=%s trace_id=%s", job_id, tid)
+        return tid
+    except Exception as exc:
+        log.warning("Langfuse role-scoring trace failed (non-fatal): %s", exc)
+        return None
+
+
+def on_cv_tailor_result(
+    job_id: str,
+    fit_score: float | None,           # cv-tailor fit_score (0.0–1.0)
+    coverage_score: float | None,      # cv-tailor coverage_score (0.0–1.0)
+    cv_quality_score: float | None,    # cv-tailor cv_quality_score (0.0–10.0)
+    job_radar_fit_score: float | None = None,  # JR fit passed to cv-tailor (0–10)
+) -> None:
+    """Enrich the existing ``role_scoring_decision`` trace with cv-tailor's verdict.
+
+    Uses the SAME deterministic trace id (``seed=job_id``) the scoring trace claimed,
+    so both systems' scores land on one trace — no join required (SPEC §3.3). Attaches
+    cv-tailor's fit/coverage/quality as NUMERIC scores and, when the JR fit it was given
+    is known, the ``fit_score_divergence`` delta. None-valued metrics are skipped (a
+    cv-tailor run may report only some). Best-effort — never raises into the API handler.
+    """
+    if not is_enabled():
+        return
+    try:
+        from langfuse import Langfuse, get_client
+        init_langfuse()
+        lf = get_client()
+        tid = Langfuse.create_trace_id(seed=job_id)
+
+        if fit_score is not None:
+            lf.create_score(trace_id=tid, name="cv_tailor_fit_score",
+                            value=fit_score, data_type="NUMERIC")
+        if coverage_score is not None:
+            lf.create_score(trace_id=tid, name="cv_tailor_coverage_score",
+                            value=coverage_score, data_type="NUMERIC")
+        if cv_quality_score is not None:
+            lf.create_score(trace_id=tid, name="cv_tailor_quality_score",
+                            value=_norm10(cv_quality_score),  # 0–10 → 0–1
+                            data_type="NUMERIC")
+        if job_radar_fit_score is not None and fit_score is not None:
+            lf.create_score(trace_id=tid, name="fit_score_divergence",
+                            value=_divergence(job_radar_fit_score, fit_score),
+                            data_type="NUMERIC")
+        lf.flush()
+        log.warning("Langfuse cv_tailor enrichment: job_id=%s trace_id=%s", job_id, tid)
+    except Exception as exc:
+        log.warning("Langfuse cv_tailor enrichment failed (non-fatal): %s", exc)
 
 
 def _score(lf, trace_id: str, observation, name: str, value: float) -> None:
