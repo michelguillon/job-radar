@@ -1,10 +1,10 @@
 # SPEC_DB_MIGRATION.md
 ## Phase 6.5 — Persistence Hardening (JSONL → SQLite for interactive state)
 
-**Status:** Specced — not yet built
-**Trigger:** After Langfuse instrumentation is stable
+**Status:** Steps 1–5 ✅ built and deployed. Step 6 pending 1 week dual-write.
+**Trigger:** After Langfuse instrumentation is stable — ✅ met
 **Scope:** Interactive/stateful data only — pipeline artefacts stay JSONL
-**Last updated:** 2026-06-13
+**Last updated:** 2026-06-14
 
 ---
 
@@ -409,17 +409,18 @@ end — it's the right starting point for this scale.
 
 ## 10. Definition of Done
 
-1. `corpus/job_radar.db` exists and has the correct schema
-2. All three JSONL state files backfilled with zero divergences
-3. `cli/stats.py --export-index --source both` exits clean (0
+1. ✅ `corpus/job_radar.db` exists and has the correct schema
+2. ✅ All three JSONL state files backfilled with zero divergences
+3. ✅ `cli/stats.py --export-index --source both` exits clean (0
    divergences) against the full live corpus
-4. API writes go to SQLite; JSONL dual-write active for 1 week
-5. API reads (live overlay) come from SQLite
-6. `cli/track.py`, `cli/analyse.py` auto-detect SQLite
-7. JSONL writes removed; files preserved as audit archive
-8. Backup cron updated for `job_radar.db`
-9. All existing 481+ tests pass; new migration tests added
-10. `SPEC_DB_MIGRATION.md` §4 steps all marked ✅
+4. ✅ API writes go to SQLite; JSONL dual-write active for 1 week
+   *(dual-write started 2026-06-14 — Step 6 gate: 2026-06-21)*
+5. ✅ API reads (live overlay) come from SQLite
+6. ✅ `cli/track.py`, `cli/analyse.py` auto-detect SQLite
+7. 🔲 JSONL writes removed; files preserved as audit archive (Step 6)
+8. ✅ Backup cron updated for `job_radar.db`
+9. ✅ All existing 481+ tests pass; new migration tests added
+10. 🔲 `SPEC_DB_MIGRATION.md` §4 steps all marked ✅
 
 ---
 
