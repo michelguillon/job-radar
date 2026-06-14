@@ -2281,10 +2281,12 @@ monitored ATS universe — correct, not an error.
 ### Rejection reasons ✅ built
 
 A new use of the existing annotations system — no new endpoint, no new file, no schema bump.
-`rejection_reason` added to `ANNOTATION_TYPE`; new `REJECTION_REASON` frozenset (10 values:
+`rejection_reason` added to `ANNOTATION_TYPE`; new `REJECTION_REASON` frozenset (11 values:
 `wrong_level`, `wrong_function`, `too_salesy`, `too_research_heavy`, `too_delivery_consulting`,
-`domain_not_interesting`, `company_not_fit`, `seniority_mismatch`, `location_mismatch`,
-`other`). `AnnotationRequest.field` relaxed to `str | None` (a rejection is about the whole
+`domain_not_interesting`, `company_not_fit`, `seniority_mismatch`, `requirement_mismatch`,
+`location_mismatch`, `other` — `requirement_mismatch` added 2026-06-14 from real use, under-
+qualified on a hard requirement: technical depth / experience / specific skills; constants-only,
+no schema bump). `AnnotationRequest.field` relaxed to `str | None` (a rejection is about the whole
 role → `field: null`). API validates `reason` against `REJECTION_REASON` for this type (422
 if invalid); existing 409-duplicate behaviour unchanged. Frontend shows the control when
 `effectiveStatus === 'rejected'` or immediately after clicking Rejected; posts to

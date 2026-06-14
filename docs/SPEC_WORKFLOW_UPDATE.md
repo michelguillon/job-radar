@@ -84,10 +84,12 @@ Three different UX approaches based on who initiated the decision:
 
 ### `Will not apply` button
 - Rejection reason dropdown appears pre-expanded below the button
-- Uses existing `REJECTION_REASON` vocabulary:
+- Uses the `REJECTION_REASON` vocabulary:
   `wrong_level | wrong_function | too_salesy | too_research_heavy |
   too_delivery_consulting | domain_not_interesting | company_not_fit |
-  seniority_mismatch | location_mismatch | other`
+  seniority_mismatch | requirement_mismatch | location_mismatch | other`
+  (`requirement_mismatch` added 2026-06-14 from real use — under-qualified on a hard
+  requirement, e.g. technical depth / experience / specific skills; constants-only)
 - Skippable — can save without selecting
 - If selected: `POST /api/annotations` with `annotation_type:
   "rejection_reason"`, same as existing annotation path

@@ -161,6 +161,7 @@ export const REJECTION_REASONS: Array<{ label: string; value: string }> = [
   { label: "Domain not interesting", value: "domain_not_interesting" },
   { label: "Company not a fit", value: "company_not_fit" },
   { label: "Seniority mismatch", value: "seniority_mismatch" },
+  { label: "Requirement mismatch", value: "requirement_mismatch" },
   { label: "Location mismatch", value: "location_mismatch" },
   { label: "Other", value: "other" },
 ];

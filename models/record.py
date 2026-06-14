@@ -209,6 +209,8 @@ REJECTION_REASON = frozenset(
         "domain_not_interesting",
         "company_not_fit",
         "seniority_mismatch",
+        "requirement_mismatch",  # under-qualified on a hard requirement (technical depth,
+        # years of experience, specific skills) — distinct from seniority/level mismatch
         "location_mismatch",
         "other",
     }

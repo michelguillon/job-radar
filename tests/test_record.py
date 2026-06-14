@@ -298,9 +298,9 @@ def test_rejection_reason_vocab_complete():
     assert REJECTION_REASON == frozenset({
         "wrong_level", "wrong_function", "too_salesy", "too_research_heavy",
         "too_delivery_consulting", "domain_not_interesting", "company_not_fit",
-        "seniority_mismatch", "location_mismatch", "other",
+        "seniority_mismatch", "requirement_mismatch", "location_mismatch", "other",
     })
-    assert len(REJECTION_REASON) == 10
+    assert len(REJECTION_REASON) == 11
 
 
 def test_will_not_apply_in_application_status():
