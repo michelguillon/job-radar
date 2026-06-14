@@ -129,7 +129,7 @@ export function Sidebar({
           onToggle={(v) => toggleIn(filters.statuses, v)}
           renderLabel={(v) => v}
         />
-        <p className="mt-[6px] text-[10.5px] leading-[1.35] text-ink-faint">rejected &amp; archived are hidden by default — tick to show</p>
+        <p className="mt-[6px] text-[10.5px] leading-[1.35] text-ink-faint">rejected, will not apply &amp; archived are hidden by default — tick to show</p>
       </div>
 
       <div className="mb-4">

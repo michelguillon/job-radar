@@ -95,7 +95,7 @@ thing tests actually run against.
 | 3 — Job Tracker | ✅ complete — `track.py` (model C, append-only event log), 263 tests. Extraction quality fixed (deviation 21). Real corpus build underway. Scorer locked. |
 | 4 — Discovery Layer | ✅ complete + **operational** — incremental collection (deviation 24) + `cli/digest.py` (deviation 26) + **working** weekly cron (`cron/`, fixed deviation 36) + cross-corpus dedupe (deviation 19). **102-company universe** seeded (SPEC §11.1); first real server run: 5,498 collected → 65 new survivors → 117 scored, $3.18 to date. |
 | 5 — Static UI | ✅ complete — `ui/{index.html,app.js,style.css}` static SPA (no framework/build/CDN), reads the joined `corpus/index.json`, served by nginx behind the `ui` Docker profile (`docker compose --profile ui up` → :8080). Browse + Pipeline + detail drawer + filters + stats bar. `index.json` contract changed to a join (deviation 27). 318 tests. |
-| 6 — Interactive UI | ✅ complete — thin FastAPI `api/` (security/settings/main + index/auth/workflow/annotations routers) over `cli.track` + `models.record`; stdlib-HMAC `jr_write` cookie, fail-closed (`JR_WRITE_KEY`/`COOKIE_SECURE`); `GET /api/index` re-projects the live activity log; `ANNOTATION_TYPE` + `validate_annotation_event` (constants only, no schema bump); `corpus/annotations.jsonl` sink. **React/Vite `frontend/`** (cv-tailor stack: `UnlockProvider`, typed `lib/api`, `useIndex`, Browse/Pipeline/Detail + owner write controls + flag form) replaces the retired Phase 5 `ui/`. `api` + `frontend` compose services (`--profile ui` → :8080/:8000). **362 tests + browser-verified.** **Deployed** behind Caddy + Cloudflare at job-radar.michel-portfolio.co.uk (`docker-compose.prod.yml`, SPEC §10.9). **§10.11 workflow enhancements built**: manual fit override + annotation visibility/dedup (event-log append + read-model join, no scorer/schema change; deviation 37). Conventions: `api/CLAUDE.md`, `frontend/CLAUDE.md` (deviations 28–37). **Manual JD entry via UI built** (SPEC §11.1): `POST /api/manual-ingest` + `frontend/.../AddRoleModal.tsx` — synchronous single-JD extract→score→append→reindex, `ats="manual"` (deviation 44). |
+| 6 — Interactive UI | ✅ complete — thin FastAPI `api/` (security/settings/main + index/auth/workflow/annotations routers) over `cli.track` + `models.record`; stdlib-HMAC `jr_write` cookie, fail-closed (`JR_WRITE_KEY`/`COOKIE_SECURE`); `GET /api/index` re-projects the live activity log; `ANNOTATION_TYPE` + `validate_annotation_event` (constants only, no schema bump); `corpus/annotations.jsonl` sink. **React/Vite `frontend/`** (cv-tailor stack: `UnlockProvider`, typed `lib/api`, `useIndex`, Browse/Pipeline/Detail + owner write controls + flag form) replaces the retired Phase 5 `ui/`. `api` + `frontend` compose services (`--profile ui` → :8080/:8000). **362 tests + browser-verified.** **Deployed** behind Caddy + Cloudflare at job-radar.michel-portfolio.co.uk (`docker-compose.prod.yml`, SPEC §10.9). **§10.11 workflow enhancements built**: manual fit override + annotation visibility/dedup (event-log append + read-model join, no scorer/schema change; deviation 37). Conventions: `api/CLAUDE.md`, `frontend/CLAUDE.md` (deviations 28–37). **Manual JD entry via UI built** (SPEC §11.1): `POST /api/manual-ingest` + `frontend/.../AddRoleModal.tsx` — synchronous single-JD extract→score→append→reindex, `ats="manual"` (deviation 44). **Workflow status redesign built** (SPEC §7.2/§10.10 item 8): 9th status `will_not_apply` + contextual per-status controls + 3 distinct terminal states (rejected/will_not_apply/archived); constants-only, no schema/endpoint change (deviation 51). |
 | 6.5 — Persistence Hardening | 🔶 **Steps 1–5 shipped; Step 6 deferred** — interactive state (`activity_log`/`annotations`/`cv_tailor_links`) moved JSONL → SQLite (`corpus/job_radar.db`, WAL, INSERT-only). `cli/db.py` + `cli/db_migrate.py`; dual-write all write endpoints; reads auto-detect (`use_sqlite()`); `--export-index --source {jsonl\|sqlite\|both}` (default sqlite); `cron/backup_db.sh`. 506 tests, `--source both` = 0 divergences on the 53-job corpus. **Step 6 (remove JSONL writes) waits on a 1-week prod dual-write soak.** Deviation 49 + `docs/SPEC_DB_MIGRATION.md`. |
 | 7 — Fine-Tuned Analyser | Deferred (Project 5) |
 
@@ -483,6 +483,33 @@ Kept in full: everything below — active operational guards Claude Code must kn
     (`telemetry._norm10`/`_divergence`, unit-tested without a live client). Best-effort
     everywhere (every recorder guards `is_enabled()` + swallows); `on_cv_tailor_result` skips
     None metrics. No scorer/schema change (`SCHEMA_VERSION` unchanged). 512 tests.
+
+51. *(→ SPEC §7.2 + §10.10 item 8 + `docs/SPEC_WORKFLOW_UPDATE.md`)* **Workflow status redesign —
+    `will_not_apply` + contextual controls.** Adds a 9th `APPLICATION_STATUS` value
+    `will_not_apply` (conscious owner "I decided no") — distinct from `rejected` (they decided)
+    and `archived` (passive cleanup); the three terminal states must never be conflated.
+    **Constants only, no `SCHEMA_VERSION` bump, no new/changed endpoint** (the existing
+    `POST /api/status` validates against `APPLICATION_STATUS`, so adding the value is sufficient).
+    Notable points: (a) `cli.track._TERMINAL` gained `will_not_apply` so a move to it from any
+    stage raises no transition warning (it's terminal, like rejected/archived). (b) `cli.analyse.
+    STATUS_ORDER` gained it (after `rejected`, before `archived`) so the funnel report counts it;
+    `REVIEWED_STATUSES` (= `APPLICATION_STATUS − {new, archived}`) now includes it automatically — a
+    `will_not_apply` role *was* reviewed. (c) **Frontend `effectiveStatus()` now maps
+    `withdrew`/`offer_declined → will_not_apply`** (was `archived`); `statusForOutcome` matches, so
+    the Withdraw/Declined buttons move the lane there. `TERMINAL_STATUSES`, `STATUS_ORDER`,
+    `PIPELINE_ORDER` all gained `will_not_apply` (all three terminal states hidden by default,
+    revealed by the Status filter). (d) **Contextual status buttons** (`STATUS_BUTTONS` map keyed by
+    effective status in `DetailPanel.tsx`) replace the flat ladder — only sensible next moves are
+    shown; `[Restore to new]` (→ status `new`) appears for `will_not_apply`/`archived` when filtered
+    in. (e) Three terminal-action reason panels: **Will not apply** pre-expands the
+    `REJECTION_REASON` dropdown (skippable → `POST /api/annotations` rejection_reason); **Withdraw**
+    POSTs status `will_not_apply` + outcome `withdrew` (dropdown's default `withdrew` option is a
+    sentinel — NOT a `REJECTION_REASON`, so it's never posted as an annotation `reason`; only a real
+    reason choice is); **Rejected** takes free text → `POST /api/outcome` on the auto-derived stage.
+    The old standalone manual **Outcome** dropdown (deviation 32) was removed — those flows are now
+    button-driven. (f) **No JS test toolchain** (frontend/CLAUDE.md): the `effectiveStatus` logic is
+    verified by `tsc -b` + manual browser check, not pytest; backend coverage is in
+    `tests/test_record.py` + `test_api.py` + `test_track.py`. 517 tests.
 
 
 ## Schema summary

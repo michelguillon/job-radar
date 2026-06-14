@@ -59,10 +59,11 @@ META_GLOB = "corpus/raw/meta_*.jsonl"
 # baseline (never logged), so it is not an option for a status event.
 LOGGABLE_STATUS = sorted(APPLICATION_STATUS - {"new"})
 
-# Lifecycle ladder for the (forgiving) transition warning. "rejected"/"archived"
-# are reachable from anywhere, so they sit outside the ladder.
+# Lifecycle ladder for the (forgiving) transition warning. The three terminal states
+# (rejected/will_not_apply/archived, SPEC_WORKFLOW_UPDATE §2) are reachable from anywhere,
+# so they sit outside the ladder.
 _LADDER = ["new", "review", "shortlisted", "applied", "interviewing", "offer"]
-_TERMINAL = frozenset({"rejected", "archived"})
+_TERMINAL = frozenset({"rejected", "will_not_apply", "archived"})
 
 # Coarse UK/remote signal for deriving location_workable from the sidecar
 # (profile base = London, acceptable_remote_policy = [remote], relocation = false).

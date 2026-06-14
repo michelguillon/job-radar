@@ -2433,5 +2433,54 @@ the job-radar Langfuse keys; locally the probe reports `enabled: false` cleanly.
 
 ---
 
+## Workflow status redesign — three distinct terminal states + contextual controls (2026-06-14)
+
+**Context.** The 8-state workflow lifecycle overloaded `archived`: stale roles, conscious
+"I decided not to pursue", and active withdrawals all landed in the same bucket. SPEC_WORKFLOW_UPDATE
+split them. The build added one status (`will_not_apply`), redesigned the detail-panel controls to be
+contextual, and tightened default visibility.
+
+**The three-way terminal distinction is the whole point — and it's a vocabulary decision, not a
+mechanism one.** `rejected` (they decided), `will_not_apply` (you decided), `archived` (time/
+indifference) are semantically different events that were being conflated. The fix needed no new
+machinery: append-only event log, `project()` fold, and `APPLICATION_STATUS` validation already
+existed. Adding the value to the frozenset is *sufficient* for the whole backend — `POST /api/status`
+validates against it, `build_event`/`validate_activity_event` accept it, SQLite stores it as text.
+Lesson: when the data model is append-only events over a closed vocab, a new lifecycle state is a
+one-line constant change plus the read-side ordering/visibility lists. Resist the urge to add an
+endpoint.
+
+**`effectiveStatus()` is the single read-time choke point for "where is this role really".** Two
+places had to flip `withdrew`/`offer_declined` from `→ archived` to `→ will_not_apply`:
+`effectiveStatus` (display) and `statusForOutcome` (the lane the outcome buttons move to). Keeping
+them in lockstep matters — if they disagree, a withdrawn role shows in one lane but the button moves
+it to another. Both are pure functions in `lib/jobs.ts`; the ordering lists (`STATUS_ORDER`,
+`PIPELINE_ORDER`, `TERMINAL_STATUSES`) are the other read-side surfaces that all needed the new value.
+
+**Contextual controls > a flat ladder.** The old panel showed every status button regardless of
+state. Replacing it with a `STATUS_BUTTONS` map keyed by effective status (only sensible next moves)
+removed a class of nonsensical transitions and let `review → applied` be a direct path. The dispatch
+is a small `onButton(key)` switch: pure status keys move the lane directly; `withdraw`/`rejected`/
+`accepted`/`declined`/`restore` are *actions* that compose status + outcome (+ optional annotation).
+
+**`withdrew` is an OUTCOME, not a REJECTION_REASON — the spec's "pre-select withdrew in the reason
+dropdown" can't be taken literally.** Posting `withdrew` as a `rejection_reason` annotation would
+422 (the API validates that type against `REJECTION_REASON`). Resolution: `withdrew` is a sentinel
+default option in the Withdraw dropdown; the withdrawal is captured structurally via
+`POST /api/outcome {withdrew}`, and a `rejection_reason` annotation is posted only if the owner
+picks a real reason. The literal DoD ("pre-selects withdrew, skippable") holds while nothing invalid
+reaches the backend. Lesson: when a spec conflates two closed vocabularies, honour the *intent*
+(capture the withdrawal + optional reason) and document the divergence (BUILD NOTE in the spec).
+
+**No JS test toolchain means TS-only logic is verified by `tsc -b` + manual, not unit tests.** The
+build prompt listed `test_effective_status_*` cases, but those assert a frontend TS function and the
+project deliberately has no JS test runner (frontend/CLAUDE.md). Adding vitest just for two
+assertions would be a larger architectural change than the feature. The backend constant/endpoint/
+transition behaviour *is* covered by pytest (517 tests); the frontend derivation is covered by a
+clean type-check and browser verification. Recorded as a BUILD NOTE so the gap is explicit, not
+silent.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

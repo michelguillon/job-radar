@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { CHIP, fitBadgeClass, statusPillClass, TOAST } from "@/lib/ui";
 import {
   daysSince, effectiveStatus, FIT_LABELS, fmtDate, isStaleApplied, LABEL_TEXT, listText,
-  OUTCOMES, REJECTION_REASONS, rejectionStageFor, statusForOutcome,
+  REJECTION_REASONS, rejectionStageFor, statusForOutcome,
 } from "@/lib/jobs";
 import { useUnlock } from "@/components/UnlockProvider";
 
@@ -18,6 +18,30 @@ const ANNOTATION_TYPES = [
   "role_type_incorrect", "domain_incorrect", "seniority_incorrect", "technical_depth_incorrect",
   "fit_score_disagree", "should_be_blocked", "false_block", "extraction_other",
 ];
+
+// Contextual status controls (SPEC_WORKFLOW_UPDATE §3): only the moves that make sense from
+// the current effective status are offered. Keyed by effective status → ordered button keys.
+const STATUS_BUTTONS: Record<string, string[]> = {
+  new:            ["review", "shortlisted", "applied", "will_not_apply", "archived"],
+  review:         ["shortlisted", "applied", "will_not_apply", "archived"],
+  shortlisted:    ["applied", "will_not_apply", "archived"],
+  applied:        ["interviewing", "rejected", "withdraw"],
+  interviewing:   ["offer", "rejected", "withdraw"],
+  offer:          ["accepted", "declined"],
+  rejected:       ["archived"],
+  will_not_apply: ["archived", "restore"],
+  archived:       ["restore"],
+};
+// Button key → display label. Keys that are statuses move the lane directly; "withdraw",
+// "rejected", "accepted", "declined", "restore" are actions (see onButton).
+const BUTTON_LABEL: Record<string, string> = {
+  review: "Review", shortlisted: "Shortlist", applied: "Applied",
+  will_not_apply: "Will not apply", archived: "Archive",
+  interviewing: "Interviewing", offer: "Offer", rejected: "Rejected",
+  withdraw: "Withdraw", restore: "Restore to new",
+  accepted: "Accepted", declined: "Declined",
+};
+const DANGER_BUTTONS = new Set(["will_not_apply", "archived", "rejected", "withdraw", "declined"]);
 
 function observedFor(type: string, r: Job): { field: string; observed: unknown } {
   switch (type) {
@@ -246,8 +270,6 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
   const [flagType, setFlagType] = useState(ANNOTATION_TYPES[0]);
   const [expected, setExpected] = useState("");
   const [reason, setReason] = useState("");
-  const [outcome, setOutcomeSel] = useState(rejectionStageFor(job.application_status));
-  const [outcomeNotes, setOutcomeNotes] = useState("");
   const [fitSel, setFitSel] = useState(job.user_fit_label || job.scorer_fit_label);
   const [fitReason, setFitReason] = useState(job.user_fit_reason || "");
   const [editingOverride, setEditingOverride] = useState(false);
@@ -256,18 +278,20 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
   // most recent rejection_reason entry is the current one).
   const rejectionAnns = (job.annotations || []).filter((a) => a.annotation_type === "rejection_reason");
   const recordedReason = rejectionAnns.length ? String(rejectionAnns[rejectionAnns.length - 1].reason) : null;
-  const [rejToast, setRejToast] = useState<Toast>(null);
-  const [rejReason, setRejReason] = useState(recordedReason || "");
-  const [showReject, setShowReject] = useState(false);     // revealed after clicking Rejected
-  const [editingReject, setEditingReject] = useState(false);
+
+  // Contextual terminal-action panel (SPEC_WORKFLOW_UPDATE §4): one panel at a time, revealed
+  // below the status buttons so the move is confirmed (with optional reason) before it commits.
+  const [pending, setPending] = useState<null | "willnot" | "withdraw" | "rejected">(null);
+  const [rejReason, setRejReason] = useState("");     // reason dropdown (willnot / withdraw)
+  const [rejectNotes, setRejectNotes] = useState(""); // free-text feedback (rejected)
+  const [panelToast, setPanelToast] = useState<Toast>(null);
 
   useEffect(() => {
     setNoteText(job.notes || ""); setTitleText(job.title || "");
     setFlagType(ANNOTATION_TYPES[0]); setExpected(""); setReason("");
-    setOutcomeSel(rejectionStageFor(job.application_status)); setOutcomeNotes("");
     setFitSel(job.user_fit_label || job.scorer_fit_label); setFitReason(job.user_fit_reason || "");
     setEditingOverride(false);
-    setRejReason(recordedReason || ""); setShowReject(false); setEditingReject(false); setRejToast(null);
+    setPending(null); setRejReason(""); setRejectNotes(""); setPanelToast(null);
     setToast(null); setFlagToast(null);
   }, [job.job_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -299,13 +323,49 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
     await api.setTitle(job.job_id, titleText.trim());
     return { kind: "ok", text: "Title override saved" };
   });
-  const recordOutcome = () => guarded(async () => {
-    await api.setOutcome(job.job_id, outcome, outcomeNotes.trim() || undefined);
+  // Offer outcome buttons (Accepted / Declined): record the outcome + move the lane.
+  // statusForOutcome maps offer_accepted→offer, offer_declined→will_not_apply.
+  const recordOutcomeMove = (outcome: string) => guarded(async () => {
+    await api.setOutcome(job.job_id, outcome);
     const lane = statusForOutcome(outcome);
     if (lane && lane !== job.application_status) await api.setStatus(job.job_id, lane);
-    setOutcomeNotes("");
     return { kind: "ok", text: `Recorded: ${outcome.replace(/_/g, " ")}` };
   });
+  // A structured rejection reason is recorded only when a real REJECTION_REASON is chosen;
+  // "withdrew" is the dropdown's default-no-reason sentinel (an OUTCOME, not a reason) and is
+  // skipped here — the withdrawal itself is captured via POST /api/outcome.
+  const postRejectionReason = async () => {
+    if (rejReason && rejReason !== "withdrew") {
+      await api.flagAnnotation({
+        job_id: job.job_id, annotation_type: "rejection_reason", field: null,
+        observed: [job.scorer_fit_label, String(job.scorer_fit_score)], expected: [], reason: rejReason,
+      });
+    }
+  };
+  // "Will not apply" — internal decision; status only (+ optional structured reason). §4.
+  const confirmWillNot = () => guarded(async () => {
+    await api.setStatus(job.job_id, "will_not_apply");
+    await postRejectionReason();
+    setPending(null);
+    return { kind: "ok", text: rejReason ? `Will not apply · ${rejReason.replace(/_/g, " ")}` : "Will not apply" };
+  }, setPanelToast);
+  // "Withdraw" — leave an in-flight application; status will_not_apply + outcome withdrew. §4.
+  const confirmWithdraw = () => guarded(async () => {
+    await api.setStatus(job.job_id, "will_not_apply");
+    await api.setOutcome(job.job_id, "withdrew");
+    await postRejectionReason();
+    setPending(null);
+    return { kind: "ok", text: "Withdrawn" };
+  }, setPanelToast);
+  // "Rejected" — employer-initiated; free-text feedback carried on the auto-derived stage. §4.
+  const confirmRejected = () => guarded(async () => {
+    await api.setStatus(job.job_id, "rejected");
+    if (rejectNotes.trim()) {
+      await api.setOutcome(job.job_id, rejectionStageFor(job.application_status), rejectNotes.trim());
+    }
+    setPending(null);
+    return { kind: "ok", text: "Marked rejected" };
+  }, setPanelToast);
   const saveOverride = () => guarded(async () => {
     await api.setFitOverride(job.job_id, fitSel, fitReason.trim() || undefined);
     setEditingOverride(false);
@@ -316,15 +376,6 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
     setEditingOverride(false);
     return { kind: "ok", text: "Override cleared" };
   });
-  const recordRejection = () => guarded(async () => {
-    if (!rejReason) return { kind: "err", text: "Select a reason" };
-    await api.flagAnnotation({
-      job_id: job.job_id, annotation_type: "rejection_reason", field: null,
-      observed: [job.scorer_fit_label, String(job.scorer_fit_score)], expected: [], reason: rejReason,
-    });
-    setEditingReject(false);
-    return { kind: "ok", text: `Rejection reason recorded: ${rejReason.replace(/_/g, " ")}` };
-  }, setRejToast);
   const submitFlag = () => guarded(async () => {
     if (!reason.trim()) return { kind: "err", text: "Reason is required" };
     const { field, observed } = observedFor(flagType, job);
@@ -341,12 +392,19 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
 
   const { observed } = observedFor(flagType, job);
   const eff = effectiveStatus(job);
-  const STATUS_BTNS: Array<{ label: string; value: string; danger?: boolean }> = [
-    { label: "Review", value: "review" }, { label: "Shortlist", value: "shortlisted" },
-    { label: "Apply", value: "applied" }, { label: "Interview", value: "interviewing" },
-    { label: "Offer", value: "offer" }, { label: "Rejected", value: "rejected", danger: true },
-    { label: "Archive", value: "archived", danger: true },
-  ];
+  const buttons = STATUS_BUTTONS[eff] || STATUS_BUTTONS.new;
+  function onButton(key: string) {
+    switch (key) {
+      case "will_not_apply": setPending("willnot"); setRejReason(""); setPanelToast(null); break;
+      case "withdraw": setPending("withdraw"); setRejReason("withdrew"); setPanelToast(null); break;
+      case "rejected": setPending("rejected"); setRejectNotes(""); setPanelToast(null); break;
+      case "restore": setStatus("new"); break;
+      case "accepted": recordOutcomeMove("offer_accepted"); break;
+      case "declined": recordOutcomeMove("offer_declined"); break;
+      case "archived": setStatus("archived"); break;
+      default: setStatus(key); break;   // review / shortlisted / applied / interviewing / offer
+    }
+  }
   const ageDays = daysSince(job.application_date);
   const stale = isStaleApplied(job);
   const hasApplied = !!job.application_date || ["applied", "interviewing", "offer", "rejected"].includes(eff);
@@ -394,20 +452,69 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
 
         <div className="mb-[10px] flex flex-wrap items-center gap-2">
           <span className={wcLabel}>Status</span>
-          <div className="flex flex-wrap gap-[6px]">
-            {STATUS_BTNS.map((b) => (
-              <button key={b.value} disabled={busy} onClick={() => { setStatus(b.value); if (b.value === "rejected") setShowReject(true); }}
+          <Pill status={eff} />
+        </div>
+        <div className="mb-[10px] flex flex-wrap gap-[6px]">
+          {buttons.map((key) => {
+            const danger = DANGER_BUTTONS.has(key);
+            const active = (key === "will_not_apply" && pending === "willnot") || key === pending;
+            return (
+              <button key={key} disabled={busy} onClick={() => onButton(key)}
                 className={cn(
                   "rounded-md border px-[11px] py-[5px] text-[12.5px] font-semibold disabled:opacity-50",
-                  eff === b.value ? "border-brand bg-brand text-white"
-                    : b.danger ? "border-line bg-white text-ink hover:border-[#c0392b] hover:text-[#c0392b]"
+                  active ? "border-brand bg-brand text-white"
+                    : danger ? "border-line bg-white text-ink hover:border-[#c0392b] hover:text-[#c0392b]"
                     : "border-line bg-white text-ink hover:border-brand hover:text-brand",
                 )}>
-                {b.label}
+                {BUTTON_LABEL[key] || key}
               </button>
-            ))}
-          </div>
+            );
+          })}
         </div>
+
+        {pending === "willnot" && (
+          <div className="mb-[10px] rounded-md border border-dashed border-line bg-white p-[12px]">
+            <p className="mb-[8px] text-[12.5px] font-semibold text-ink">You're marking this as “Will not apply”</p>
+            <label className={LABEL}>Why? (optional)</label>
+            <div className="flex flex-wrap items-center gap-2">
+              <select className={cn(FIELD_INPUT, "w-auto min-w-[200px]")} value={rejReason} disabled={busy} onChange={(e) => setRejReason(e.target.value)}>
+                <option value="">— select reason —</option>
+                {REJECTION_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
+              <button className={BTN_PRIMARY} onClick={confirmWillNot} disabled={busy}>Confirm</button>
+              <button className={BTN} onClick={() => setPending(null)} disabled={busy}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {pending === "withdraw" && (
+          <div className="mb-[10px] rounded-md border border-dashed border-line bg-white p-[12px]">
+            <p className="mb-[8px] text-[12.5px] font-semibold text-ink">You're withdrawing from this application</p>
+            <label className={LABEL}>Why? (optional)</label>
+            <div className="flex flex-wrap items-center gap-2">
+              <select className={cn(FIELD_INPUT, "w-auto min-w-[200px]")} value={rejReason} disabled={busy} onChange={(e) => setRejReason(e.target.value)}>
+                <option value="withdrew">withdrew</option>
+                {REJECTION_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
+              <button className={BTN_PRIMARY} onClick={confirmWithdraw} disabled={busy}>Confirm</button>
+              <button className={BTN} onClick={() => setPending(null)} disabled={busy}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {pending === "rejected" && (
+          <div className="mb-[10px] rounded-md border border-dashed border-line bg-white p-[12px]">
+            <p className="mb-[8px] text-[12.5px] font-semibold text-ink">Mark as rejected</p>
+            <label className={LABEL}>What happened? (optional)</label>
+            <div className="flex flex-wrap items-center gap-2">
+              <input className={cn(FIELD_INPUT, "min-w-[220px] flex-1")} value={rejectNotes} placeholder="Feedback, stage reached, or “no response after X weeks”…" disabled={busy} onChange={(e) => setRejectNotes(e.target.value)} />
+              <button className={BTN_PRIMARY} onClick={confirmRejected} disabled={busy}>Confirm</button>
+              <button className={BTN} onClick={() => setPending(null)} disabled={busy}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {panelToast && <div className={cn("mb-2 rounded-md px-[9px] py-[6px] text-[12px]", TOAST[panelToast.kind])}>{panelToast.text}</div>}
 
         <div className="mb-[10px] flex flex-wrap items-center gap-2">
           <span className={wcLabel}>Notes</span>
@@ -432,43 +539,16 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
                 {job.outcome && <span className="ml-2 rounded-[5px] bg-[#f3dede] px-2 py-px text-[11px] font-semibold text-[#9a3636]">{job.outcome.replace(/_/g, " ")}</span>}
               </span>
             </div>
-            <div className="mb-[10px] flex flex-wrap items-center gap-2">
-              <span className={wcLabel}>Outcome</span>
-              <select className={cn(FIELD_INPUT, "w-auto min-w-[168px] shrink-0")} value={outcome} disabled={busy} onChange={(e) => setOutcomeSel(e.target.value)}>
-                {OUTCOMES.map((o) => <option key={o} value={o}>{o.replace(/_/g, " ")}</option>)}
-              </select>
-              <input className={cn(FIELD_INPUT, "min-w-[140px] flex-1")} value={outcomeNotes} placeholder="Reason / notes…" disabled={busy} onChange={(e) => setOutcomeNotes(e.target.value)} />
-              <button className={BTN} onClick={recordOutcome} disabled={busy}>Record</button>
-            </div>
           </div>
         )}
 
         {toast && <div className={cn("mt-2 rounded-md px-[9px] py-[6px] text-[12px]", TOAST[toast.kind])}>{toast.text}</div>}
       </div>
 
-      {(eff === "rejected" || showReject) && (
+      {recordedReason && (eff === "will_not_apply" || eff === "rejected") && (
         <div className="mt-[18px] rounded-lg border border-line bg-[#fbfcfe] p-[14px]">
-          <h3 className="mb-[8px] text-[11px] font-bold uppercase tracking-wide text-brand">Rejection reason</h3>
-          {recordedReason && !editingReject ? (
-            <div className="flex flex-wrap items-center gap-2 text-[13px]">
-              <span className="text-ink-soft">Already recorded:</span>
-              <span className="rounded-[5px] bg-[#f3e9e9] px-2 py-px text-[12px] font-semibold text-[#9a5252]">{recordedReason.replace(/_/g, " ")}</span>
-              <button className={BTN} onClick={() => setEditingReject(true)} disabled={busy}>Edit</button>
-            </div>
-          ) : (
-            <>
-              <p className="mb-[8px] text-[12.5px] text-ink-soft">Why didn't you pursue this?</p>
-              <div className="flex flex-wrap items-end gap-2">
-                <select className={cn(FIELD_INPUT, "w-auto min-w-[200px]")} value={rejReason} disabled={busy} onChange={(e) => setRejReason(e.target.value)}>
-                  <option value="">— select reason —</option>
-                  {REJECTION_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-                </select>
-                <button className={BTN_PRIMARY} onClick={recordRejection} disabled={busy}>Record reason</button>
-                {editingReject && <button className={BTN} onClick={() => setEditingReject(false)} disabled={busy}>Cancel</button>}
-              </div>
-            </>
-          )}
-          {rejToast && <div className={cn("mt-2 rounded-md px-[9px] py-[6px] text-[12px]", TOAST[rejToast.kind])}>{rejToast.text}</div>}
+          <h3 className="mb-[8px] text-[11px] font-bold uppercase tracking-wide text-brand">Reason not pursued</h3>
+          <span className="rounded-[5px] bg-[#f3e9e9] px-2 py-px text-[12px] font-semibold text-[#9a5252]">{recordedReason.replace(/_/g, " ")}</span>
         </div>
       )}
 

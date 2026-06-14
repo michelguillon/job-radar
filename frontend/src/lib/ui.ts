@@ -24,6 +24,7 @@ const STATUS_PILL: Record<string, string> = {
   shortlisted: "bg-[#eaf1ff] text-[#2f5fd0]",
   review: "bg-[#eaf1ff] text-[#2f5fd0]",
   rejected: "bg-[#f3e9e9] text-[#9a5252]",
+  will_not_apply: "bg-[#efe9f3] text-[#6b5288]",
   archived: "bg-[#f3e9e9] text-[#9a5252]",
 };
 

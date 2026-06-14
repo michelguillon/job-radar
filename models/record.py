@@ -127,6 +127,8 @@ APPLICATION_STATUS = frozenset(
         "interviewing",
         "offer",
         "rejected",
+        "will_not_apply",  # conscious owner decision not to pursue (vs rejected = they
+        # decided, archived = passive cleanup); SPEC_WORKFLOW_UPDATE §2
         "archived",
     }
 )

@@ -15,7 +15,7 @@ export function StatBar({ stats }: { stats: IndexStats | null }) {
   if (!stats) return null;
   const strong = stats.by_fit_label?.strong_fit ?? 0;
   const active = STATUS_ORDER
-    .filter((k) => !["new", "rejected", "archived"].includes(k))
+    .filter((k) => !["new", "rejected", "will_not_apply", "archived"].includes(k))
     .reduce((n, k) => n + (stats.by_application_status?.[k] ?? 0), 0);
 
   const dist = stats.fit_score_distribution || {};

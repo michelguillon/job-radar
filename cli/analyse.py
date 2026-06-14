@@ -76,7 +76,8 @@ FIT_LABEL_ORDER = [
 ]
 # Funnel order for the pipeline section (mirrors the UI STATUS_ORDER).
 STATUS_ORDER = [
-    "new", "review", "shortlisted", "applied", "interviewing", "offer", "rejected", "archived",
+    "new", "review", "shortlisted", "applied", "interviewing", "offer",
+    "rejected", "will_not_apply", "archived",
 ]
 # "Reviewed" = progressed past the untriaged backlog and not parked as done.
 REVIEWED_STATUSES = APPLICATION_STATUS - {"new", "archived"}

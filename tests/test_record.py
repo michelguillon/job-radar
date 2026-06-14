@@ -13,6 +13,7 @@ import pytest
 from models.record import (
     ACTIVITY_EVENT,
     ANNOTATION_TYPE,
+    APPLICATION_STATUS,
     JDRECORD_SCHEMA_VERSION,
     OUTCOME,
     REJECTION_REASON,
@@ -300,6 +301,16 @@ def test_rejection_reason_vocab_complete():
         "seniority_mismatch", "location_mismatch", "other",
     })
     assert len(REJECTION_REASON) == 10
+
+
+def test_will_not_apply_in_application_status():
+    # SPEC_WORKFLOW_UPDATE §8: a conscious "I decided no" terminal state, distinct from
+    # rejected (they decided) and archived (passive cleanup). Constants only — no schema bump.
+    assert "will_not_apply" in APPLICATION_STATUS
+
+
+def test_will_not_apply_is_a_valid_status_event():
+    assert validate_activity_event(_status_event(value="will_not_apply")) == []
 
 
 @pytest.mark.parametrize(

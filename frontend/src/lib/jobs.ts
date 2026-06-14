@@ -8,13 +8,17 @@ export const FIT_LABELS = [
   "strong_fit", "good_fit", "stretch", "interview_practice", "income_bridge", "blocked_fit",
 ];
 export const STATUS_ORDER = [
-  "new", "review", "shortlisted", "applied", "interviewing", "offer", "rejected", "archived",
+  "new", "review", "shortlisted", "applied", "interviewing", "offer",
+  // terminal — hidden by default (SPEC_WORKFLOW_UPDATE §5)
+  "rejected", "will_not_apply", "archived",
 ];
 // Pipeline lane order: most-progressed/active stages on top, the big untriaged "new"
 // backlog below them, terminal states at the bottom (the funnel STATUS_ORDER reads the
-// other way and is still used by the stats bar + filters).
+// other way and is still used by the stats bar + filters). SPEC_WORKFLOW_UPDATE §6.
 export const PIPELINE_ORDER = [
-  "offer", "interviewing", "applied", "shortlisted", "review", "new", "rejected", "archived",
+  "offer", "interviewing", "applied", "shortlisted", "review", "new",
+  // terminal — hidden by default, shown when filtered in
+  "rejected", "will_not_apply", "archived",
 ];
 export const LABEL_TEXT: Record<string, string> = {
   strong_fit: "strong", good_fit: "good", stretch: "stretch",
@@ -40,17 +44,21 @@ export function emptyFilters(): Filters {
 }
 
 // Terminal/dead lanes hidden from the default dashboard — they're done, not actionable.
-// Tick them in the Status filter to review them (rejected is a state in itself, SPEC §10.10).
-export const TERMINAL_STATUSES = new Set(["rejected", "archived"]);
+// Tick them in the Status filter to review them. Three distinct terminal states that must
+// never be conflated (SPEC_WORKFLOW_UPDATE §2): rejected = they decided, will_not_apply =
+// you decided, archived = passive cleanup.
+export const TERMINAL_STATUSES = new Set(["rejected", "will_not_apply", "archived"]);
 
 // A recorded outcome is the stronger signal of where a role actually is than the status
 // lane (which a CLI --outcome write, or a missed UI step, may not have moved). Derive an
 // effective status so a rejection never shows as "applied" anywhere (SPEC §10.10 item 5).
+// A withdrawal / declined offer is an internal "no" → will_not_apply, not archived
+// (SPEC_WORKFLOW_UPDATE §7).
 export function effectiveStatus(job: Job): string {
   const o = job.outcome;
   if (o) {
     if (o.startsWith("rejected")) return "rejected";
-    if (o === "withdrew" || o === "offer_declined") return "archived";
+    if (o === "withdrew" || o === "offer_declined") return "will_not_apply";
     if (o === "offer_accepted") return "offer";
   }
   return job.application_status;
@@ -161,7 +169,7 @@ export const REJECTION_REASONS: Array<{ label: string; value: string }> = [
 // but the UI moves the lane too so the pipeline reflects reality). null = leave lane as-is.
 export function statusForOutcome(outcome: string): string | null {
   if (outcome.startsWith("rejected")) return "rejected";
-  if (outcome === "withdrew" || outcome === "offer_declined") return "archived";
+  if (outcome === "withdrew" || outcome === "offer_declined") return "will_not_apply";
   if (outcome === "offer_accepted") return "offer";
   return null;
 }

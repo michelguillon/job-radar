@@ -68,6 +68,7 @@ def test_build_event_rejects_bad_value():
         ("new", "applied", True),          # skips stages
         ("interviewing", "shortlisted", True),  # backward
         ("applied", "rejected", False),    # terminal from anywhere
+        ("applied", "will_not_apply", False),  # terminal from anywhere (§2)
         ("new", "archived", False),        # terminal from anywhere
         ("applied", "applied", False),     # no-op
     ],

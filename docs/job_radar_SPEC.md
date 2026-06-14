@@ -212,7 +212,8 @@ class ApplicationRecord:
     location_notes: str
     blocking_constraints: list[str]  # hard stops that likely prevent success
     application_status: str      # "new"|"review"|"shortlisted"|"applied"|
-                                 # "interviewing"|"rejected"|"offer"|"archived"
+                                 # "interviewing"|"offer"|"rejected"|
+                                 # "will_not_apply"|"archived"
     application_date: str | None
     outcome: str | None          # None until terminal state reached
                                  # "rejected_pre_screen"|"rejected_post_screen"|
@@ -1155,6 +1156,31 @@ offer / rejected
 archived
 ```
 
+**Terminal states (9-state vocabulary, SPEC_WORKFLOW_UPDATE).** The active funnel
+above can end in one of three distinct terminal states — these must never be
+conflated:
+
+| Terminal state | Meaning | Initiated by |
+|---|---|---|
+| `rejected` | They said no (any stage) or no response after time | Them (external) |
+| `will_not_apply` | Conscious decision not to pursue | You (internal) |
+| `archived` | Stale, old, never got to a decision | Time / indifference |
+
+```
+… applied / interviewing / offer
+        ↓
+rejected  ·  will_not_apply  ·  archived   (all three hidden by default)
+```
+
+`will_not_apply` (added 2026-06-14, constants-only — no `SCHEMA_VERSION` bump) is
+reached either by the **Will not apply** control or by the **Withdraw** action
+(which also records the `withdrew` outcome). `effectiveStatus()` derives it from a
+`withdrew`/`offer_declined` outcome at read time. The UI offers **contextual
+controls** — only the status moves that make sense from the current state are shown
+(SPEC_WORKFLOW_UPDATE §3); all three terminal states are hidden from Browse and
+Pipeline by default and revealed by ticking them in the Status filter, where a
+`[Restore to new]` control becomes available for `will_not_apply`/`archived`.
+
 ### 7.3 — Outcome tracking (future capability)
 
 The most valuable long-term signal from the tracker is the gap between
@@ -1624,7 +1650,7 @@ POST /api/outcome            {job_id, outcome, notes?}
                              appends outcome event to activity_log.jsonl
                              validated against OUTCOME vocab. The UI also POSTs
                              /api/status to move the lane (rejected_* → "rejected",
-                             withdrew/offer_declined → "archived"); the rejection
+                             withdrew/offer_declined → "will_not_apply"); the rejection
                              stage is auto-derived from current status (applied→
                              post_screen, interviewing→interview, offer→final) but
                              editable. Added post-M2 from use — the OUTCOME model +
@@ -1898,8 +1924,10 @@ CLAUDE.md deviations 32–34.
 2. **Pipeline lanes order active stages above the `new` backlog.** The kanban
    funnel put `new` (the large untriaged bucket) on top, burying live
    opportunities. Pipeline now renders `offer → interviewing → applied →
-   shortlisted → review → new → rejected → archived` (`PIPELINE_ORDER`); the
-   funnel `STATUS_ORDER` used by the stats bar + filters is unchanged.
+   shortlisted → review → new → rejected → will_not_apply → archived`
+   (`PIPELINE_ORDER`, SPEC_WORKFLOW_UPDATE §6 — the three terminal states sit
+   below the active funnel and are hidden by default); the funnel `STATUS_ORDER`
+   used by the stats bar + filters is unchanged.
 
 3. **Write-action buttons are real buttons; the flag form has its own feedback.**
    Save / Override / Submit Flag had been mis-classed and rendered as faint,
@@ -1960,6 +1988,26 @@ CLAUDE.md deviations 32–34.
    `409` by `POST /api/annotations` with a client-side "submit anyway?" warning. Both the
    live override and the live annotations are overlaid by `GET /api/index` so a write shows
    on reload without a re-export.
+
+8. **Workflow status redesign — `will_not_apply` + contextual controls** (2026-06-14,
+   SPEC_WORKFLOW_UPDATE; supersedes the relevant parts of items 4–5 above). Adds a ninth
+   status, `will_not_apply` (a conscious owner "I decided no"), distinct from `rejected`
+   (they decided) and `archived` (passive cleanup) — the three terminal states must never be
+   conflated (§7.2). Constants only: `will_not_apply` added to `APPLICATION_STATUS`, no
+   endpoint and no `SCHEMA_VERSION` change. The detail panel's flat status ladder is replaced
+   by **contextual buttons** — only the moves that make sense from the current effective
+   status are shown (e.g. `applied → [Interviewing] [Rejected] [Withdraw]`; a terminal state →
+   `[Archive]`/`[Restore to new]`). Three terminal actions get tailored reason UX: **Will not
+   apply** pre-expands the `REJECTION_REASON` dropdown (skippable → `POST /api/annotations`);
+   **Withdraw** sets status `will_not_apply` + outcome `withdrew` (dropdown pre-selected
+   `withdrew`); **Rejected** takes free-text feedback carried on the auto-derived rejection
+   stage via `POST /api/outcome`. `effectiveStatus()` now maps `withdrew`/`offer_declined →
+   will_not_apply` (was `archived`); `TERMINAL_STATUSES` and `PIPELINE_ORDER` gain
+   `will_not_apply` (all three terminal states hidden by default, revealed by filter, where
+   `[Restore to new]` is available). Frontend-only `effectiveStatus` logic verified by
+   `tsc -b` + manual browser check (no JS test toolchain — frontend/CLAUDE.md); backend
+   constant/endpoint/transition coverage in `tests/test_record.py` + `test_api.py` +
+   `test_track.py`.
 
 ---
 

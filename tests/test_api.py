@@ -222,6 +222,25 @@ def test_status_invalid_value_422(client, monkeypatch):
     assert r.status_code == 422
 
 
+def test_status_will_not_apply_accepted(client, monkeypatch):
+    # SPEC_WORKFLOW_UPDATE §9: will_not_apply is a status like any other — accepted by the
+    # existing endpoint once it's in APPLICATION_STATUS, no endpoint change needed.
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    r = client.post("/api/status", json={"job_id": "sha256:j1", "status": "will_not_apply"})
+    assert r.status_code == 200
+    events = track.load_events(client.settings.log_path)
+    assert events[-1]["event"] == "status"
+    assert events[-1]["value"] == "will_not_apply"
+
+
+def test_status_invalid_still_rejected(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    r = client.post("/api/status", json={"job_id": "sha256:j1", "status": "invalid"})
+    assert r.status_code == 422
+
+
 # --- annotations ---------------------------------------------------------------
 
 def test_annotation_appends_with_scorer_context(client, monkeypatch):
