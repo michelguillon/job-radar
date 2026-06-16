@@ -511,6 +511,30 @@ Kept in full: everything below — active operational guards Claude Code must kn
     verified by `tsc -b` + manual browser check, not pytest; backend coverage is in
     `tests/test_record.py` + `test_api.py` + `test_track.py`. 517 tests.
 
+52. *(→ `docs/SPEC_ACTIVE_COMPANY_FILTER.md`)* **Active-application company filter.** A
+    Browse/Pipeline sidebar toggle that hides *sibling* roles at any company with an
+    `applied`/`interviewing` role applied within a **14-day** window — kills the
+    multiple-roles-per-company noise (the Writer cluster) without manually declining each.
+    **Frontend-only + one constants change; no backend/endpoint/schema change.** Notable
+    points: (a) Adds `applied_elsewhere_same_company` to `models.record.REJECTION_REASON`
+    (now 12 values) — constants only, no `SCHEMA_VERSION` bump; the existing
+    `POST /api/annotations` rejection_reason path validates it with no code change. (b) Filter
+    logic in `frontend/src/lib/jobs.ts`: `getActiveCompanies` (lowercased company keys with an
+    in-window active role), `activeCompanyHiddenCounts` (sidebar hint), and `applyFilters`
+    derives the active set from the **full** record input (not the post-filter view) so a
+    sibling is hidden regardless of the other filters; the applied/interviewing role itself is
+    **never** hidden. (c) Toggle in `Sidebar.tsx` under a new "Company filters" group —
+    **default on**, persisted in `localStorage` (`jr_hide_active_companies`,
+    `readHideActivePref`/`writeHideActivePref`); count hint renders only when on AND hiding ≥1.
+    (d) `App.tsx` computes `activeCompanies` once (`useMemo`) and threads it to `DetailPanel`,
+    which shows `Applied: YYYY-MM-DD` on the active role and a subtle `Active application at
+    {company}` on siblings, and pre-selects `applied_elsewhere_same_company` in the
+    will-not-apply reason dropdown for siblings (skippable). (e) **No JS test toolchain**
+    (deviation 51(f)): the §9 `getActiveCompanies`/`applyFilters` cases were verified by
+    `tsc -b` + manual browser check, not added as JS tests; the vocab test ships as pytest
+    (`test_applied_elsewhere_in_rejection_reason` in `test_record.py` + `test_api.py`).
+    519 tests.
+
 
 ## Schema summary
 

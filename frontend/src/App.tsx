@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Lock, ShieldCheck } from "lucide-react";
 import type { Job } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { applyFilters, emptyFilters, fmtDate, type Filters, type Sort } from "@/lib/jobs";
+import { applyFilters, emptyFilters, fmtDate, getActiveCompanies, type Filters, type Sort } from "@/lib/jobs";
 import { useIndex } from "@/hooks/useIndex";
 import { UnlockProvider, useUnlock } from "@/components/UnlockProvider";
 import { StatBar } from "@/components/StatBar";
@@ -71,6 +71,9 @@ function Shell() {
 
   const records = data?.records ?? [];
   const filtered = useMemo(() => applyFilters(records, filters), [records, filters]);
+  // Active companies drive the detail-panel context line + the will-not-apply reason
+  // pre-select (SPEC_ACTIVE_COMPANY_FILTER §12, §5) — derived from the full record set.
+  const activeCompanies = useMemo(() => getActiveCompanies(records), [records]);
   const selected = selectedId ? records.find((r) => r.job_id === selectedId) ?? null : null;
 
   function toggleSort(key: keyof Job) {
@@ -120,7 +123,7 @@ function Shell() {
         </section>
       </main>
 
-      {selected && <DetailPanel job={selected} onClose={() => setSelectedId(null)} onChanged={refetch} />}
+      {selected && <DetailPanel job={selected} activeCompanies={activeCompanies} onClose={() => setSelectedId(null)} onChanged={refetch} />}
     </div>
   );
 }

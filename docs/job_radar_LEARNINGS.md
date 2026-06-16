@@ -2482,5 +2482,31 @@ silent.
 
 ---
 
+## Active-application company filter (2026-06-16, deviation 52)
+
+- **A purely client-side filter beats new state when the data is already in the index.**
+  "Hide companies I'm already in play with" needs no field, endpoint, or schema change —
+  `application_status`/`application_date`/`company` are all in the live index overlay, so
+  `getActiveCompanies()` + a clause in `applyFilters()` is the whole feature. The only
+  persistent change is one `REJECTION_REASON` constant (`applied_elsewhere_same_company`),
+  validated by the existing rejection_reason path with zero backend code. Reach for a derived
+  client filter before a new write path when the inputs already exist.
+- **Derive the active-company set from the *unfiltered* records, or siblings leak through.**
+  `applyFilters` computes `getActiveCompanies(records)` from its full input, not the running
+  filtered view — otherwise a status/fit filter could drop the *applied* role from the set and
+  un-hide its siblings. The active role is also explicitly exempted from the hide clause so the
+  application you're tracking is never filtered out of its own pipeline lane.
+- **14-day window with no config knob.** The window (response gap + first-interview lead time)
+  is a hard constant in v1; an `interviewing` event keeps a company active because its
+  `application_date` advances. Configurable window deferred to settings — the constant is the
+  right default and avoids a settings round-trip for a filter that's already opt-out-able.
+- **No JS test toolchain (again): TS filter logic verified by `tsc -b` + browser, vocab by
+  pytest.** Same posture as deviation 51(f) — the spec's `getActiveCompanies`/`applyFilters`
+  unit cases would need vitest the project deliberately doesn't have; the one backend-testable
+  case (`applied_elsewhere_same_company` accepted by `POST /api/annotations`) ships as pytest.
+  Recorded as a BUILD NOTE in the spec so the gap is explicit.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

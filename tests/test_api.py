@@ -296,6 +296,20 @@ def test_rejection_reason_valid(client, monkeypatch):
     assert rec["scorer_label"] == "good_fit"  # captured server-side
 
 
+def test_applied_elsewhere_in_rejection_reason(client, monkeypatch):
+    # SPEC_ACTIVE_COMPANY_FILTER §6: the new vocab value is accepted by the rejection_reason
+    # validation path (used by the will-not-apply sibling-role pre-select).
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    r = client.post("/api/annotations", json={
+        "job_id": "sha256:j1", "annotation_type": "rejection_reason", "field": None,
+        "observed": [], "expected": [], "reason": "applied_elsewhere_same_company",
+    })
+    assert r.status_code == 200
+    rec = track.load_events(client.settings.annotations_path)[0]
+    assert rec["reason"] == "applied_elsewhere_same_company"
+
+
 def test_rejection_reason_invalid_reason(client, monkeypatch):
     monkeypatch.setenv("JR_WRITE_KEY", KEY)
     _unlock(client)

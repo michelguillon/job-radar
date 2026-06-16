@@ -1913,7 +1913,7 @@ leg). `ANTHROPIC_API_KEY` is pipeline-only, not needed to serve.
 Refinements made **after** Phase 6 shipped, driven by using the tool day-to-day.
 All are read-model / UI / thin-endpoint changes — no scorer, schema, or pipeline
 change. Captured here so §10 reflects the actual end state; cross-referenced as
-CLAUDE.md deviations 32–34.
+CLAUDE.md deviations 32–34, 37, 51, 52.
 
 1. **Detail view is a centred modal, not a right rail.** The original 560px
    right-side drawer wasted most of a wide screen. The detail view is now a
@@ -2008,6 +2008,24 @@ CLAUDE.md deviations 32–34.
    `tsc -b` + manual browser check (no JS test toolchain — frontend/CLAUDE.md); backend
    constant/endpoint/transition coverage in `tests/test_record.py` + `test_api.py` +
    `test_track.py`.
+
+9. **Active-application company filter** (2026-06-16, `docs/SPEC_ACTIVE_COMPANY_FILTER.md`,
+   deviation 52). As the corpus grows, companies post multiple roles and the `will_not_apply`
+   pile fills with "I'm already in play here" noise (the Writer cluster). A Browse/Pipeline
+   sidebar toggle — **"Hide companies with active applications"**, default **on**, persisted in
+   `localStorage` (`jr_hide_active_companies`) — hides *sibling* roles at any company with an
+   `applied`/`interviewing` role applied within the last **14 days**; the active role itself is
+   never hidden. Frontend-only + one constants change: adds `applied_elsewhere_same_company` to
+   `REJECTION_REASON` (12 values now, no `SCHEMA_VERSION` bump, no new/changed endpoint — the
+   existing `POST /api/annotations` rejection_reason path validates it). Filter logic lives in
+   `frontend/src/lib/jobs.ts` (`getActiveCompanies` derives the active set from the **full**
+   record input so siblings can't leak past other filters; `activeCompanyHiddenCounts` drives a
+   "N companies, M roles hidden" hint). The detail panel shows `Applied: YYYY-MM-DD` on the
+   active role and a subtle `Active application at {company}` on siblings, and pre-selects
+   `applied_elsewhere_same_company` in the will-not-apply reason dropdown for siblings
+   (skippable). No backend/schema change; TS filter logic verified by `tsc -b` + manual browser
+   check (no JS test toolchain), the vocab value covered by pytest
+   (`test_applied_elsewhere_in_rejection_reason`). Full design: `SPEC_ACTIVE_COMPANY_FILTER.md`.
 
 ---
 

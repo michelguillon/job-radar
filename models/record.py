@@ -212,6 +212,9 @@ REJECTION_REASON = frozenset(
         "requirement_mismatch",  # under-qualified on a hard requirement (technical depth,
         # years of experience, specific skills) — distinct from seniority/level mismatch
         "location_mismatch",
+        "applied_elsewhere_same_company",  # already in play at this company on another role —
+        # noise from monitoring multiple roles per company, not a real rejection
+        # (SPEC_ACTIVE_COMPANY_FILTER §6)
         "other",
     }
 )

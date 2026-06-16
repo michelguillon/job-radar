@@ -2,7 +2,10 @@ import { Download } from "lucide-react";
 import { CV_TAILOR_REPORT_URL, YIELD_REPORT_URL, type Job } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { fitBadgeClass } from "@/lib/ui";
-import { effectiveStatus, FIT_LABELS, LABEL_TEXT, STATUS_ORDER, type Filters } from "@/lib/jobs";
+import {
+  activeCompanyHiddenCounts, effectiveStatus, FIT_LABELS, LABEL_TEXT, STATUS_ORDER,
+  writeHideActivePref, type Filters,
+} from "@/lib/jobs";
 import { AddRoleModal } from "@/components/AddRoleModal";
 
 // Search, fit/priority ranges, location toggle, and frequency-counted checkbox groups for
@@ -71,6 +74,8 @@ export function Sidebar({
   };
   const present = (key: keyof Job) => new Set(records.map((r) => r[key] as unknown as string).filter(Boolean));
 
+  const hidden = activeCompanyHiddenCounts(records);
+
   // Status filter reads the effective (outcome-aware) status.
   const statusPresent = new Set(records.map(effectiveStatus));
   const statusCounts: Record<string, number> = {};
@@ -130,6 +135,25 @@ export function Sidebar({
           renderLabel={(v) => v}
         />
         <p className="mt-[6px] text-[10.5px] leading-[1.35] text-ink-faint">rejected, will not apply &amp; archived are hidden by default — tick to show</p>
+      </div>
+
+      {/* Active-company filter (SPEC_ACTIVE_COMPANY_FILTER §4): hide sibling roles at companies
+          with an in-flight application. Default on; persists in localStorage. */}
+      <div className="mb-4">
+        <label className={FILTER_TITLE}>Company filters</label>
+        <label className="flex cursor-pointer items-start gap-[7px] text-[12.5px] text-ink">
+          <input
+            type="checkbox" className="mt-[2px] accent-brand" checked={filters.hideActiveCompanies}
+            onChange={(e) => { writeHideActivePref(e.target.checked); patch((f) => { f.hideActiveCompanies = e.target.checked; }); }}
+          />
+          <span>Hide companies with active applications</span>
+        </label>
+        {filters.hideActiveCompanies && hidden.roles > 0 && (
+          <p className="mt-[6px] text-[10.5px] leading-[1.35] text-ink-faint">
+            {hidden.companies} {hidden.companies === 1 ? "company" : "companies"},{" "}
+            {hidden.roles} {hidden.roles === 1 ? "role" : "roles"} hidden
+          </p>
+        )}
       </div>
 
       <div className="mb-4">

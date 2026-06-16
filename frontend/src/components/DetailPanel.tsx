@@ -260,7 +260,7 @@ function AnnotationItem({ a }: { a: Annotation }) {
   );
 }
 
-function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<void> }) {
+function WriteControls({ job, companyActive, onChanged }: { job: Job; companyActive: boolean; onChanged: () => Promise<void> }) {
   const { requestUnlock } = useUnlock();
   const [toast, setToast] = useState<Toast>(null);
   const [flagToast, setFlagToast] = useState<Toast>(null);
@@ -395,7 +395,9 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
   const buttons = STATUS_BUTTONS[eff] || STATUS_BUTTONS.new;
   function onButton(key: string) {
     switch (key) {
-      case "will_not_apply": setPending("willnot"); setRejReason(""); setPanelToast(null); break;
+      // Pre-select "applied elsewhere (same company)" when this is a sibling of an active
+      // application — the usual reason you're closing it out (SPEC_ACTIVE_COMPANY_FILTER §5).
+      case "will_not_apply": setPending("willnot"); setRejReason(companyActive ? "applied_elsewhere_same_company" : ""); setPanelToast(null); break;
       case "withdraw": setPending("withdraw"); setRejReason("withdrew"); setPanelToast(null); break;
       case "rejected": setPending("rejected"); setRejectNotes(""); setPanelToast(null); break;
       case "restore": setStatus("new"); break;
@@ -582,9 +584,14 @@ function WriteControls({ job, onChanged }: { job: Job; onChanged: () => Promise<
   );
 }
 
-export function DetailPanel({ job, onClose, onChanged }: { job: Job; onClose: () => void; onChanged: () => Promise<void> }) {
+export function DetailPanel({ job, activeCompanies, onClose, onChanged }: { job: Job; activeCompanies: Set<string>; onClose: () => void; onChanged: () => Promise<void> }) {
   const { configured } = useUnlock();
   const niceToHave = [...(job.nice_to_have_technologies || []), ...(job.nice_to_have_competencies || [])];
+  // Application context (SPEC_ACTIVE_COMPANY_FILTER §12): on the applied role show the date;
+  // on a sibling of an active company show a subtle "active application at X" cue.
+  const eff = effectiveStatus(job);
+  const isActiveRole = eff === "applied" || eff === "interviewing";
+  const companyActive = activeCompanies.has(job.company.toLowerCase().trim());
 
   return (
     <>
@@ -610,10 +617,16 @@ export function DetailPanel({ job, onClose, onChanged }: { job: Job; onClose: ()
             <div><div className="text-[22px] font-extrabold">{job.priority_score}</div><div className="text-[10px] uppercase tracking-wide text-ink-soft">priority</div></div>
             {job.location_workable && <div><div className="text-[22px] font-extrabold">{job.location_workable}</div><div className="text-[10px] uppercase tracking-wide text-ink-soft">location</div></div>}
           </div>
+          {isActiveRole && job.application_date && (
+            <div className="mt-[10px] text-[12.5px] text-ink-soft">Applied: {fmtDate(job.application_date)}</div>
+          )}
+          {!isActiveRole && companyActive && (
+            <div className="mt-[10px] text-[12px] text-ink-faint">Active application at {job.company}</div>
+          )}
         </div>
 
         <div className="mx-auto max-w-[760px] px-6 pb-12 pt-2">
-          {configured && <WriteControls job={job} onChanged={onChanged} />}
+          {configured && <WriteControls job={job} companyActive={companyActive} onChanged={onChanged} />}
           {/* Read-only-deploy fallback (no write key): WriteControls is hidden, but the
               cv-tailor snapshot should still be visible when present (job_radar_SPEC §11.3). */}
           {!configured && <CvTailorSection job={job} onChanged={onChanged} />}

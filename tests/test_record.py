@@ -298,9 +298,16 @@ def test_rejection_reason_vocab_complete():
     assert REJECTION_REASON == frozenset({
         "wrong_level", "wrong_function", "too_salesy", "too_research_heavy",
         "too_delivery_consulting", "domain_not_interesting", "company_not_fit",
-        "seniority_mismatch", "requirement_mismatch", "location_mismatch", "other",
+        "seniority_mismatch", "requirement_mismatch", "location_mismatch",
+        "applied_elsewhere_same_company", "other",
     })
-    assert len(REJECTION_REASON) == 11
+    assert len(REJECTION_REASON) == 12
+
+
+def test_applied_elsewhere_in_rejection_reason():
+    # SPEC_ACTIVE_COMPANY_FILTER §6: sibling roles at a company you're already in play with
+    # aren't real rejections — a dedicated reason keeps them out of the will_not_apply noise.
+    assert "applied_elsewhere_same_company" in REJECTION_REASON
 
 
 def test_will_not_apply_in_application_status():

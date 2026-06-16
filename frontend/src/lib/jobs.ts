@@ -34,12 +34,33 @@ export interface Filters {
   statuses: Set<string>;
   domains: Set<string>;
   roles: Set<string>;
+  hideActiveCompanies: boolean;
+}
+
+// Active-company filter persistence (SPEC_ACTIVE_COMPANY_FILTER §4). Default on — most of
+// the time you want sibling roles at companies you're already in play with gone.
+export const HIDE_ACTIVE_KEY = "jr_hide_active_companies";
+export function readHideActivePref(): boolean {
+  try {
+    const v = localStorage.getItem(HIDE_ACTIVE_KEY);
+    return v === null ? true : v === "true";
+  } catch {
+    return true;
+  }
+}
+export function writeHideActivePref(on: boolean): void {
+  try {
+    localStorage.setItem(HIDE_ACTIVE_KEY, String(on));
+  } catch {
+    /* storage unavailable (private mode) — toggle still works for the session */
+  }
 }
 
 export function emptyFilters(): Filters {
   return {
     search: "", fitMin: 1, fitMax: 10, priMin: 1, priMax: 10, locWorkable: false,
     fitLabels: new Set(), statuses: new Set(), domains: new Set(), roles: new Set(),
+    hideActiveCompanies: readHideActivePref(),
   };
 }
 
@@ -64,7 +85,54 @@ export function effectiveStatus(job: Job): string {
   return job.application_status;
 }
 
+// --- Active-company filter (SPEC_ACTIVE_COMPANY_FILTER) ---------------------------
+// 14-day window: a company counts as "active" while an application there is recent enough to
+// be in play (response window + gap before first interview). After 14 days with no movement
+// the filter releases and sibling roles reappear; an `interviewing` event resets the clock.
+export const ACTIVE_COMPANY_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+
+function companyKey(company: string): string {
+  return company.toLowerCase().trim();
+}
+
+// Set of company keys (lowercased) with an `applied`/`interviewing` role inside the window.
+export function getActiveCompanies(jobs: Job[]): Set<string> {
+  const cutoff = Date.now() - ACTIVE_COMPANY_WINDOW_MS;
+  const active = new Set<string>();
+  for (const job of jobs) {
+    const status = effectiveStatus(job);
+    if (status === "applied" || status === "interviewing") {
+      const appliedAt = job.application_date ? new Date(job.application_date).getTime() : NaN;
+      if (!isNaN(appliedAt) && appliedAt > cutoff) active.add(companyKey(job.company));
+    }
+  }
+  return active;
+}
+
+// True when this role is the active application itself (never hidden) rather than a sibling.
+function isActiveRole(job: Job): boolean {
+  const s = effectiveStatus(job);
+  return s === "applied" || s === "interviewing";
+}
+
+// How many companies / sibling roles the active-company filter would hide — for the sidebar
+// count hint. Counts across the full record set, independent of the other filters.
+export function activeCompanyHiddenCounts(records: Job[]): { companies: number; roles: number } {
+  const active = getActiveCompanies(records);
+  const companies = new Set<string>();
+  let roles = 0;
+  for (const r of records) {
+    if (isActiveRole(r)) continue;
+    const key = companyKey(r.company);
+    if (active.has(key)) { roles++; companies.add(key); }
+  }
+  return { companies: companies.size, roles };
+}
+
 export function applyFilters(records: Job[], f: Filters): Job[] {
+  // Active companies are derived from the FULL input set (not the post-filter view) so a
+  // sibling is hidden regardless of how the other filters are set (SPEC §2/§3).
+  const activeCompanies = f.hideActiveCompanies ? getActiveCompanies(records) : null;
   return records.filter((r) => {
     if (r.fit_score < f.fitMin || r.fit_score > f.fitMax) return false;
     if (r.priority_score < f.priMin || r.priority_score > f.priMax) return false;
@@ -76,6 +144,12 @@ export function applyFilters(records: Job[], f: Filters): Job[] {
     if (f.statuses.size) {
       if (!f.statuses.has(status)) return false;
     } else if (TERMINAL_STATUSES.has(status)) {
+      return false;
+    }
+    // Active-company filter: hide sibling roles at a company with an active application; the
+    // applied/interviewing role itself is always visible.
+    if (activeCompanies && status !== "applied" && status !== "interviewing"
+        && activeCompanies.has(companyKey(r.company))) {
       return false;
     }
     if (f.domains.size && !(r.domain || []).some((d) => f.domains.has(d))) return false;
@@ -163,6 +237,7 @@ export const REJECTION_REASONS: Array<{ label: string; value: string }> = [
   { label: "Seniority mismatch", value: "seniority_mismatch" },
   { label: "Requirement mismatch", value: "requirement_mismatch" },
   { label: "Location mismatch", value: "location_mismatch" },
+  { label: "Applied elsewhere (same company)", value: "applied_elsewhere_same_company" },
   { label: "Other", value: "other" },
 ];
 
