@@ -2796,6 +2796,37 @@ cv-tailor shows a warning and allows retry; Job Radar is not in the critical pat
 
 ---
 
+### Phase 4 — Deep integration — Step 1 ✅ BUILT (2026-06-17)
+
+**Status:** Step 1 (extraction + assessment context on the read endpoint) built.
+The broader Phase 4 redesign remains open — see the integration spec §7. Step 1
+revives a *scoped* slice of the originally-retired "share Job Radar's extraction"
+direction: rather than coupling the two pipelines, it simply exposes Job Radar's
+extraction + assessment as read-only context cv-tailor's Phase-0 bypass *may*
+consume. No pipeline coupling, no auth change.
+
+`GET /api/jobs/{job_id}` (still public, unchanged auth) now returns two nested
+objects alongside the existing fields:
+
+- **`extraction`** — the JDRecord extraction fields (`role_type`, `seniority`,
+  `domain`, `technical_depth`, `delivery_motion`, `required_technologies`,
+  `required_competencies`, `nice_to_have_technologies`,
+  `nice_to_have_competencies`, `remote_policy`, `leadership_geography`). `null`
+  when the role has no JDRecord (a partial manual ingest).
+- **`assessment`** — Job Radar's scorer verdict (`fit_label`, `fit_score`,
+  `priority_score`, `blocking_constraints`, `requirement_gaps`) plus the owner's
+  live workflow state: `fit_override` (`{label, reason}` or `null`),
+  `owner_status`, `annotations` (`[{type, field, reason}]`), and `notes`
+  (`[{ts, text}]`). Individual absent fields are `null`/`[]`, never omitted.
+
+Pure join over data that already exists (deviation 53). The interactive state
+(`fit_override`/`owner_status`/`notes`/`annotations`) is read through the
+auto-detecting loaders (`load_activity_events` + `project`, `load_annotations_auto`)
+— the same source `GET /api/index` overlays — **not** raw SQLite, so it honours
+the JSONL fallback and the SQLite cut-over identically. No schema/scorer change.
+
+---
+
 ### Boundaries (both systems)
 
 Job Radar does not: generate CVs, store full generated CV documents, edit

@@ -10,7 +10,11 @@ Two endpoints:
   Validated against ``validate_cv_tailor_link``; 404s an unknown job_id; 422s a bad score.
 - ``GET /api/jobs/{job_id}`` (public, no auth) — job detail (scored ⨝ JD extraction ⨝
   sidecar) including ``raw_text`` for the Phase 2 cv-tailor handoff. The JD text is already
-  visible in the public detail panel, so this exposes nothing new.
+  visible in the public detail panel, so this exposes nothing new. **Phase 4 Step 1
+  (INTEGRATION_SPEC §7):** it now also returns two nested objects — ``extraction`` (the
+  JDRecord extraction fields cv-tailor's Phase-0 bypass needs) and ``assessment`` (Job
+  Radar's verdict + the owner's live workflow state: fit override, owner status,
+  annotations, notes). Both are pure joins over data that already exists; no auth change.
 """
 
 from __future__ import annotations
@@ -23,13 +27,15 @@ from api.security import WRITE_COOKIE, has_valid_service_token, verify_token
 from api.settings import Settings, get_settings
 from cli import telemetry
 from cli.db import write_cv_tailor_link
-from cli.stats import _location_for
+from cli.stats import _location_for, load_annotations_auto
 from cli.track import (
     _clock,
     append_event,
+    load_activity_events,
     load_jdrecords,
     load_meta,
     load_scores,
+    project,
     _title_for,
 )
 from models.record import CV_TAILOR_LINK_VERSION, validate_cv_tailor_link
@@ -103,16 +109,86 @@ def record_cv_tailor_result(
     return record
 
 
+# The JDRecord extraction fields cv-tailor's Phase-0 bypass consumes (INTEGRATION_SPEC §7,
+# Phase 4 Step 1). A pure projection of JDRecord attributes — no derivation, no scoring.
+_EXTRACTION_VIEW_FIELDS = (
+    "role_type",
+    "seniority",
+    "domain",
+    "technical_depth",
+    "delivery_motion",
+    "required_technologies",
+    "required_competencies",
+    "nice_to_have_technologies",
+    "nice_to_have_competencies",
+    "remote_policy",
+    "leadership_geography",
+)
+
+
+def _extraction_view(jd) -> dict | None:
+    """The ``extraction`` block from a JDRecord, or ``None`` when there is no JDRecord
+    (some manually-ingested roles may have only a partial extraction)."""
+    if jd is None:
+        return None
+    return {field: getattr(jd, field) for field in _EXTRACTION_VIEW_FIELDS}
+
+
+def _assessment_view(score, state: dict | None, events: list[dict], annotations: list[dict],
+                     job_id: str) -> dict:
+    """The ``assessment`` block: Job Radar's scorer verdict + the owner's live workflow state.
+
+    ``score`` is the ApplicationRecord (always present — the caller 404s when not scored).
+    ``state`` is ``project()``'s folded state for this job_id (None when no events exist).
+    The fit override / owner status / notes are read from the SAME projected event log the
+    ``GET /api/index`` overlay uses (deviation 49: API read paths use the auto-detecting
+    loaders, not raw SQLite), and ``annotations`` is the per-job_id annotation view list.
+    """
+    state = state or {}
+    override = state.get("fit_override")
+    fit_override = (
+        {"label": override, "reason": state.get("fit_override_reason")} if override else None
+    )
+    notes = [
+        {"ts": e.get("ts"), "text": e.get("notes")}
+        for e in events
+        if e.get("job_id") == job_id and e.get("event") == "note"
+    ]
+    return {
+        "fit_label": score.fit_label,
+        "fit_score": score.fit_score,
+        "priority_score": score.priority_score,
+        "blocking_constraints": score.blocking_constraints,
+        "requirement_gaps": score.requirement_gaps,
+        "fit_override": fit_override,
+        # owner_status: the live projected status (default "new" once any event exists),
+        # None when the job has no activity-log events at all.
+        "owner_status": state.get("status"),
+        "annotations": [
+            {"type": a.get("annotation_type"), "field": a.get("field"), "reason": a.get("reason")}
+            for a in annotations
+        ],
+        "notes": notes,
+    }
+
+
 @router.get("/jobs/{job_id}")
 def get_job_detail(job_id: str, settings: Settings = Depends(get_settings)) -> dict:
-    """Public job detail for the Phase 2 cv-tailor handoff: scored ⨝ JD extraction ⨝ sidecar,
-    including ``raw_text`` (already public in the UI detail panel). 404 if not scored."""
+    """Public job detail for the cv-tailor handoff: scored ⨝ JD extraction ⨝ sidecar, plus
+    (Phase 4 Step 1) nested ``extraction`` + ``assessment`` blocks. Includes ``raw_text``
+    (already public in the UI detail panel). 404 if not scored."""
     score = load_scores(settings.scored_glob).get(job_id)
     if score is None:
         raise HTTPException(status_code=404, detail=f"job_id not found in scored corpus: {job_id}")
 
     jd = load_jdrecords(settings.validated_glob).get(job_id)
     meta = load_meta(settings.meta_glob).get(jd.source_url) if jd else None
+
+    # Live interactive state via the auto-detecting loaders (SQLite if present, else JSONL) —
+    # same source the GET /api/index overlay reads, so the detail view never goes stale.
+    events = load_activity_events(settings.log_path)
+    state = project(events).get(job_id)
+    annotations = load_annotations_auto(settings.annotations_path).get(job_id, [])
 
     return {
         "job_id": job_id,
@@ -124,4 +200,6 @@ def get_job_detail(job_id: str, settings: Settings = Depends(get_settings)) -> d
         "fit_score": score.fit_score,
         "priority_score": score.priority_score,
         "raw_text": jd.raw_text if jd else "",
+        "extraction": _extraction_view(jd),
+        "assessment": _assessment_view(score, state, events, annotations, job_id),
     }

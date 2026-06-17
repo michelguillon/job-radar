@@ -535,6 +535,36 @@ Kept in full: everything below — active operational guards Claude Code must kn
     (`test_applied_elsewhere_in_rejection_reason` in `test_record.py` + `test_api.py`).
     519 tests.
 
+53. *(→ SPEC §11.3 Phase 4 Step 1 + INTEGRATION_SPEC §7)* **cv-tailor integration Phase 4
+    Step 1 — extraction + assessment context on `GET /api/jobs/{job_id}`.** The existing
+    public read endpoint (`api/routers/cv_tailor.py`) now returns two new nested objects so
+    cv-tailor's Phase-0 bypass *may* consume Job Radar's richer extraction + the human
+    assessment: `extraction` (the 11 JDRecord extraction fields) and `assessment` (scorer
+    verdict + live workflow state — `fit_override`/`owner_status`/`annotations`/`notes`).
+    **Pure join, no new endpoint, no auth change, no schema/scorer change.** Notable points:
+    (a) **Scoped revival of a retired design.** INTEGRATION_SPEC §7 had *retired* the
+    "pass JDRecord extraction to cv-tailor" idea (the two extractions serve different
+    purposes). Step 1 does NOT couple the pipelines — it only *exposes* the data read-only;
+    cv-tailor keeps its own Mistral Phase-0 keyword pass. The broader multi-agent-scoring
+    redesign in §7 is unchanged. (b) **Diverged from the build prompt's raw-SQLite reads.**
+    The prompt sketched direct `get_db().execute("SELECT … FROM activity_log/annotations …")`
+    queries. Rejected: that breaks the Phase 6.5 dual-source contract (would return nothing on
+    a fresh host where the DB doesn't exist yet — deviation 49) **and** errors in tests (no
+    tables until a write runs). Instead it reads the SAME auto-detecting loaders the
+    `GET /api/index` overlay uses — `load_activity_events` + `project` (status/fit_override/
+    notes) and `load_annotations_auto` (annotations). SQLite-when-present, JSONL-fallback,
+    test-hermetic — all for free. (c) **Note text lives in the event's `notes` field, not
+    `value`.** A `note` event is built `value=None, notes=text` (workflow.py); the prompt's
+    `SELECT value … text: r["value"]` would have returned null. The `notes` list is filtered
+    from the event log as `[{ts, text: e["notes"]}]`. (d) `owner_status` is the live projected
+    status (`project()` default `"new"` once any event exists; `None` when the job has zero
+    activity events) — surfaced consistently with the index overlay's `application_status`,
+    not a separate "latest status event else None" query. (e) `extraction` is `null` when no
+    JDRecord exists (partial manual ingest); `assessment` is always present (the endpoint
+    already 404s unscored roles). `leadership_geography` is returned as the model's `list[str]`
+    (the prompt's example showed a scalar — the executable artifact wins). Helpers
+    `_extraction_view`/`_assessment_view` are pure + module-level; 527 tests.
+
 
 ## Schema summary
 

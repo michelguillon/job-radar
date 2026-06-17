@@ -2508,5 +2508,33 @@ silent.
 
 ---
 
+## cv-tailor integration Phase 4 Step 1 — extraction + assessment on the read endpoint (2026-06-17)
+
+- **A "retired" design can come back scoped.** INTEGRATION_SPEC §7 retired "share Job Radar's
+  extraction with cv-tailor" because the two extractions serve different purposes (structural
+  fit vs keyword coverage). Step 1 revives only the *read-only exposure* — `GET /api/jobs/{job_id}`
+  now returns `extraction` + `assessment` — without coupling the pipelines. The retirement was of
+  *pipeline coupling*, not of *making the data available*; surfacing it as optional context
+  cv-tailor may consume costs nothing and keeps both extractions independent.
+- **Read API paths use the auto-detecting loaders, never raw SQLite — even when a build prompt
+  says otherwise.** The prompt sketched `get_db().execute("SELECT … FROM activity_log")`. That
+  would (a) violate the Phase 6.5 dual-source contract (empty on a fresh host with no DB yet —
+  deviation 49) and (b) raise "no such table" in tests, where the per-test DB has no tables until
+  a write runs. Reusing `load_activity_events`+`project` and `load_annotations_auto` (the same
+  source the `/api/index` overlay reads) gives SQLite-when-present, JSONL-fallback, and
+  test-hermetic behaviour for free. When a prompt's data-access sketch contradicts an established
+  read convention, the convention wins — the prompt describes intent, not the integration.
+- **Note text is in the event's `notes` field, not `value`.** `note` events are built
+  `value=None, notes=text`; the prompt's `text: r["value"]` would have returned null. Verified
+  against `workflow.py`'s `add_note` and `project()`'s note fold before writing the join — cheaper
+  than debugging an all-null `notes` array after the fact.
+- **`assessment` is always present, `extraction` can be null.** The endpoint already 404s an
+  unscored role, so the ApplicationRecord (the assessment source) always exists by the time we
+  build the body; only the JDRecord (extraction) can be absent (a partial manual ingest), so only
+  `extraction` needs a null path. Matching the null-handling to what can actually be missing
+  avoided a redundant assessment-null branch the prompt's generic guidance implied.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

@@ -643,6 +643,92 @@ def test_get_job_detail_no_auth_required(client, monkeypatch):
     assert client.get("/api/jobs/sha256:j1").status_code == 200
 
 
+# --- Phase 4 Step 1: extraction + assessment blocks (INTEGRATION_SPEC §7) ------
+
+def test_get_job_detail_includes_extraction(client, tmp_path):
+    from dataclasses import replace
+    full = replace(client.settings, validated_glob=_seed_validated_jd(tmp_path))
+    app.dependency_overrides[get_settings] = lambda: full
+    extraction = client.get("/api/jobs/sha256:j1").json()["extraction"]
+    # base_envelope() seeds these extraction fields.
+    assert extraction["role_type"] == ["Product"]
+    assert extraction["seniority"] == "ic"
+    assert extraction["domain"] == ["SaaS"]
+    assert extraction["technical_depth"] == "hands_on"
+    assert extraction["remote_policy"] == "remote"
+
+
+def test_get_job_detail_includes_assessment(client):
+    assessment = client.get("/api/jobs/sha256:j1").json()["assessment"]
+    assert assessment["fit_label"] == "good_fit"
+    assert assessment["fit_score"] == 7
+    assert assessment["priority_score"] == 7
+    assert assessment["blocking_constraints"] == []
+    assert assessment["requirement_gaps"] == []
+    # No events yet → no override, no annotations/notes, owner_status unset.
+    assert assessment["fit_override"] is None
+    assert assessment["owner_status"] is None
+    assert assessment["annotations"] == []
+    assert assessment["notes"] == []
+
+
+def test_get_job_detail_fit_override_present(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    assert client.post(
+        "/api/fit-override",
+        json={"job_id": "sha256:j1", "fit_label": "strong_fit", "reason": "culture fit"},
+    ).status_code == 200
+    override = client.get("/api/jobs/sha256:j1").json()["assessment"]["fit_override"]
+    assert override == {"label": "strong_fit", "reason": "culture fit"}
+
+
+def test_get_job_detail_fit_override_absent(client):
+    assert client.get("/api/jobs/sha256:j1").json()["assessment"]["fit_override"] is None
+
+
+def test_get_job_detail_owner_status_reflects_latest(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    client.post("/api/status", json={"job_id": "sha256:j1", "status": "shortlisted"})
+    assert client.get("/api/jobs/sha256:j1").json()["assessment"]["owner_status"] == "shortlisted"
+
+
+def test_get_job_detail_annotations_returned(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    assert client.post("/api/annotations", json={
+        "job_id": "sha256:j1", "annotation_type": "technical_depth_incorrect",
+        "field": "technical_depth", "reason": "more strategic than technical",
+    }).status_code == 200
+    annotations = client.get("/api/jobs/sha256:j1").json()["assessment"]["annotations"]
+    assert annotations == [{
+        "type": "technical_depth_incorrect",
+        "field": "technical_depth",
+        "reason": "more strategic than technical",
+    }]
+
+
+def test_get_job_detail_notes_returned(client, monkeypatch):
+    monkeypatch.setenv("JR_WRITE_KEY", KEY)
+    _unlock(client)
+    assert client.post(
+        "/api/note", json={"job_id": "sha256:j1", "text": "consulting background a real gap"}
+    ).status_code == 200
+    notes = client.get("/api/jobs/sha256:j1").json()["assessment"]["notes"]
+    assert len(notes) == 1
+    assert notes[0]["text"] == "consulting background a real gap"
+    assert notes[0]["ts"]  # an ISO timestamp is present
+
+
+def test_get_job_detail_missing_jd_extraction_null(client):
+    # sha256:j1 is scored but has no validated JDRecord (default empty validated_glob) →
+    # extraction is null (not a 500), assessment still present from the score.
+    body = client.get("/api/jobs/sha256:j1").json()
+    assert body["extraction"] is None
+    assert body["assessment"]["fit_label"] == "good_fit"
+
+
 def test_index_overlays_live_cv_tailor(client, monkeypatch):
     monkeypatch.setenv("JR_WRITE_KEY", KEY)
     _unlock(client)

@@ -464,8 +464,32 @@ Radar's critical path and Job Radar is not in cv-tailor's.
 
 ## 7. Phase 4 — Deep integration (to be redesigned based on data)
 
-**Status:** 🔄 Original design retired. To be redesigned once Phase 3 data
-accumulates.
+**Status:** 🔄 Broader redesign still open. **Step 1 ✅ built (2026-06-17,
+Job Radar side).**
+
+**Step 1 — extraction + assessment context on the read endpoint (✅ built).**
+`GET /api/jobs/{job_id}` (public, unchanged auth) now returns two nested objects
+alongside its existing fields:
+- `extraction` — the JDRecord extraction fields (`role_type`, `seniority`,
+  `domain`, `technical_depth`, `delivery_motion`, `required_technologies`,
+  `required_competencies`, `nice_to_have_technologies`,
+  `nice_to_have_competencies`, `remote_policy`, `leadership_geography`); `null`
+  when the role has no JDRecord (partial manual ingest).
+- `assessment` — Job Radar's scorer verdict (`fit_label`, `fit_score`,
+  `priority_score`, `blocking_constraints`, `requirement_gaps`) + the owner's
+  live workflow state: `fit_override` (`{label, reason}`|null), `owner_status`,
+  `annotations` (`[{type, field, reason}]`), `notes` (`[{ts, text}]`).
+
+This is a **scoped revival** of the originally-retired "share Job Radar's
+extraction" idea (below): it does **not** couple the two pipelines — it just
+*exposes* the richer extraction + the human assessment as read-only context that
+cv-tailor's Phase-0 bypass *may* consume, leaving the keyword-coverage question
+to cv-tailor's own Mistral pass. Pure join over existing data; no schema, scorer,
+or auth change (Job Radar CLAUDE.md deviation 53, SPEC §11.3). The broader
+multi-agent-scoring redesign below is unchanged by this.
+
+**Original design (retired narrative, kept for context):** To be redesigned once
+Phase 3 data accumulates.
 
 **Original assumption (retired):** Job Radar's 17-field `JDRecord` extraction
 (Claude Sonnet/Haiku) is richer than cv-tailor's Phase 0 (Mistral mini), so
