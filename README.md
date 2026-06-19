@@ -25,7 +25,7 @@ Radar replaces both with a pipeline that collects, labels, scores, and tracks
 ## Key Features
 
 - **Multi-source collection** — Greenhouse, Lever, Ashby public APIs across
-  81 monitored companies (no auth required) + manual drop folder; incremental
+  109 monitored companies (no auth required) + manual drop folder; incremental
   collection with per-source cursors
 - **Structured extraction** — 17-field schema validated on 10 real JDs before
   any automation ran; extracted via Claude Batch API (50% cost discount);
@@ -68,7 +68,7 @@ report to surface which companies produce the highest-signal roles.
 ## Architecture Diagram
 
 ```text
-Sources (Greenhouse / Lever / Ashby — 81 companies)
+Sources (Greenhouse / Lever / Ashby — 109 companies)
 ↓
 cli/collect.py  (incremental, per-source cursors)
 ↓
@@ -96,9 +96,10 @@ corpus/index.json  (joined read model: score ⨝ JD ⨝ sidecar ⨝ activity log
 ↓
 React UI + FastAPI  (browse / filter / manage / annotate / download reports)
 
-corpus/activity_log.jsonl  ← CLI + API writes (append-only event log)
-corpus/annotations.jsonl   ← scoring flags + rejection reasons
-company_seeds.yaml         ← 81 companies with domain/fit_hypothesis/action
+corpus/job_radar.db        ← SQLite (WAL): interactive state (activity log [append-only],
+                             annotations, cv-tailor links) + company_seeds (109; mutable —
+                             edit in UI, export to YAML). The *.jsonl twins are frozen audit
+                             archives (Phase 6.5).
 ```
 
 ---
@@ -117,8 +118,9 @@ company_seeds.yaml         ← 81 companies with domain/fit_hypothesis/action
 
 Phases 1–6 are complete. Post-Phase 6 backlog also shipped: `cli/analyse.py`
 reporting, rejection reasons, company metadata v2, company yield tracking,
-company universe expanded to 81 verified companies. Phase 7 (fine-tuning) is
-deferred until the corpus justifies it.
+company universe expanded to 109 verified companies, and company-seed management
+moved to SQLite with a browser UI (`cli/seeds.py`, `PATCH /api/companies`). Phase
+7 (fine-tuning) is deferred until the corpus justifies it.
 
 ---
 
