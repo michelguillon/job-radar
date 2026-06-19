@@ -6,11 +6,11 @@
 
 **Project:** 4 — Job Radar
 **Repository:** job-radar (renamed from jd-refinery)
-**Status:** Phases 1–6 complete — 481 tests. **Deployed + operational** at
+**Status:** Phases 1–6 complete — 527 tests. **Deployed + operational** at
 job-radar.michel-portfolio.co.uk (Caddy + Cloudflare, SPEC §10.9). Discovery now runs the
 **81-company universe v2** (§11.1) via a working weekly cron; first real server run: 5,498
 collected → 65 new survivors → **117 scored, $3.18** labelling to date.
-**Last updated:** 2026-06-14
+**Last updated:** 2026-06-19
 **Deployment target:** M720q home server, Ubuntu Server 24.04, Docker + Caddy + Cloudflare
 **Schema version:** 1.3 (ApplicationRecord added Phase 2; annotation constants added Phase 6)
 **Predecessor:** jd-refinery (renamed; Phase 1 complete, 95 tests, commit efb8d41)
