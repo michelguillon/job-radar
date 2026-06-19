@@ -569,6 +569,38 @@ Kept in full: everything below — active operational guards Claude Code must kn
     at run start in production. cv-tailor-side wiring (DoD 2–5) + the coverage-measurement
     gate (DoD 6) remain open — tracked in `docs/SPEC_INTEGRATION_PHASE4.md` §10.
 
+54. *(→ SPEC §11.1 item 10 + `docs/SPEC_BULK_ACTIONS.md`)* **Bulk actions in Browse — multi-action
+    composer.** Checkbox selection + a sticky bottom bar whose four buttons open a **tabbed
+    composer** where the owner stages any *combination* of the four detail-panel writes (fit
+    override / status / scoring flag / note) and applies them all in one pass, fanning out the
+    **existing** per-role endpoints — **frontend-only, no new endpoint, no schema/scorer/backend
+    change.** Notable points: (a) **Pure logic in `frontend/src/lib/bulk.ts`** —
+    `statusSkipReason` (per-action skip), `executeRole` (one write, injectable `BulkApi`),
+    `planComposite`/`executeComposite` (the multi-action plan + `Promise.all` fan-out over every
+    staged action × role), `actionSummary`/`rowOutcomeText`. Extracted so it's testable-shaped, but
+    per the standing **no-JS-test-toolchain** convention (frontend/CLAUDE.md, deviations 51f/52e)
+    it's verified by `tsc -b` + `vite build` + manual browser check, **not** the 8 JS tests the
+    build prompt named (user-approved divergence — bulk actions are frontend-only, so there is
+    nothing for pytest to cover). (b) **A tab is "included" when its toggle is ticked OR any field
+    is edited** (`touch()`), because fit/status have no empty state and must never be applied
+    unintentionally; flag/note also need non-empty required text to be valid. A • marks a staged
+    tab (amber when staged-but-missing-text). (c) **Gated on `write_configured`** — the checkbox
+    column + bar render only when an owner write key exists (no dead affordances on a read-only
+    deploy, SPEC §10.5); apply still goes through `requestUnlock()`. (d) **Skip logic is per
+    (role, action), status-only** (fit/flag/note never skip): `will_not_apply`/`archived` skip an
+    applied/interviewing/offer role ("won't archive active application"), skip an already-at-target
+    role, and skip a more-advanced role; computed client-side, so the confirm screen shows a
+    per-action ✓/⚠ chip and "Apply N" counts only the non-skipped (role, action) ops. (e) **Two
+    distinct 409 meanings:** a 409 on a primary **flag** annotation = the op is **skipped** (the
+    flag already exists); a 409 on the **secondary** `rejection_reason` that rides a
+    `will_not_apply` status move is **swallowed** (the status write already succeeded → counts as
+    **updated**). (f) The status dropdown posts the **real enum values**
+    (`review`/`shortlisted`/`will_not_apply`/`archived`) under friendly labels. (g) Selection is
+    **session-only** (a `Set<string>` in `App.tsx`), **Browse-only** (the bar hides on the Pipeline
+    tab), and **cleared on any filter change** with a toast (the wrapped `setFilters` clears it;
+    search keystrokes count as filter changes by design). No `SCHEMA_VERSION` bump. Convention:
+    `frontend/CLAUDE.md`.
+
 
 ## Schema summary
 

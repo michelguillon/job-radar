@@ -25,6 +25,14 @@ export const LABEL_TEXT: Record<string, string> = {
   interview_practice: "practice", income_bridge: "bridge", blocked_fit: "blocked",
 };
 
+// Scoring-flag annotation types (mirror the ANNOTATION_TYPE constants the API validates). Shared
+// by the detail panel and the bulk "flag scoring issue" form. rejection_reason is excluded — it
+// has its own structured flow (the will-not-apply reason dropdown), not the free-form flag form.
+export const ANNOTATION_TYPES = [
+  "role_type_incorrect", "domain_incorrect", "seniority_incorrect", "technical_depth_incorrect",
+  "fit_score_disagree", "should_be_blocked", "false_block", "extraction_other",
+];
+
 export interface Filters {
   search: string;
   fitMin: number; fitMax: number;

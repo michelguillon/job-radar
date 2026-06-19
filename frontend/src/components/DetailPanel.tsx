@@ -3,8 +3,8 @@ import { api, ApiError, type Annotation, type Job } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { CHIP, fitBadgeClass, statusPillClass, TOAST } from "@/lib/ui";
 import {
-  daysSince, effectiveStatus, FIT_LABELS, fmtDate, isStaleApplied, LABEL_TEXT, listText,
-  REJECTION_REASONS, rejectionStageFor, statusForOutcome,
+  ANNOTATION_TYPES, daysSince, effectiveStatus, FIT_LABELS, fmtDate, isStaleApplied, LABEL_TEXT,
+  listText, REJECTION_REASONS, rejectionStageFor, statusForOutcome,
 } from "@/lib/jobs";
 import { useUnlock } from "@/components/UnlockProvider";
 
@@ -13,11 +13,6 @@ import { useUnlock } from "@/components/UnlockProvider";
 // write opens the unlock dialog via requestUnlock(). All Tailwind, no global classes.
 
 type Toast = { kind: "ok" | "warn" | "err"; text: string } | null;
-
-const ANNOTATION_TYPES = [
-  "role_type_incorrect", "domain_incorrect", "seniority_incorrect", "technical_depth_incorrect",
-  "fit_score_disagree", "should_be_blocked", "false_block", "extraction_other",
-];
 
 // Contextual status controls (SPEC_WORKFLOW_UPDATE §3): only the moves that make sense from
 // the current effective status are offered. Keyed by effective status → ordered button keys.

@@ -2554,5 +2554,50 @@ silent.
 
 ---
 
+## Bulk actions in Browse — frontend-only, convention over prompt (2026-06-19)
+
+- **A build prompt asking for tests doesn't override a standing no-test convention — surface it,
+  don't silently pick.** The prompt named 8 frontend logic tests in its DoD, but the repo has a
+  firmly-established "no JS test toolchain" rule (frontend/CLAUDE.md, deviations 51f/52e) and bulk
+  actions are frontend-only, so there's nothing for pytest to cover. Rather than quietly skip the
+  tests *or* unilaterally introduce vitest (reversing a convention), asked the owner; they chose
+  the convention. The resolution still honors the prompt's *intent*: the logic that the 8 tests
+  would target (`statusSkipReason`, `planBulk`, `executeRole`/`executeBulk`) was extracted into
+  pure functions in `lib/bulk.ts` with an **injectable** `BulkApi`, so it's testable-shaped and
+  could grow JS tests later without rework — verified now by `tsc -b` + `vite build` + browser.
+- **Gate the whole feature on `write_configured`, not just the apply button.** The prompt said
+  "checkboxes always visible," but rendering selection UI on a read-only deploy (no owner key)
+  would be a dead affordance — the same anti-pattern §10.5 and the detail panel already avoid by
+  hiding `WriteControls` when `!configured`. Threading a `selectable` prop into `BrowseView` (so
+  the checkbox column simply isn't rendered) kept it consistent with the rest of the UI.
+- **Two 409s on the `will_not_apply` path mean opposite things.** A 409 on a *primary* flag
+  annotation means the flag already exists → the role is **skipped** (benign, not a failure). But
+  the *secondary* `rejection_reason` annotation that rides a `will_not_apply` status move can also
+  409 — and there the status write already succeeded, so swallowing it and counting the role as
+  **updated** is correct (treating it as a skip would under-report a real status change). Encoding
+  both in `executeRole` up front avoided a confusing "1 skipped" that was actually a success.
+- **Clearing selection inside a `setState` updater is a side-effect trap.** The first cut called
+  `pushToast` from inside `setSelectedIds(prev => …)`, which fires a setter during another
+  component's update. Reading the current `selectedIds` from the render closure in the wrapped
+  `setFilters` (recreated each render, so never stale for a single filter change) is both simpler
+  and pure — state updaters stay free of side effects.
+- **Docker typecheck leaves an empty `node_modules` mountpoint even with an anonymous volume.**
+  `-v /app/node_modules` shadows the real install (good — host stays clean of deps), but Docker
+  still materializes an empty `node_modules/` dir and npm writes `package-lock.json` into the bind
+  mount. Both must be `rm`'d after, or they poison the compose build (frontend-typecheck-in-docker
+  memory). `git status` is the cheap final check that only the intended files changed.
+- **The single-action flow became a multi-action composer after the owner used it.** The first
+  build (per the prompt) was one-action-at-a-time: pick fit *or* status *or* flag *or* note, apply,
+  re-select, repeat. Reviewing a roster usually wants several changes at once, so the owner asked
+  to stage them together. The clean refactor kept the single-write primitive (`executeRole`,
+  injectable api) and added a thin composite layer on top (`planComposite`/`executeComposite`) +
+  a tabbed UI — the per-role/per-action skip model and the two-409 semantics carried over
+  unchanged. **Lesson: build the per-item primitive first; batching/composition is a layer above
+  it, not a rewrite.** The "include a tab when its toggle is ticked *or* a field is edited" rule
+  was the one genuinely new decision — needed because fit/status have no empty state to infer
+  intent from (unlike flag/note, where empty required text already means "not staged").
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

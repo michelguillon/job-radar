@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { Job } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { fitBadgeClass, statusPillClass } from "@/lib/ui";
@@ -26,21 +27,51 @@ function Badge({ label }: { label: string }) {
   );
 }
 
+// Header "select all filtered" checkbox — indeterminate when some-but-not-all rows are selected
+// (a DOM property, not an attribute, so it's set imperatively via a ref). SPEC_BULK_ACTIONS §1.
+function SelectAllCheckbox({ checked, indeterminate, onChange }: { checked: boolean; indeterminate: boolean; onChange: (checked: boolean) => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (ref.current) ref.current.indeterminate = indeterminate; }, [indeterminate]);
+  return (
+    <input
+      ref={ref} type="checkbox" className="accent-brand align-middle" checked={checked}
+      aria-label="Select all filtered roles" title="Select all filtered roles"
+      onChange={(e) => onChange(e.target.checked)}
+    />
+  );
+}
+
 export function BrowseView({
-  rows, sort, onSort, onOpen,
+  rows, sort, onSort, onOpen, selectable, selectedIds, onToggle, onSelectAll,
 }: {
   rows: Job[];
   sort: Sort;
   onSort: (key: keyof Job) => void;
   onOpen: (job: Job) => void;
+  selectable: boolean; // checkbox column only when writes are configured (no dead affordances)
+  selectedIds: Set<string>;
+  onToggle: (jobId: string) => void;
+  onSelectAll: (jobIds: string[], checked: boolean) => void;
 }) {
   const sorted = sortRows(rows, sort);
+  const visibleIds = sorted.map((r) => r.job_id);
+  const selectedVisible = visibleIds.filter((id) => selectedIds.has(id)).length;
+  const allSelected = visibleIds.length > 0 && selectedVisible === visibleIds.length;
+  const someSelected = selectedVisible > 0 && !allSelected;
   return (
     <div>
       <Table>
-        <colgroup>{COLUMNS.map((c) => <col key={c.label} style={{ width: c.width }} />)}</colgroup>
+        <colgroup>
+          {selectable && <col style={{ width: "34px" }} />}
+          {COLUMNS.map((c) => <col key={c.label} style={{ width: c.width }} />)}
+        </colgroup>
         <TableHeader>
           <TableRow className="border-b-line">
+            {selectable && (
+              <TableHead className="text-center">
+                <SelectAllCheckbox checked={allSelected} indeterminate={someSelected} onChange={(c) => onSelectAll(visibleIds, c)} />
+              </TableHead>
+            )}
             {COLUMNS.map((c) => {
               const on = !!c.sort && c.sort === sort.key;
               return (
@@ -59,12 +90,22 @@ export function BrowseView({
         <TableBody>
           {sorted.map((r) => {
             const blocked = r.fit_label === "blocked_fit";
+            const selected = selectedIds.has(r.job_id);
             return (
               <TableRow
                 key={r.job_id}
-                onClick={(e) => { if ((e.target as HTMLElement).tagName !== "A") onOpen(r); }}
-                className={cn("cursor-pointer hover:bg-rowhover", blocked && "text-ink-faint")}
+                onClick={(e) => { const t = (e.target as HTMLElement).tagName; if (t !== "A" && t !== "INPUT") onOpen(r); }}
+                className={cn("cursor-pointer hover:bg-rowhover", blocked && "text-ink-faint", selected && "bg-[#eef4ff] hover:bg-[#e4eeff]")}
               >
+                {selectable && (
+                  <TableCell className="text-center">
+                    <input
+                      type="checkbox" className="accent-brand align-middle" checked={selected}
+                      aria-label={`Select ${r.company} ${r.title}`}
+                      onChange={() => onToggle(r.job_id)}
+                    />
+                  </TableCell>
+                )}
                 <TableCell className={cn("font-semibold", blocked && "font-medium")}>{r.company}</TableCell>
                 <TableCell className="whitespace-normal break-words">
                   <span className={cn(blocked && "line-through decoration-ink-faint")}>{r.title}</span>

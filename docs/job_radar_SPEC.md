@@ -2027,6 +2027,32 @@ CLAUDE.md deviations 32–34, 37, 51, 52.
    check (no JS test toolchain), the vocab value covered by pytest
    (`test_applied_elsewhere_in_rejection_reason`). Full design: `SPEC_ACTIVE_COMPANY_FILTER.md`.
 
+10. **Bulk actions in Browse** ✅ built (2026-06-19, `docs/SPEC_BULK_ACTIONS.md`, deviation 54).
+    Reviewing a company's full roster surfaces patterns (a domain that's never a fit, a level
+    uniformly above profile) that previously needed one-by-one detail-panel edits. Browse rows
+    gain a checkbox column + a "Select all filtered" header box; selecting ≥1 role raises a sticky
+    bottom **bulk action bar**. Its four buttons each open a **tabbed multi-action composer**
+    (Override fit / Set status / Flag issue / Add note) where the owner stages any *combination*
+    of the four detail-panel writes — **override fit**, **set status** (restricted to
+    `review`/`shortlisted`/`will_not_apply`/`archived`; the active milestones
+    applied/interviewing/offer are never batch decisions), **flag scoring issue**, **add note**.
+    A tab is *included* when its toggle is ticked or any field edited (fit/status have no empty
+    state, so they're never applied unintentionally). One **Preview →** shows a confirmation
+    listing every role with a per-action ✓/⚠ chip; one **Apply** fans out every staged action ×
+    role over the SAME per-role endpoints (`POST /api/fit-override`/`/status`/`/annotations`/
+    `/note`) with `Promise.all()`. **Frontend-only — no new endpoint, no schema/scorer/backend
+    change.** Skip logic is **per (role, action)**, status-only (fit/flag/note never skip):
+    `will_not_apply`/`archived` skip an `applied`/`interviewing`/`offer` role, skip an
+    already-at-target role, and skip a more-advanced role — so a role can take the fit override
+    while its status change is skipped. A `will_not_apply` + rejection reason also posts a
+    `rejection_reason` annotation per role; a 409 on a primary flag counts as **skipped, not
+    failed**, while a 409 on the secondary rejection_reason is swallowed (the status write already
+    succeeded). Filter change clears the (session-only) selection with a toast. Gated on
+    `write_configured` (no checkboxes on a read-only deploy — SPEC §10.5). Logic extracted to pure
+    functions in `frontend/src/lib/bulk.ts` (`planComposite` + injectable-api `executeComposite`),
+    verified by `tsc -b` + `vite build` + manual browser check (no JS test toolchain —
+    frontend/CLAUDE.md). Full design: `SPEC_BULK_ACTIONS.md`.
+
 ---
 
 ### 10.11 — Workflow enhancements ✅ built (see §10.10 item 7 + deviation 37)

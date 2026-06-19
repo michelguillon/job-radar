@@ -1,17 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Lock, ShieldCheck } from "lucide-react";
 import type { Job } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { applyFilters, emptyFilters, fmtDate, getActiveCompanies, type Filters, type Sort } from "@/lib/jobs";
+import { TOAST } from "@/lib/ui";
 import { useIndex } from "@/hooks/useIndex";
 import { UnlockProvider, useUnlock } from "@/components/UnlockProvider";
 import { StatBar } from "@/components/StatBar";
 import { Sidebar } from "@/components/Sidebar";
 import { BrowseView } from "@/components/BrowseView";
+import { BulkActionBar } from "@/components/BulkActionBar";
 import { PipelineView } from "@/components/PipelineView";
 import { DetailPanel } from "@/components/DetailPanel";
 
 type View = "browse" | "pipeline";
+type AppToast = { kind: "ok" | "warn" | "err"; text: string } | null;
 
 function OwnerIndicator() {
   const { configured, unlocked, requestUnlock, lock } = useUnlock();
@@ -48,10 +51,48 @@ function Tab({ active, onClick, children }: { active: boolean; onClick: () => vo
 
 function Shell() {
   const { data, error, loading, refetch } = useIndex();
+  const { configured } = useUnlock();
   const [view, setView] = useState<View>(location.hash === "#pipeline" ? "pipeline" : "browse");
-  const [filters, setFilters] = useState<Filters>(emptyFilters);
+  const [filters, setFiltersRaw] = useState<Filters>(emptyFilters);
   const [sort, setSort] = useState<Sort>({ key: "priority_score", dir: "desc" });
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Bulk selection (SPEC_BULK_ACTIONS) — session-only, Browse-only, owner-gated.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [toast, setToast] = useState<AppToast>(null);
+  const toastTimer = useRef<number | null>(null);
+
+  function pushToast(kind: "ok" | "warn" | "err", text: string) {
+    setToast({ kind, text });
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 4000);
+  }
+
+  // Changing any filter invalidates the current selection (a hidden role can't be acted on).
+  function setFilters(next: Filters) {
+    setFiltersRaw(next);
+    if (selectedIds.size) {
+      setSelectedIds(new Set());
+      pushToast("warn", "Selection cleared — filters changed");
+    }
+  }
+  function toggleSelect(jobId: string) {
+    setSelectedIds((prev) => {
+      const n = new Set(prev);
+      if (n.has(jobId)) n.delete(jobId); else n.add(jobId);
+      return n;
+    });
+  }
+  function selectAll(jobIds: string[], checked: boolean) {
+    setSelectedIds((prev) => {
+      const n = new Set(prev);
+      for (const id of jobIds) { if (checked) n.add(id); else n.delete(id); }
+      return n;
+    });
+  }
+  async function onBulkComplete() {
+    await refetch();
+    setSelectedIds(new Set());
+  }
 
   useEffect(() => {
     const onHash = () => setView(location.hash === "#pipeline" ? "pipeline" : "browse");
@@ -75,6 +116,8 @@ function Shell() {
   // pre-select (SPEC_ACTIVE_COMPANY_FILTER §12, §5) — derived from the full record set.
   const activeCompanies = useMemo(() => getActiveCompanies(records), [records]);
   const selected = selectedId ? records.find((r) => r.job_id === selectedId) ?? null : null;
+  const selectedJobs = useMemo(() => records.filter((r) => selectedIds.has(r.job_id)), [records, selectedIds]);
+  const showBulk = configured && view === "browse" && selectedJobs.length > 0;
 
   function toggleSort(key: keyof Job) {
     setSort((s) =>
@@ -116,14 +159,25 @@ function Shell() {
 
       <main className="flex min-h-0 flex-1">
         <Sidebar records={records} filters={filters} setFilters={setFilters} onReset={() => setFilters(emptyFilters())} onAdded={refetch} onOpenRole={setSelectedId} />
-        <section className="flex-1 overflow-auto px-[18px] pb-10 pt-[14px]">
+        <section className={cn("flex-1 overflow-auto px-[18px] pt-[14px]", showBulk ? "pb-28" : "pb-10")}>
           {view === "browse"
-            ? <BrowseView rows={filtered} sort={sort} onSort={toggleSort} onOpen={(j) => setSelectedId(j.job_id)} />
+            ? <BrowseView rows={filtered} sort={sort} onSort={toggleSort} onOpen={(j) => setSelectedId(j.job_id)}
+                selectable={configured} selectedIds={selectedIds} onToggle={toggleSelect} onSelectAll={selectAll} />
             : <PipelineView rows={filtered} onOpen={(j) => setSelectedId(j.job_id)} />}
         </section>
       </main>
 
       {selected && <DetailPanel job={selected} activeCompanies={activeCompanies} onClose={() => setSelectedId(null)} onChanged={refetch} />}
+
+      {showBulk && (
+        <BulkActionBar selectedJobs={selectedJobs} onDeselectAll={() => setSelectedIds(new Set())} onComplete={onBulkComplete} pushToast={pushToast} />
+      )}
+
+      {toast && (
+        <div className={cn("fixed bottom-4 right-4 z-[60] rounded-md px-[14px] py-[10px] text-[13px] shadow-lg", TOAST[toast.kind])}>
+          {toast.text}
+        </div>
+      )}
     </div>
   );
 }
