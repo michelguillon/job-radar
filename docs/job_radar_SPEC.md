@@ -2323,6 +2323,43 @@ rows that fall under domain `(unknown)` are one-off **manual/calibration** recor
 Chase, AI Consultancy, Fin (Intercom), Outreach, Zendesk) that were never part of the
 monitored ATS universe — correct, not an error.
 
+### Company seeds → SQLite + management UI ✅ built 2026-06-19
+
+Full spec: `docs/SPEC_COMPANY_SEEDS_DB.md` (deviation 55). The company universe moved from
+`company_seeds.yaml` to a new **mutable** `company_seeds` SQLite table (`corpus/job_radar.db`)
+so it is editable from the browser, queryable alongside the rest of interactive state, and no
+longer requires an SSH + vim edit. **This is the one mutable table in the otherwise append-only
+store** — company metadata (`fit_hypothesis`/`action`/`notes`) is reference data, not an event
+log, so it allows UPDATE and introduces the API's first non-POST write (`PATCH
+/api/companies/{name}`). No `SCHEMA_VERSION` bump (the record schema is untouched; a new table
+is additive). Pieces:
+
+- **`cli/db.py`** gains the `company_seeds` table (+ `ats`/`action` indexes) and CRUD helpers
+  (`import_company_seed` = `INSERT OR IGNORE`, `insert_company_seed` = plain INSERT for the API
+  409 path, `update_company_seed`, `delete_company_seed`, `get_company_seed`, `list_company_seeds`).
+- **`cli/seeds.py`** — `python -m cli.seeds {import|export} [path]`. Import is idempotent (a
+  re-import never clobbers a DB edit). `dump_seeds_yaml` (header comment + bare list) is shared
+  by the CLI export **and** `GET /api/companies/export`, so the YAML format never drifts. One-shot
+  migration ran 2026-06-19: 109 YAML entries → 109 rows.
+- **`cli/collect.py`** reads SQLite via `load_company_seeds(db=None)` (excludes
+  `action='remove'`; `pause` still collects — advisory as before), **falling back to
+  `company_seeds.yaml` when the table is empty** (fresh install before migration, logged).
+- **`api/routers/companies.py`** — `GET` (list, public) + `POST` (409 dup) + `PATCH` (404) +
+  `DELETE` (404, or **409 if the company has validated-corpus records**, checked via
+  `load_jdrecords` exact-name match — use `action: remove` to keep history instead) + `GET
+  /export` + `POST /probe-ats`. Reads public; writes owner-gated per-route. `api/ats_probe.py`
+  ports `find_ats_slugs.py`'s slug generation + Greenhouse/Ashby/Lever probes (10s budget, never
+  raises), aligned with the live collector URLs. Every write emits `index_updated` (SSE).
+- **Frontend `Companies` tab** (`CompaniesView` + `AddCompanyModal`) — owner-only (hidden unless
+  `write_configured`): sortable/searchable table, inline-edit cells (ATS/domain/fit/action/notes),
+  row actions (edit/pause/remove/delete with corpus-records guard), Add-company with "Find ATS"
+  auto-discovery, and an Export-YAML download. Verified by `tsc -b` + manual browser check (no JS
+  test toolchain).
+
+**Out of scope (deferred):** the **yield report still reads `company_seeds.yaml`**
+(`cli.analyse`/`load_companies` unchanged) — regenerate the YAML via export when yield input must
+reflect DB edits.
+
 ### Rejection reasons ✅ built
 
 A new use of the existing annotations system — no new endpoint, no new file, no schema bump.

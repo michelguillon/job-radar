@@ -9,6 +9,8 @@ const BASE = "/api";
 // streams the text/plain attachment straight to disk — no fetch/JSON round-trip needed.
 export const YIELD_REPORT_URL = `${BASE}/report/yield`;
 export const CV_TAILOR_REPORT_URL = `${BASE}/report/cv_tailor`;
+// Company universe YAML export (owner-gated; SPEC_COMPANY_SEEDS_DB §4.1).
+export const COMPANIES_EXPORT_URL = `${BASE}/companies/export`;
 
 // Raised when an HTTP call fails; carries the status so callers can branch (401/403/404).
 export class ApiError extends Error {
@@ -46,6 +48,22 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   });
   if (!res.ok) throw await errorFrom(res);
   return res.json() as Promise<T>;
+}
+
+async function patch<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await errorFrom(res);
+  return res.json() as Promise<T>;
+}
+
+async function del(path: string): Promise<void> {
+  const res = await fetch(`${BASE}${path}`, { method: "DELETE", credentials: "include" });
+  if (!res.ok) throw await errorFrom(res);
 }
 
 // One scoring flag embedded per job (job_radar_SPEC §10.11 Feature 2). observed/expected are
@@ -208,6 +226,38 @@ export interface ManualIngestResult {
   warnings: string[]; // advisory soft-validation findings (e.g. off-vocabulary role_type); [] when clean
 }
 
+// One company-universe row (SPEC_COMPANY_SEEDS_DB). The company_seeds table is mutable
+// reference data — edited via PATCH (deviation 55), unlike every other append-only sink.
+export interface Company {
+  name: string;
+  ats: string;
+  slug: string | null;
+  domain: string | null;
+  fit_hypothesis: string | null;
+  action: string;
+  notes: string;
+  updated_at?: string;
+}
+
+export interface CompanyCreatePayload {
+  name: string;
+  ats: string;
+  slug?: string | null;
+  domain?: string | null;
+  fit_hypothesis?: string | null;
+  action?: string | null;
+  notes?: string | null;
+}
+
+// Any subset of the mutable columns (name is immutable — the corpus join key).
+export type CompanyPatchPayload = Partial<Omit<CompanyCreatePayload, "name">>;
+
+export interface ProbeResult {
+  found: boolean;
+  ats?: string;
+  slug?: string;
+}
+
 export const api = {
   index: () => get<IndexResponse>("/index"),
   capabilities: () => get<Capabilities>("/capabilities"),
@@ -232,4 +282,12 @@ export const api = {
     post<{ job_id: string; cv_tailor_run_id: string }>("/cv-tailor-results", payload),
   // Paste-and-score a JD from outside the monitored universe (owner-gated, §11.1).
   manualIngest: (payload: ManualIngestPayload) => post<ManualIngestResult>("/manual-ingest", payload),
+
+  // Company universe management (SPEC_COMPANY_SEEDS_DB §4). List is public; writes owner-gated.
+  companies: () => get<Company[]>("/companies"),
+  createCompany: (payload: CompanyCreatePayload) => post<Company>("/companies", payload),
+  patchCompany: (name: string, payload: CompanyPatchPayload) =>
+    patch<Company>(`/companies/${encodeURIComponent(name)}`, payload),
+  deleteCompany: (name: string) => del(`/companies/${encodeURIComponent(name)}`),
+  probeAts: (name: string) => post<ProbeResult>("/companies/probe-ats", { name }),
 };

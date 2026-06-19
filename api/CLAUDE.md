@@ -90,10 +90,17 @@ owner-only? If the spec does not explicitly state "public", the endpoint
 is owner-only by default. If the spec says "public", add a comment:
 `# public — no auth required (see SPEC §X.X)`
 
-There are currently no PUT or PATCH endpoints in this API. The data model
-is append-only — writes always append new records, never mutate existing
-ones. If a PUT or PATCH is ever proposed, push back: can it be modelled
-as an append event instead?
+The data model is append-only for the three **event** sinks (activity_log /
+annotations / cv_tailor_links) — writes append, never mutate. There is **one**
+PATCH endpoint: `PATCH /api/companies/{name}` (`routers/companies.py`, deviation
+55). It is the deliberate exception, not a precedent: the `company_seeds` table
+is mutable *reference data* (fit_hypothesis/action/notes change as evidence
+accumulates), not an event log, so UPDATE-in-place is correct there. For
+anything that is an event/observation, still push back on PUT/PATCH: can it be
+modelled as an append instead? The PATCH carries `Depends(require_unlocked)`
+per-route like every other write. In `routers/companies.py`, `GET /api/companies`
+(list) is the lone public read; **everything else is owner-gated**, including
+`GET /api/companies/export` (it downloads the whole universe).
 
 ## Read-only report downloads
 

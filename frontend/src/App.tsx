@@ -12,9 +12,16 @@ import { BrowseView } from "@/components/BrowseView";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { PipelineView } from "@/components/PipelineView";
 import { DetailPanel } from "@/components/DetailPanel";
+import { CompaniesView } from "@/components/CompaniesView";
 
-type View = "browse" | "pipeline";
+type View = "browse" | "pipeline" | "companies";
 type AppToast = { kind: "ok" | "warn" | "err"; text: string } | null;
+
+function viewFromHash(): View {
+  if (location.hash === "#pipeline") return "pipeline";
+  if (location.hash === "#companies") return "companies";
+  return "browse";
+}
 
 function OwnerIndicator() {
   const { configured, unlocked, requestUnlock, lock } = useUnlock();
@@ -52,7 +59,7 @@ function Tab({ active, onClick, children }: { active: boolean; onClick: () => vo
 function Shell() {
   const { data, error, loading, refetch } = useIndex();
   const { configured } = useUnlock();
-  const [view, setView] = useState<View>(location.hash === "#pipeline" ? "pipeline" : "browse");
+  const [view, setView] = useState<View>(viewFromHash);
   const [filters, setFiltersRaw] = useState<Filters>(emptyFilters);
   const [sort, setSort] = useState<Sort>({ key: "priority_score", dir: "desc" });
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -95,7 +102,7 @@ function Shell() {
   }
 
   useEffect(() => {
-    const onHash = () => setView(location.hash === "#pipeline" ? "pipeline" : "browse");
+    const onHash = () => setView(viewFromHash());
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -152,20 +159,30 @@ function Shell() {
       <div className="flex items-center gap-1 border-b border-line bg-panel px-[18px]">
         <Tab active={view === "browse"} onClick={() => go("browse")}>Browse</Tab>
         <Tab active={view === "pipeline"} onClick={() => go("pipeline")}>Pipeline</Tab>
-        <span className="ml-auto text-[12px] text-ink-faint">
-          {loading ? "loading…" : `${filtered.length} of ${records.length} roles`}
-        </span>
+        {/* Companies management is owner-only — hidden from public visitors (SPEC_COMPANY_SEEDS_DB §5). */}
+        {configured && <Tab active={view === "companies"} onClick={() => go("companies")}>Companies</Tab>}
+        {view !== "companies" && (
+          <span className="ml-auto text-[12px] text-ink-faint">
+            {loading ? "loading…" : `${filtered.length} of ${records.length} roles`}
+          </span>
+        )}
       </div>
 
-      <main className="flex min-h-0 flex-1">
-        <Sidebar records={records} filters={filters} setFilters={setFilters} onReset={() => setFilters(emptyFilters())} onAdded={refetch} onOpenRole={setSelectedId} />
-        <section className={cn("flex-1 overflow-auto px-[18px] pt-[14px]", showBulk ? "pb-28" : "pb-10")}>
-          {view === "browse"
-            ? <BrowseView rows={filtered} sort={sort} onSort={toggleSort} onOpen={(j) => setSelectedId(j.job_id)}
-                selectable={configured} selectedIds={selectedIds} onToggle={toggleSelect} onSelectAll={selectAll} />
-            : <PipelineView rows={filtered} onOpen={(j) => setSelectedId(j.job_id)} />}
-        </section>
-      </main>
+      {view === "companies" ? (
+        <main className="min-h-0 flex-1 overflow-auto">
+          <CompaniesView pushToast={pushToast} />
+        </main>
+      ) : (
+        <main className="flex min-h-0 flex-1">
+          <Sidebar records={records} filters={filters} setFilters={setFilters} onReset={() => setFilters(emptyFilters())} onAdded={refetch} onOpenRole={setSelectedId} />
+          <section className={cn("flex-1 overflow-auto px-[18px] pt-[14px]", showBulk ? "pb-28" : "pb-10")}>
+            {view === "browse"
+              ? <BrowseView rows={filtered} sort={sort} onSort={toggleSort} onOpen={(j) => setSelectedId(j.job_id)}
+                  selectable={configured} selectedIds={selectedIds} onToggle={toggleSelect} onSelectAll={selectAll} />
+              : <PipelineView rows={filtered} onOpen={(j) => setSelectedId(j.job_id)} />}
+          </section>
+        </main>
+      )}
 
       {selected && <DetailPanel job={selected} activeCompanies={activeCompanies} onClose={() => setSelectedId(null)} onChanged={refetch} />}
 

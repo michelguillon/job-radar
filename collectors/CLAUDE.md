@@ -31,6 +31,14 @@ each collector is then just an endpoint URL + a field mapping.
 
 ## Company seeds — schema (`company_seeds.yaml`)
 
+> **Source of truth is now the `company_seeds` SQLite table** (deviation 55,
+> `docs/SPEC_COMPANY_SEEDS_DB.md`). `collect.py` reads it via
+> `load_company_seeds(db=None)` (excludes `action='remove'`; **falls back to the YAML below
+> when the table is empty** — fresh install before `python -m cli.seeds import`). The YAML is
+> now an export/backup artefact (`python -m cli.seeds export` / `GET /api/companies/export`);
+> `load_companies` (the YAML reader, schema below) is still used for that fallback and by the
+> yield report. Same per-entry schema either way.
+
 `cli.collect.load_companies` accepts **either** a bare top-level list (the v2
 metadata format) **or** a `{companies: [...]}` mapping (v1.1) — both are valid.
 Each entry is `{name, ats, slug}` plus optional **v2 metadata** (all default to

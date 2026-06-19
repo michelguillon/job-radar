@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api import events
-from api.routers import annotations, auth, cv_tailor, events as events_router, index, manual_ingest, reports, workflow
+from api.routers import annotations, auth, companies, cv_tailor, events as events_router, index, manual_ingest, reports, workflow
 
 
 @asynccontextmanager
@@ -63,4 +63,5 @@ app.include_router(annotations.router)
 app.include_router(reports.router)
 app.include_router(cv_tailor.router)
 app.include_router(manual_ingest.router)
+app.include_router(companies.router)
 app.include_router(events_router.router)

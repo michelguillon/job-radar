@@ -122,6 +122,24 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_ctl_job_id ON cv_tailor_links (job_id);
             CREATE INDEX IF NOT EXISTS idx_ctl_run_id ON cv_tailor_links (cv_tailor_run_id);
 
+            -- company_seeds is the ONLY mutable table (SPEC_COMPANY_SEEDS_DB, deviation 55):
+            -- company metadata is reference data, not an event log, so it ALLOWS UPDATE.
+            -- The other three sinks stay INSERT-only (append-only discipline).
+            CREATE TABLE IF NOT EXISTS company_seeds (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                name            TEXT NOT NULL UNIQUE,
+                ats             TEXT NOT NULL,
+                slug            TEXT,
+                domain          TEXT,
+                fit_hypothesis  TEXT,
+                action          TEXT DEFAULT 'keep',
+                notes           TEXT DEFAULT '',
+                created_at      TEXT DEFAULT (datetime('now')),
+                updated_at      TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_company_seeds_ats    ON company_seeds (ats);
+            CREATE INDEX IF NOT EXISTS idx_company_seeds_action ON company_seeds (action);
+
             -- version is the PRIMARY KEY (not the spec's bare INTEGER NOT NULL) so
             -- INSERT OR IGNORE actually no-ops on re-init; otherwise init_db would
             -- append a duplicate version row every run and break idempotency.
@@ -359,6 +377,82 @@ def write_cv_tailor_link(rec: dict) -> None:
             insert_cv_tailor_link(conn, rec)
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Company seeds — the one MUTABLE table (SPEC_COMPANY_SEEDS_DB, deviation 55).
+# Reference data, not an event log: UPDATE is allowed here (and only here).
+# ---------------------------------------------------------------------------
+
+# The seven owner-facing columns (id/created_at/updated_at are managed by SQLite).
+COMPANY_SEED_COLUMNS = ("name", "ats", "slug", "domain", "fit_hypothesis", "action", "notes")
+# The subset a PATCH may change — name is immutable (it's the natural key + the corpus join key).
+COMPANY_SEED_MUTABLE = ("ats", "slug", "domain", "fit_hypothesis", "action", "notes")
+
+
+def _company_seed_values(rec: dict) -> tuple:
+    """Map a seed dict to the INSERT tuple, applying the column defaults (action='keep',
+    notes='') so an entry missing those still inserts cleanly."""
+    return (
+        rec.get("name"),
+        rec.get("ats"),
+        rec.get("slug"),
+        rec.get("domain"),
+        rec.get("fit_hypothesis"),
+        rec.get("action") or "keep",
+        rec.get("notes") or "",
+    )
+
+
+def import_company_seed(conn: sqlite3.Connection, rec: dict) -> bool:
+    """``INSERT OR IGNORE`` one seed (the idempotent YAML→DB import path). Returns True if a
+    row was inserted, False if a company with that ``name`` already existed (left untouched)."""
+    cur = conn.execute(
+        "INSERT OR IGNORE INTO company_seeds "
+        "(name, ats, slug, domain, fit_hypothesis, action, notes) VALUES (?,?,?,?,?,?,?)",
+        _company_seed_values(rec),
+    )
+    return cur.rowcount > 0
+
+
+def insert_company_seed(conn: sqlite3.Connection, rec: dict) -> None:
+    """Plain INSERT (the API ``POST /api/companies`` path). Raises ``sqlite3.IntegrityError``
+    on a duplicate ``name`` — the caller maps that to a 409."""
+    conn.execute(
+        "INSERT INTO company_seeds "
+        "(name, ats, slug, domain, fit_hypothesis, action, notes) VALUES (?,?,?,?,?,?,?)",
+        _company_seed_values(rec),
+    )
+
+
+def update_company_seed(conn: sqlite3.Connection, name: str, fields: dict) -> bool:
+    """UPDATE the given subset of mutable columns for ``name`` and bump ``updated_at``.
+    Unknown / immutable keys are ignored. Returns True iff a row matched (else the caller
+    404s). An empty ``fields`` still touches ``updated_at`` (and reports existence)."""
+    cols = [c for c in COMPANY_SEED_MUTABLE if c in fields]
+    assignments = ", ".join(f"{c} = ?" for c in cols)
+    set_clause = (assignments + ", " if assignments else "") + "updated_at = datetime('now')"
+    values = [fields[c] for c in cols] + [name]
+    cur = conn.execute(f"UPDATE company_seeds SET {set_clause} WHERE name = ?", values)
+    return cur.rowcount > 0
+
+
+def delete_company_seed(conn: sqlite3.Connection, name: str) -> bool:
+    """Hard-DELETE one company by ``name``. Returns True iff a row was removed."""
+    cur = conn.execute("DELETE FROM company_seeds WHERE name = ?", (name,))
+    return cur.rowcount > 0
+
+
+def get_company_seed(conn: sqlite3.Connection, name: str) -> dict | None:
+    """One company by ``name`` as a plain dict, or None if absent."""
+    row = conn.execute("SELECT * FROM company_seeds WHERE name = ?", (name,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_company_seeds(conn: sqlite3.Connection) -> list[dict]:
+    """All companies ordered by name, as plain dicts (includes id/created_at/updated_at)."""
+    rows = conn.execute("SELECT * FROM company_seeds ORDER BY name").fetchall()
+    return [dict(r) for r in rows]
 
 
 def main(argv: list[str] | None = None) -> int:

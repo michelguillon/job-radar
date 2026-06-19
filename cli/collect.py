@@ -24,6 +24,7 @@ import logging
 import os
 from collections import Counter
 from datetime import date, datetime, timezone
+from pathlib import Path
 
 import yaml
 
@@ -94,6 +95,37 @@ def load_companies(path: str = SEEDS_PATH) -> list[dict]:
     with open(path, encoding="utf-8") as fh:
         data = yaml.safe_load(fh)
     return data["companies"] if isinstance(data, dict) else data
+
+
+def load_company_seeds(db=None) -> list[dict]:
+    """Load the company universe from SQLite (the source of truth after the seeds migration,
+    SPEC_COMPANY_SEEDS_DB / deviation 55), excluding ``action='remove'`` companies.
+
+    Falls back to ``company_seeds.yaml`` when the table is empty (a fresh install before the
+    one-shot ``python -m cli.seeds import`` has run), logging a warning. ``db`` is injectable
+    for tests; when None a connection is opened (and closed) here.
+    """
+    own = db is None
+    if own:
+        from cli.db import get_db, init_db
+        init_db()  # idempotent CREATE TABLE IF NOT EXISTS — ensures the table exists to query
+        db = get_db()
+    try:
+        rows = db.execute(
+            "SELECT * FROM company_seeds WHERE action NOT IN ('remove') ORDER BY name"
+        ).fetchall()
+        if rows:
+            return [dict(r) for r in rows]
+    finally:
+        if own:
+            db.close()
+
+    # Fallback: empty table (fresh install before migration). Read the YAML directly.
+    seeds_path = Path(SEEDS_PATH)
+    if seeds_path.exists():
+        log.warning("company_seeds table empty — falling back to %s", SEEDS_PATH)
+        return load_companies(SEEDS_PATH)
+    return []
 
 
 def select(companies: list[dict], source: str, company: str | None) -> list[dict]:
@@ -195,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Cursor is the run START (so a job updated mid-run is re-caught next time).
     run_start = datetime.now(timezone.utc).isoformat()
-    companies = select(load_companies(), args.source, args.company)
+    companies = select(load_company_seeds(), args.source, args.company)
     selected_sources = {c["ats"] for c in companies}
 
     # Per-source incremental cursor: only for sources that support it, only when

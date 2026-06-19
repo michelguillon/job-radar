@@ -37,6 +37,16 @@ def test_init_db_creates_tables(tmp_db):
         assert conn.execute("SELECT version FROM schema_version").fetchone()["version"] == 1
 
 
+def test_init_db_creates_company_seeds_table(tmp_db):
+    db.init_db()
+    with db.get_db() as conn:
+        assert "company_seeds" in _tables(conn)
+        # The mutable reference table: confirm UPDATE works (unlike the append-only sinks).
+        db.insert_company_seed(conn, {"name": "Acme", "ats": "greenhouse", "slug": "acme"})
+        assert db.update_company_seed(conn, "Acme", {"fit_hypothesis": "high"})
+        assert db.get_company_seed(conn, "Acme")["fit_hypothesis"] == "high"
+
+
 def test_init_db_is_idempotent(tmp_db):
     db.init_db()
     with db.get_db() as conn:

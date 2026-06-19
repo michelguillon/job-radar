@@ -41,9 +41,13 @@ thing tests actually run against.
   regenerable, the fine-tuning ground truth; no ORM. The three **interactive** sinks
   (`activity_log`, `annotations`, `cv_tailor_links`) moved to `corpus/job_radar.db`
   (stdlib `sqlite3`, WAL on every connection, **INSERT-only — never UPDATE/DELETE**). Their
-  JSONL files are kept as read-only audit archives.
-- **Append-only everywhere** — JSONL appends or SQLite INSERTs; never migrate a record in
-  place, bump schema version instead.
+  JSONL files are kept as read-only audit archives. **One exception (deviation 55): the
+  `company_seeds` table is mutable reference data (UPDATE allowed, `PATCH /api/companies`),
+  not an event log** — the append-only rule applies to the three *event* sinks, not the
+  company universe.
+- **Append-only everywhere** *(event sinks)* — JSONL appends or SQLite INSERTs; never migrate a
+  record in place, bump schema version instead. (Reference data — `company_seeds` — is the lone
+  mutable exception, deviation 55.)
 - **Extraction vs annotation boundary is strict** — Claude never
   populates annotation fields; human never populates extraction fields
 - **CLI writes, UI reads** — all state changes through CLI scripts only
@@ -605,6 +609,35 @@ Kept in full: everything below — active operational guards Claude Code must kn
     tab), and **cleared on any filter change** with a toast (the wrapped `setFilters` clears it;
     search keystrokes count as filter changes by design). No `SCHEMA_VERSION` bump. Convention:
     `frontend/CLAUDE.md`.
+
+
+55. *(→ `docs/SPEC_COMPANY_SEEDS_DB.md`)* **Company seeds → SQLite + PATCH (the one mutable
+    table).** The company universe moved from `company_seeds.yaml` to a new `company_seeds`
+    SQLite table (`corpus/job_radar.db`) — editable from the browser, source of truth after a
+    one-shot `python -m cli.seeds import company_seeds.yaml`. **Unlike every other interactive
+    sink (append-only INSERT), this table ALLOWS UPDATE** — company metadata (`fit_hypothesis`/
+    `action`/`notes`) is mutable reference data, not an event log — so `PATCH /api/companies/{name}`
+    is the **first and only non-POST write endpoint** in the API (api/CLAUDE.md "per-route gating
+    rule" updated). Notable points: (a) **No `SCHEMA_VERSION`/DB-`schema_version` bump** — a new
+    table is additive; the record schema is untouched (the internal DB `schema_version` stays 1,
+    pinned by `test_db`). (b) `cli/seeds.py` is the import/export module (`python -m cli.seeds
+    {import|export}`); `dump_seeds_yaml` is shared by the CLI export **and** `GET
+    /api/companies/export` so the YAML format never drifts. Import is idempotent (`INSERT OR
+    IGNORE` — a re-import never clobbers a DB edit). (c) **`cli/collect.py` reads SQLite** via
+    `load_company_seeds(db=None)` (excludes `action='remove'`; `pause` still collects, advisory as
+    before — deviation 40b), **falling back to `company_seeds.yaml` when the table is empty** (fresh
+    install before migration, logged). (d) **The yield report still reads YAML** (`cli.analyse` /
+    `load_companies` unchanged) — out of scope for this change; regenerate `company_seeds.yaml` via
+    the export when yield input must reflect DB edits. (e) `api/routers/companies.py`: list/export +
+    `POST` (409 on dup) + `PATCH` (404) + `DELETE` (**409 if the company has validated-corpus
+    records** — checked via `load_jdrecords` exact-name match, the yield join key — else hard
+    delete) + `POST /probe-ats` (server-side Greenhouse/Ashby/Lever auto-discovery, ported from
+    `find_ats_slugs.py` into `api/ats_probe.py`, 10s budget, never raises). Reads public; writes
+    owner-gated per-route. (f) **Frontend `Companies` tab** (`CompaniesView`/`AddCompanyModal`) —
+    owner-only (hidden unless `write_configured`): sortable/searchable table, inline-edit cells
+    (domain/fit/action/notes), row actions (edit/pause/remove/delete), Add-with-Find-ATS, Export
+    YAML. No JS test toolchain (deviations 51f/52e/54a) — verified by `tsc -b` + manual browser
+    check. The endpoints emit `index_updated` (SSE) on every write.
 
 
 ## Schema summary

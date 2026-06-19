@@ -2632,5 +2632,55 @@ silent.
 
 ---
 
+## Company seeds → SQLite + management UI (2026-06-19, deviation 55)
+
+Moved the company universe from `company_seeds.yaml` to a mutable `company_seeds` SQLite table
+so it's editable from the browser; added `cli/seeds.py` (import/export), an
+`api/routers/companies.py` CRUD router (+ `api/ats_probe.py`), and an owner-only `Companies`
+frontend tab. 109 YAML entries migrated 1:1; 551 tests pass; `tsc -b` clean.
+
+- **The append-only store now has exactly one mutable table — and that's correct, not a
+  regression.** Every prior SQLite sink is an *event log* (INSERT-only, `project()` folds it).
+  Company metadata is *reference data*: `fit_hypothesis`/`action`/`notes` change as evidence
+  accumulates, and there's no value in an event history of "this used to say medium". So
+  `company_seeds` allows UPDATE and `PATCH /api/companies/{name}` is the API's first non-POST
+  write. The litmus test for "append vs mutate": is the thing an *observation that happened*
+  (append) or the *current truth about an entity* (mutate)? This is the first place in the
+  project the two genuinely diverge.
+- **The build sketch's DELETE check referenced a table that doesn't exist.** The prompt's SQL
+  joined a `corpus` table (`SELECT job_id FROM corpus WHERE company = ?`) — there is no such
+  table; company lives on the **JDRecord** (validated corpus JSONL), not the ApplicationRecord
+  (scored). The 409-guard reads `load_jdrecords` and matches on exact company name — the same
+  key the yield report joins on. Lesson: when a build prompt hands you SQL, verify the schema it
+  assumes against the executable artifacts before pasting it.
+- **Creating the table can't be done at API boot — but writes legitimately create it.** Phase
+  6.5 deliberately does NOT `init_db()` in the FastAPI lifespan, because `use_sqlite()` is
+  existence-based and an empty DB at boot would hide JSONL interactive state before backfill. The
+  company endpoints still need the table to exist, so they call `init_db()` per request (the same
+  precedent as `write_activity_event`). This is safe *because the migration is historical*: every
+  real host already has the DB post-6.5, and a net-new install has no JSONL state to hide. Worth
+  stating explicitly so the next person doesn't "fix" the per-request `init_db()` back into the
+  lifespan and resurrect the footgun.
+- **Idempotent import must not clobber edits — `INSERT OR IGNORE`, not upsert.** The whole point
+  of moving to a DB is editing in place; a re-run of `cli.seeds import company_seeds.yaml` (e.g.
+  re-applying the deploy step) must leave a fit_hypothesis the owner changed in the UI untouched.
+  `INSERT OR IGNORE` gives that for free; an `INSERT ... ON CONFLICT DO UPDATE` would silently
+  revert every edit to the last-exported YAML. A test pins this (`import → edit → re-import →
+  edit survives`).
+- **Yield report still reads YAML — a deliberate scope cut, flagged loudly.** `cli.analyse`/
+  `load_companies` were left on the YAML so this change stayed contained to collection + the new
+  UI. The cost is a divergence window: edit a company in the UI (DB) and the yield report reads
+  stale YAML until someone runs the export. Documented in three places (SPEC §11.1 "out of
+  scope", deviation 55d, this entry) rather than silently half-migrating — a partial cut-over you
+  can't see is worse than one you can.
+- **Frontend typecheck has no lockfile — `npm install` then the local `tsc`, and clean up after.**
+  `frontend/` ships no `package-lock.json`, so `npm ci` fails ("aliases: clean-install…") and
+  `npx tsc` grabs the wrong `tsc@2.0.4` squatter package. The working recipe: `npm install` in a
+  `node:20` container, run `./node_modules/.bin/tsc -b`, then `rm -rf node_modules dist
+  *.tsbuildinfo` **and** the freshly-generated `package-lock.json` so neither poisons the compose
+  build nor lands as an untracked file.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

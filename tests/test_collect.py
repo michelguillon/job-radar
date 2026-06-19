@@ -1,6 +1,7 @@
 """Tests for the collect.py CLI: selection, routing, writing, and dry-run."""
 
 import cli.collect as collect
+import cli.db as db
 from collectors.base import CollectedJob, build_meta, build_raw_record
 
 
@@ -28,6 +29,50 @@ def _record(company="Acme"):
             location_str="London, UK",
         ),
     )
+
+
+# --- load_company_seeds (SQLite, SPEC_COMPANY_SEEDS_DB §4.4) ---
+
+
+def _seed_db(companies):
+    """Init the per-test DB (conftest sets JR_DB_PATH) and INSERT the given seeds."""
+    db.init_db()
+    with db.get_db() as conn:
+        for c in companies:
+            db.insert_company_seed(conn, c)
+
+
+def test_collect_reads_from_sqlite():
+    _seed_db([
+        {"name": "Anthropic", "ats": "greenhouse", "slug": "anthropic"},
+        {"name": "Mistral", "ats": "lever", "slug": "mistral"},
+    ])
+    out = collect.load_company_seeds()
+    assert {c["name"] for c in out} == {"Anthropic", "Mistral"}
+
+
+def test_collect_skips_removed_companies():
+    _seed_db([
+        {"name": "Anthropic", "ats": "greenhouse", "slug": "anthropic", "action": "keep"},
+        {"name": "Klaviyo", "ats": "greenhouse", "slug": "klaviyo", "action": "remove"},
+        {"name": "Cognigy", "ats": "greenhouse", "slug": "cognigy", "action": "pause"},
+    ])
+    out = collect.load_company_seeds()
+    names = {c["name"] for c in out}
+    assert "Klaviyo" not in names          # action=remove is excluded
+    assert {"Anthropic", "Cognigy"} <= names  # keep + pause both still collected
+
+
+def test_collect_fallback_to_yaml(tmp_path, monkeypatch):
+    """Empty table → fall back to company_seeds.yaml (fresh install before migration)."""
+    db.init_db()  # creates the (empty) table
+    yaml_path = tmp_path / "company_seeds.yaml"
+    yaml_path.write_text(
+        "- name: FallbackCo\n  ats: greenhouse\n  slug: fallbackco\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(collect, "SEEDS_PATH", str(yaml_path))
+    out = collect.load_company_seeds()
+    assert [c["name"] for c in out] == ["FallbackCo"]
 
 
 # --- select ---
