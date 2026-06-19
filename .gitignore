@@ -42,3 +42,7 @@ docs/*PROMPT*
 # Temporary build docs — feature PLANs, handoffs, scratch. Live here, never in docs/
 # (CLAUDE.md "Temporary build docs" convention). Durable decisions get migrated out first.
 tmp/
+
+# Local corpus-review exports (cli.analyse / report dumps). Corpus-derived personal data
+# like the corpus itself — generated on demand, never committed (the repo is public).
+exports/
