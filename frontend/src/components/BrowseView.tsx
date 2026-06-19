@@ -68,7 +68,7 @@ export function BrowseView({
         <TableHeader>
           <TableRow className="border-b-line">
             {selectable && (
-              <TableHead className="text-center">
+              <TableHead className="px-0 text-center">
                 <SelectAllCheckbox checked={allSelected} indeterminate={someSelected} onChange={(c) => onSelectAll(visibleIds, c)} />
               </TableHead>
             )}
@@ -98,7 +98,7 @@ export function BrowseView({
                 className={cn("cursor-pointer hover:bg-rowhover", blocked && "text-ink-faint", selected && "bg-[#eef4ff] hover:bg-[#e4eeff]")}
               >
                 {selectable && (
-                  <TableCell className="text-center">
+                  <TableCell className="overflow-visible text-clip px-0 text-center">
                     <input
                       type="checkbox" className="accent-brand align-middle" checked={selected}
                       aria-label={`Select ${r.company} ${r.title}`}
