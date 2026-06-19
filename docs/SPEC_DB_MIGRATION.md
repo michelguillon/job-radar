@@ -1,10 +1,10 @@
 # SPEC_DB_MIGRATION.md
 ## Phase 6.5 — Persistence Hardening (JSONL → SQLite for interactive state)
 
-**Status:** Steps 1–5 ✅ built and deployed. Step 6 pending 1 week dual-write.
+**Status:** ✅ Complete — all six steps built and deployed. SQLite is the sole interactive store.
 **Trigger:** After Langfuse instrumentation is stable — ✅ met
 **Scope:** Interactive/stateful data only — pipeline artefacts stay JSONL
-**Last updated:** 2026-06-14
+**Last updated:** 2026-06-19
 
 ---
 
@@ -302,7 +302,22 @@ and still matches JSONL.
 **Verify:** full integration test — new write → SSE event → frontend
 re-fetch → data appears, consistent with JSONL file.
 
-### Step 6 — Stop JSONL writes, keep files as audit archive
+### Step 6 — Stop JSONL writes, keep files as audit archive ✅ built (2026-06-19)
+
+> Dual-write ran cleanly in production 2026-06-14 → 2026-06-19 (5 days, 0 divergences,
+> no rollbacks — the `--source both` gate stayed clean throughout). The JSONL write was
+> then removed from **all four** API write paths: `workflow.py` (`_append`, covering
+> status/note/title/outcome/fit-override), `annotations.py`, `cv_tailor.py`, and
+> `manual_ingest.py`'s owner-note event. (The build prompt named the first three; the
+> manual-ingest note is the same `activity_log` interactive-state category and was frozen
+> with them so the audit archive stays consistent across writers — otherwise a
+> manual-ingest-with-note would still grow `activity_log.jsonl` while every other path had
+> stopped, violating "a write does not change the JSONL line count".) Each removed call site
+> carries `# JSONL archived at corpus/...jsonl (read-only audit trail)`. The JSONL files are
+> kept on disk untouched — never deleted. SQLite (Step 5 reads + Step 6 writes) is now the
+> sole source of truth for interactive state. The JSONL *loaders* (`load_events`,
+> `load_annotations`, `load_cv_tailor_links`) are retained for the `--source jsonl` flag and
+> audit inspection.
 
 Once dual-write has run cleanly for 1 week in production (no
 divergences, no rollbacks):
@@ -310,8 +325,10 @@ divergences, no rollbacks):
 - Keep existing JSONL files in place as audit archive — never delete
 - Add a comment in each endpoint: `# JSONL archived at corpus/...jsonl`
 
-**Verify:** write a status update, confirm JSONL file does NOT get a
-new line, SQLite has the new row, UI updates correctly.
+**Verified:** the hermetic API tests (`test_status_write_sqlite_only` /
+`test_annotation_write_sqlite_only` / `test_cv_tailor_write_sqlite_only`) assert a write
+lands in SQLite and adds **no** line to the JSONL file; the duplicate-annotation test
+confirms the 409 path also writes no JSONL. 527 tests pass.
 
 ---
 
@@ -413,14 +430,14 @@ end — it's the right starting point for this scale.
 2. ✅ All three JSONL state files backfilled with zero divergences
 3. ✅ `cli/stats.py --export-index --source both` exits clean (0
    divergences) against the full live corpus
-4. ✅ API writes go to SQLite; JSONL dual-write active for 1 week
-   *(dual-write started 2026-06-14 — Step 6 gate: 2026-06-21)*
+4. ✅ API writes go to SQLite; JSONL dual-write ran cleanly 2026-06-14 → 2026-06-19
+   *(5-day soak, 0 divergences — Step 6 cut-over done 2026-06-19, ahead of the 06-21 gate)*
 5. ✅ API reads (live overlay) come from SQLite
 6. ✅ `cli/track.py`, `cli/analyse.py` auto-detect SQLite
-7. 🔲 JSONL writes removed; files preserved as audit archive (Step 6)
+7. ✅ JSONL writes removed (all four API paths); files preserved as audit archive (Step 6)
 8. ✅ Backup cron updated for `job_radar.db`
-9. ✅ All existing 481+ tests pass; new migration tests added
-10. 🔲 `SPEC_DB_MIGRATION.md` §4 steps all marked ✅
+9. ✅ All existing tests pass (527); new migration + SQLite-only tests added
+10. ✅ `SPEC_DB_MIGRATION.md` §4 steps all marked ✅
 
 ---
 

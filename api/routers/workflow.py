@@ -1,12 +1,13 @@
 """api/routers/workflow.py — gated workflow writes (job_radar_SPEC §10.4).
 
 Task-oriented endpoints (status / note / title) over the SAME append-only event model the
-CLI uses. Each reuses cli.track: build_event (which runs validate_activity_event) →
-append_event. The API adds nothing the CLI doesn't already do — it is one more write path
-over corpus/activity_log.jsonl, not a second source of truth. Every endpoint is gated on
-the capability cookie **per-route** (`dependencies=[Depends(require_unlocked)]` on each POST,
-not at the router level — api/CLAUDE.md "per-route gating rule", deviation 42) and 404s an
-unknown job_id (the CLI's --force escape hatch is intentionally not exposed over HTTP).
+CLI uses. Each reuses cli.track.build_event (which runs validate_activity_event), then INSERTs
+into SQLite via cli.db.write_activity_event. Phase 6.5 Step 6: SQLite is the sole write
+destination for interactive state; corpus/activity_log.jsonl is a frozen read-only audit
+archive (the JSONL dual-write was removed after a clean 5-day production soak). Every endpoint
+is gated on the capability cookie **per-route** (`dependencies=[Depends(require_unlocked)]` on
+each POST, not at the router level — api/CLAUDE.md "per-route gating rule", deviation 42) and
+404s an unknown job_id (the CLI's --force escape hatch is intentionally not exposed over HTTP).
 """
 
 from __future__ import annotations
@@ -21,7 +22,6 @@ from cli.db import write_activity_event
 from cli.track import (
     _clock,
     _default_state,
-    append_event,
     build_event,
     load_activity_events,
     load_scores,
@@ -66,19 +66,18 @@ def _require_scored(job_id: str, scored_glob: str) -> None:
         raise HTTPException(status_code=404, detail=f"job_id not found in scored corpus: {job_id}")
 
 
-def _append(log_path: str, job_id: str, *, event: str, value, notes: str) -> dict:
-    """Build (=validate) + append one event, or 422 on a vocab violation.
+def _append(job_id: str, *, event: str, value, notes: str) -> dict:
+    """Build (=validate) + INSERT one event into SQLite, or 422 on a vocab violation.
 
-    Phase 6.5 Step 4: dual-write — append to JSONL (the safety net + audit archive) AND
-    INSERT into SQLite. JSONL stays the read source until Step 5; the JSONL write is first
-    so it survives even if the SQLite write raises (the dual-read gate would then flag the
-    gap before the Step-5 cut-over).
+    Phase 6.5 Step 6 (2026-06-19): SQLite is the sole write destination for interactive
+    state — the dual-write JSONL append was removed after a clean production dual-write soak
+    (2026-06-14 → 06-19, 0 divergences). Reads already come from SQLite (Step 5, auto-detect).
     """
     try:
         record = build_event(job_id, event=event, value=value, notes=notes, ts=_clock())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    append_event(log_path, record)
+    # JSONL archived at corpus/activity_log.jsonl (read-only audit trail)
     write_activity_event(record)
     return record
 
@@ -90,7 +89,7 @@ def set_status(body: StatusRequest, settings: Settings = Depends(get_settings)) 
     _require_scored(body.job_id, settings.scored_glob)
     current = project(load_activity_events(settings.log_path)).get(body.job_id, _default_state())["status"]
     warning = transition_warning(current, body.status)
-    _append(settings.log_path, body.job_id, event="status", value=body.status, notes=body.notes or "")
+    _append(body.job_id, event="status", value=body.status, notes=body.notes or "")
     emit_index_updated()
     return {"ok": True, "job_id": body.job_id, "status": body.status, "warning": warning}
 
@@ -99,7 +98,7 @@ def set_status(body: StatusRequest, settings: Settings = Depends(get_settings)) 
 def add_note(body: NoteRequest, settings: Settings = Depends(get_settings)) -> dict:
     """Attach a pure note (no status change)."""
     _require_scored(body.job_id, settings.scored_glob)
-    _append(settings.log_path, body.job_id, event="note", value=None, notes=body.text)
+    _append(body.job_id, event="note", value=None, notes=body.text)
     emit_index_updated()
     return {"ok": True, "job_id": body.job_id}
 
@@ -108,7 +107,7 @@ def add_note(body: NoteRequest, settings: Settings = Depends(get_settings)) -> d
 def set_title(body: TitleRequest, settings: Settings = Depends(get_settings)) -> dict:
     """Set a display-title override (presentation only — never scored)."""
     _require_scored(body.job_id, settings.scored_glob)
-    _append(settings.log_path, body.job_id, event="title", value=body.title, notes="")
+    _append(body.job_id, event="title", value=body.title, notes="")
     emit_index_updated()
     return {"ok": True, "job_id": body.job_id, "title": body.title}
 
@@ -119,7 +118,7 @@ def set_outcome(body: OutcomeRequest, settings: Settings = Depends(get_settings)
     reason. The granular outcome and the workflow status are orthogonal (model C): the UI
     also POSTs /api/status to move the lane. Invalid outcome → 422 (build_event validates)."""
     _require_scored(body.job_id, settings.scored_glob)
-    _append(settings.log_path, body.job_id, event="outcome", value=body.outcome, notes=body.notes or "")
+    _append(body.job_id, event="outcome", value=body.outcome, notes=body.notes or "")
     emit_index_updated()
     return {"ok": True, "job_id": body.job_id, "outcome": body.outcome}
 
@@ -131,6 +130,6 @@ def set_fit_override(body: FitOverrideRequest, settings: Settings = Depends(get_
     scored ApplicationRecord (the scorer's value is preserved). fit_label=null clears a prior
     override; an invalid fit_label → 422 (build_event runs validate_activity_event)."""
     _require_scored(body.job_id, settings.scored_glob)
-    _append(settings.log_path, body.job_id, event="fit_override", value=body.fit_label, notes=body.reason or "")
+    _append(body.job_id, event="fit_override", value=body.fit_label, notes=body.reason or "")
     emit_index_updated()
     return {"ok": True, "job_id": body.job_id, "fit_label": body.fit_label}

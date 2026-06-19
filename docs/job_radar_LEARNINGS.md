@@ -2599,5 +2599,38 @@ silent.
 
 ---
 
+## Phase 6.5 Step 6 — JSONL writes removed; SQLite is the sole interactive store (2026-06-19)
+
+- **Dual-write soaked 5 days, 0 divergences, then the JSONL leg was cut.** Steps 4–5 wrote
+  both stores and read SQLite (auto-detect); the `--source both` comparison stayed clean in
+  production from 2026-06-14, so Step 6 removed the JSONL `append_event` from all API write
+  paths. SQLite is now the sole write destination for `activity_log` / `annotations` /
+  `cv_tailor_links`; the JSONL files are frozen read-only audit archives (kept, never deleted —
+  their loaders survive for `--source jsonl` + audit). The phased dual-write → soak → cut-over
+  is exactly what made this a one-line-per-endpoint change with zero data risk.
+- **The build prompt scoped three routers; correctness required a fourth.** The prompt named
+  `workflow.py` / `annotations.py` / `cv_tailor.py`, but `manual_ingest.py` also dual-wrote an
+  `activity_log` *note* event. Leaving it would have meant a manual-ingest-with-note kept
+  growing `activity_log.jsonl` after every other path had stopped — silently violating the
+  step's own invariant ("a write does not change the JSONL line count") and producing a
+  half-frozen audit archive. Lesson: scope a migration by the *data category* (every
+  interactive-state writer), not by the file list someone happened to enumerate. Grepping
+  `append_event\(` across `api/` up front surfaced the fourth site immediately.
+- **Removing a write path means the read-back in its tests must move too.** ~16 `test_api.py`
+  assertions read the event back via the *pure* JSONL loader `track.load_events(path)` — which
+  now returns `[]`. They were repointed at the SQLite source via the auto-detecting loaders
+  (`load_activity_events`, `load_annotations_auto`, `load_all_cv_tailor_links_auto`), the same
+  ones the API/CLI read through. The subtle trap: one test (`test_index_overlay_reads_from_sqlite`)
+  *deliberately* asserts the raw JSONL file is empty while SQLite has data — a blind
+  search-replace to the auto loader broke its intent. The pure loader and the auto loader are
+  now both needed in tests, for opposite assertions ("JSONL untouched" vs "state present").
+- **Repurpose dual-write tests into invariant tests, don't delete them.** The three
+  `*_goes_to_sqlite_and_jsonl` tests became `*_sqlite_only`: assert the row is in SQLite **and**
+  that `track.load_events(jsonl_path) == []`. That last assertion is the executable form of DoD
+  item 5 ("`wc -l activity_log.jsonl` does not change after a write") — cheaper and more
+  reliable than a manual `wc -l` against the live corpus, and it never mutates real data.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

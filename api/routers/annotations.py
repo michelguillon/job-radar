@@ -2,8 +2,9 @@
 
 A field-level scoring/extraction flag. It NEVER mutates an extraction — it records that
 the owner disagrees with one, with the scorer's verdict at flag time captured for later
-calibration (Phase 7). Appends to corpus/annotations.jsonl (a separate sink from the
-activity log — different purpose, different future consumer). Gated on the capability
+calibration (Phase 7). INSERTs into the SQLite `annotations` table (a separate sink from the
+activity log — different purpose, different future consumer); Phase 6.5 Step 6 made SQLite the
+sole write destination, with corpus/annotations.jsonl kept as a read-only audit archive. Gated on the capability
 cookie **per-route** (`dependencies=[Depends(require_unlocked)]` on the POST, not at the
 router level — api/CLAUDE.md "per-route gating rule", deviation 42); 404s an unknown
 job_id; validated against ANNOTATION_TYPE before append.
@@ -21,7 +22,7 @@ from api.events import emit_index_updated
 from api.security import require_unlocked
 from api.settings import Settings, get_settings
 from cli.db import write_annotation
-from cli.track import _clock, append_event, load_scores
+from cli.track import _clock, load_scores
 from models.record import ANNOTATION_LOG_VERSION, REJECTION_REASON, validate_annotation_event
 
 router = APIRouter(prefix="/api", tags=["annotations"])
@@ -67,15 +68,14 @@ def flag(body: AnnotationRequest, settings: Settings = Depends(get_settings)) ->
         raise HTTPException(status_code=422, detail=f"invalid annotation: {errors}")
 
     # Duplicate prevention (job_radar_SPEC §10.11 Feature 2): an exact duplicate is the
-    # same job_id + annotation_type + field + reason. Phase 6.5 Step 4: the Python "load
-    # the JSONL and scan" check is replaced by the SQLite UNIQUE(job_id, type,
-    # IFNULL(field,''), reason) index — a duplicate raises IntegrityError -> 409. SQLite is
-    # written FIRST so the constraint rejects the dup before any JSONL append (no orphan
-    # line). The JSONL append remains the dual-write safety net + audit archive.
+    # same job_id + annotation_type + field + reason. The SQLite UNIQUE(job_id, type,
+    # IFNULL(field,''), reason) index enforces it — a duplicate raises IntegrityError -> 409.
+    # Phase 6.5 Step 6: SQLite is the sole write destination (the JSONL dual-write was removed
+    # after a clean 5-day production soak).
     try:
         write_annotation(record)
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail="duplicate annotation: same job_id + type + field + reason")
-    append_event(settings.annotations_path, record)
+    # JSONL archived at corpus/annotations.jsonl (read-only audit trail)
     emit_index_updated()
     return {"ok": True, "job_id": body.job_id, "annotation_type": body.annotation_type}

@@ -46,7 +46,6 @@ from cli.stats import (
 )
 from cli.track import (
     _clock,
-    append_event,
     build_event,
     load_activity_events,
     load_jdrecords,
@@ -208,11 +207,12 @@ def manual_ingest(body: ManualIngestRequest, settings: Settings = Depends(get_se
         fh.write(json.dumps(meta, ensure_ascii=False) + "\n")
 
     # Persist any owner note as a workflow note event (otherwise it would be silently dropped).
-    # Phase 6.5 Step 4: dual-write the note to SQLite too, so the activity_log table stays a
-    # complete mirror of the JSONL log (this is a separate write path from the workflow router).
+    # Phase 6.5 Step 6: SQLite is the sole write destination for interactive state (this is a
+    # separate activity_log write path from the workflow router, frozen alongside it after the
+    # clean 5-day production soak — so the JSONL audit archive stays consistent across writers).
     if body.notes.strip():
         note_event = build_event(job_id, event="note", value=None, notes=body.notes.strip(), ts=_clock())
-        append_event(settings.log_path, note_event)
+        # JSONL archived at corpus/activity_log.jsonl (read-only audit trail)
         write_activity_event(note_event)
 
     # --- cost tracking (same ledger as batch runs) + index rebuild ---

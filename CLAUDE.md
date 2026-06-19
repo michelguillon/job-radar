@@ -96,7 +96,7 @@ thing tests actually run against.
 | 4 — Discovery Layer | ✅ complete + **operational** — incremental collection (deviation 24) + `cli/digest.py` (deviation 26) + **working** weekly cron (`cron/`, fixed deviation 36) + cross-corpus dedupe (deviation 19). **102-company universe** seeded (SPEC §11.1); first real server run: 5,498 collected → 65 new survivors → 117 scored, $3.18 to date. |
 | 5 — Static UI | ✅ complete — `ui/{index.html,app.js,style.css}` static SPA (no framework/build/CDN), reads the joined `corpus/index.json`, served by nginx behind the `ui` Docker profile (`docker compose --profile ui up` → :8080). Browse + Pipeline + detail drawer + filters + stats bar. `index.json` contract changed to a join (deviation 27). 318 tests. |
 | 6 — Interactive UI | ✅ complete — thin FastAPI `api/` (security/settings/main + index/auth/workflow/annotations routers) over `cli.track` + `models.record`; stdlib-HMAC `jr_write` cookie, fail-closed (`JR_WRITE_KEY`/`COOKIE_SECURE`); `GET /api/index` re-projects the live activity log; `ANNOTATION_TYPE` + `validate_annotation_event` (constants only, no schema bump); `corpus/annotations.jsonl` sink. **React/Vite `frontend/`** (cv-tailor stack: `UnlockProvider`, typed `lib/api`, `useIndex`, Browse/Pipeline/Detail + owner write controls + flag form) replaces the retired Phase 5 `ui/`. `api` + `frontend` compose services (`--profile ui` → :8080/:8000). **362 tests + browser-verified.** **Deployed** behind Caddy + Cloudflare at job-radar.michel-portfolio.co.uk (`docker-compose.prod.yml`, SPEC §10.9). **§10.11 workflow enhancements built**: manual fit override + annotation visibility/dedup (event-log append + read-model join, no scorer/schema change; deviation 37). Conventions: `api/CLAUDE.md`, `frontend/CLAUDE.md` (deviations 28–37). **Manual JD entry via UI built** (SPEC §11.1): `POST /api/manual-ingest` + `frontend/.../AddRoleModal.tsx` — synchronous single-JD extract→score→append→reindex, `ats="manual"` (deviation 44). **Workflow status redesign built** (SPEC §7.2/§10.10 item 8): 9th status `will_not_apply` + contextual per-status controls + 3 distinct terminal states (rejected/will_not_apply/archived); constants-only, no schema/endpoint change (deviation 51). |
-| 6.5 — Persistence Hardening | 🔶 **Steps 1–5 shipped; Step 6 deferred** — interactive state (`activity_log`/`annotations`/`cv_tailor_links`) moved JSONL → SQLite (`corpus/job_radar.db`, WAL, INSERT-only). `cli/db.py` + `cli/db_migrate.py`; dual-write all write endpoints; reads auto-detect (`use_sqlite()`); `--export-index --source {jsonl\|sqlite\|both}` (default sqlite); `cron/backup_db.sh`. 506 tests, `--source both` = 0 divergences on the 53-job corpus. **Step 6 (remove JSONL writes) waits on a 1-week prod dual-write soak.** Deviation 49 + `docs/SPEC_DB_MIGRATION.md`. |
+| 6.5 — Persistence Hardening | ✅ **complete (all six steps)** — interactive state (`activity_log`/`annotations`/`cv_tailor_links`) moved JSONL → SQLite (`corpus/job_radar.db`, WAL, INSERT-only). `cli/db.py` + `cli/db_migrate.py`; reads auto-detect (`use_sqlite()`); `--export-index --source {jsonl\|sqlite\|both}` (default sqlite); `cron/backup_db.sh`. `--source both` = 0 divergences on the 53-job corpus. **Step 6 (2026-06-19): JSONL writes removed after a clean 5-day prod dual-write soak — SQLite is the sole write destination; JSONL files are frozen read-only audit archives.** Deviation 49 + `docs/SPEC_DB_MIGRATION.md`. |
 | 7 — Fine-Tuned Analyser | Deferred (Project 5) |
 
 ---
@@ -445,18 +445,23 @@ Kept in full: everything below — active operational guards Claude Code must kn
 49. *(→ SPEC_DB_MIGRATION + SPEC §11.4)* **Phase 6.5 — interactive state moved JSONL → SQLite.**
     The three interactive sinks (`activity_log`, `annotations`, `cv_tailor_links`) now live in
     `corpus/job_radar.db` (stdlib `sqlite3`, gitignored); pipeline artefacts stay JSONL forever
-    (boundary in SPEC_DB_MIGRATION §1). **Steps 1–5 shipped; Step 6 (remove JSONL writes) is
-    deferred pending a 1-week production dual-write soak.** Key points: (a) **Append-only kept as
+    (boundary in SPEC_DB_MIGRATION §1). **✅ Complete (all six steps). Step 6 (2026-06-19):
+    the JSONL dual-write was removed from all four API write paths after a clean 5-day production
+    dual-write soak (2026-06-14 → 06-19, 0 divergences) — SQLite is now the sole write destination
+    and the JSONL state files are frozen read-only audit archives (never deleted; their loaders are
+    kept for `--source jsonl` + audit).** Key points: (a) **Append-only kept as
     discipline** — INSERT-only, never UPDATE/DELETE; `project()` is unchanged (a fold over a flat
     event list). (b) `cli/db.py` is the single home for schema (`init_db`, WAL + FKs on every
     `get_db`), the JSONL↔SQL row mapping (`insert_*`/`_enc`/`_dec`/`_bool_to_int`), the SQLite read
-    paths (`load_events_sqlite` etc.), and the dual-write helpers (`write_*`). (c) **Two DDL
+    paths (`load_events_sqlite` etc.), and the SQLite write helpers (`write_*`). (c) **Two DDL
     corrections to the spec** (LEARNINGS Step 1): `schema_version.version` is PK so `INSERT OR
     IGNORE` is idempotent; the annotations dedup is a UNIQUE **expression** index over
     `IFNULL(field,'')` (a plain UNIQUE wouldn't dedupe the `field=NULL` rejection_reasons —
-    deviation 39). (d) **Dual-write** (`api/routers/{workflow,annotations,cv_tailor,manual_ingest}`):
-    every write hits both stores; the annotations **409 now comes from the SQLite UNIQUE index**
-    (IntegrityError), not a JSONL scan. (e) **Reads auto-detect** via `cli.db.use_sqlite()`
+    deviation 39). (d) **Writes — SQLite only as of Step 6** (`api/routers/{workflow,annotations,
+    cv_tailor,manual_ingest}`): each INSERTs via the `cli.db.write_*` helper and no longer appends
+    JSONL (the `append_event` import is gone from all four); the annotations **409 comes from the
+    SQLite UNIQUE index** (IntegrityError), not a JSONL scan. (During Steps 4–5 these dual-wrote;
+    Step 6 removed the JSONL leg.) (e) **Reads auto-detect** via `cli.db.use_sqlite()`
     (`DB exists?`): the API overlay + reports + the CLIs (`track list`/`analyse`/`digest`) call
     *separate* `_auto` loaders (`load_activity_events`, `load_*_auto`) — the bare `load_*` stay PURE
     JSONL as the `cli.stats --export-index --source both` comparison baseline (default `--source`

@@ -2,9 +2,11 @@
 
 Two endpoints:
 
-- ``POST /api/cv-tailor-results`` — append a cv-tailor run snapshot for a scored role to the
-  append-only ``corpus/cv_tailor_links.jsonl``. It NEVER mutates a JDRecord, an
-  ApplicationRecord, or a cv-tailor output file — it is a side snapshot keyed by job_id.
+- ``POST /api/cv-tailor-results`` — append a cv-tailor run snapshot for a scored role by
+  INSERTing into the SQLite ``cv_tailor_links`` table (Phase 6.5 Step 6: SQLite is the sole
+  write destination; ``corpus/cv_tailor_links.jsonl`` is a read-only audit archive). It NEVER
+  mutates a JDRecord, an ApplicationRecord, or a cv-tailor output file — a side snapshot keyed
+  by job_id.
   **Dual auth (deviation 43):** accepts the owner capability cookie (Phase 1, browser) OR a
   ``CV_TAILOR_SERVICE_KEY`` Bearer token (Phase 3, cv-tailor's machine-to-machine callback).
   Validated against ``validate_cv_tailor_link``; 404s an unknown job_id; 422s a bad score.
@@ -30,7 +32,6 @@ from cli.db import write_cv_tailor_link
 from cli.stats import _location_for, load_annotations_auto
 from cli.track import (
     _clock,
-    append_event,
     load_activity_events,
     load_jdrecords,
     load_meta,
@@ -91,9 +92,9 @@ def record_cv_tailor_result(
     errors = validate_cv_tailor_link(record)
     if errors:
         raise HTTPException(status_code=422, detail=f"invalid cv-tailor link: {errors}")
-    # Phase 6.5 Step 4: dual-write — JSONL (safety net + audit archive) AND SQLite. No
-    # dedup here (multiple runs per job_id are kept as history). JSONL first; SQLite second.
-    append_event(settings.cv_tailor_links_path, record)
+    # Phase 6.5 Step 6: SQLite is the sole write destination (JSONL dual-write removed after a
+    # clean 5-day production soak). No dedup — multiple runs per job_id are kept as history.
+    # JSONL archived at corpus/cv_tailor_links.jsonl (read-only audit trail)
     write_cv_tailor_link(record)
     emit_index_updated()
     # Phase C: enrich the role_scoring_decision trace (same job_id seed) with cv-tailor's

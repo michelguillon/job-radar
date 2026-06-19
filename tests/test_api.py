@@ -84,6 +84,28 @@ def _unlock(client) -> None:
     assert client.post("/api/unlock", json={"key": KEY}).status_code == 200
 
 
+# --- Phase 6.5 Step 6: interactive state is read back from SQLite ---------------
+# The API no longer writes JSONL (the *.jsonl state files are frozen read-only audit
+# archives); these helpers read the new sole source of truth via the same auto-detecting
+# loaders the API/CLI use (SQLite when the per-test DB exists — conftest._isolate_db).
+
+def _events(client) -> list[dict]:
+    """Activity-log events from SQLite (flat list, project()-shaped)."""
+    return track.load_activity_events(client.settings.log_path)
+
+
+def _annotations(client, job_id: str = "sha256:j1") -> list[dict]:
+    """Annotation view dicts for one job_id from SQLite."""
+    from cli.stats import load_annotations_auto
+    return load_annotations_auto(client.settings.annotations_path).get(job_id, [])
+
+
+def _cv_links(client) -> list[dict]:
+    """All cv-tailor link records from SQLite (flat, insertion order)."""
+    from cli.stats import load_all_cv_tailor_links_auto
+    return load_all_cv_tailor_links_auto(client.settings.cv_tailor_links_path)
+
+
 # --- capabilities matrix -------------------------------------------------------
 
 def test_capabilities_not_configured(client, monkeypatch):
@@ -150,7 +172,7 @@ def test_status_appends_event(client, monkeypatch):
     _unlock(client)
     r = client.post("/api/status", json={"job_id": "sha256:j1", "status": "shortlisted", "notes": "keen"})
     assert r.status_code == 200
-    events = track.load_events(client.settings.log_path)
+    events = _events(client)
     assert len(events) == 1
     assert events[0]["event"] == "status"
     assert events[0]["value"] == "shortlisted"
@@ -161,7 +183,7 @@ def test_note_appends_note_event(client, monkeypatch):
     monkeypatch.setenv("JR_WRITE_KEY", KEY)
     _unlock(client)
     client.post("/api/note", json={"job_id": "sha256:j1", "text": "recruiter emailed"})
-    events = track.load_events(client.settings.log_path)
+    events = _events(client)
     assert events[0]["event"] == "note"
     assert events[0]["value"] is None
     assert events[0]["notes"] == "recruiter emailed"
@@ -171,7 +193,7 @@ def test_title_appends_title_event(client, monkeypatch):
     monkeypatch.setenv("JR_WRITE_KEY", KEY)
     _unlock(client)
     client.post("/api/title", json={"job_id": "sha256:j1", "title": "Forward Deployed Engineer"})
-    events = track.load_events(client.settings.log_path)
+    events = _events(client)
     assert events[0]["event"] == "title"
     assert events[0]["value"] == "Forward Deployed Engineer"
 
@@ -181,7 +203,7 @@ def test_outcome_appends_event(client, monkeypatch):
     _unlock(client)
     r = client.post("/api/outcome", json={"job_id": "sha256:j1", "outcome": "rejected_interview", "notes": "no fit"})
     assert r.status_code == 200
-    events = track.load_events(client.settings.log_path)
+    events = _events(client)
     assert events[0]["event"] == "outcome"
     assert events[0]["value"] == "rejected_interview"
     assert events[0]["notes"] == "no fit"
@@ -229,7 +251,7 @@ def test_status_will_not_apply_accepted(client, monkeypatch):
     _unlock(client)
     r = client.post("/api/status", json={"job_id": "sha256:j1", "status": "will_not_apply"})
     assert r.status_code == 200
-    events = track.load_events(client.settings.log_path)
+    events = _events(client)
     assert events[-1]["event"] == "status"
     assert events[-1]["value"] == "will_not_apply"
 
@@ -251,7 +273,7 @@ def test_annotation_appends_with_scorer_context(client, monkeypatch):
         "observed": ["Enterprise Software"], "expected": [], "reason": "catch-all",
     })
     assert r.status_code == 200
-    lines = track.load_events(client.settings.annotations_path)
+    lines = _annotations(client)
     assert len(lines) == 1
     rec = lines[0]
     assert rec["annotation_type"] == "domain_incorrect"
@@ -289,7 +311,7 @@ def test_rejection_reason_valid(client, monkeypatch):
         "observed": ["good_fit", "7"], "expected": [], "reason": "too_salesy",
     })
     assert r.status_code == 200
-    rec = track.load_events(client.settings.annotations_path)[0]
+    rec = _annotations(client)[0]
     assert rec["annotation_type"] == "rejection_reason"
     assert rec["reason"] == "too_salesy"
     assert rec["field"] is None
@@ -306,7 +328,7 @@ def test_applied_elsewhere_in_rejection_reason(client, monkeypatch):
         "observed": [], "expected": [], "reason": "applied_elsewhere_same_company",
     })
     assert r.status_code == 200
-    rec = track.load_events(client.settings.annotations_path)[0]
+    rec = _annotations(client)[0]
     assert rec["reason"] == "applied_elsewhere_same_company"
 
 
@@ -348,7 +370,7 @@ def test_fit_override_appends_event(client, monkeypatch):
     _unlock(client)
     r = client.post("/api/fit-override", json={"job_id": "sha256:j1", "fit_label": "stretch", "reason": "depth gap"})
     assert r.status_code == 200
-    events = track.load_events(client.settings.log_path)
+    events = _events(client)
     assert events[0]["event"] == "fit_override"
     assert events[0]["value"] == "stretch"
     assert events[0]["notes"] == "depth gap"
@@ -505,7 +527,7 @@ def test_cv_tailor_results_post_valid(client, monkeypatch):
         "output_link": "https://cv-tailor.example/runs/run_20260611_001", "notes": "good",
     })
     assert r.status_code == 200
-    links = track.load_events(client.settings.cv_tailor_links_path)
+    links = _cv_links(client)
     assert len(links) == 1
     assert links[0]["cv_tailor_run_id"] == "run_20260611_001"
     assert links[0]["fit_score"] == 0.56 and links[0]["cv_quality_score"] == 8.1
@@ -566,7 +588,7 @@ def test_bearer_token_auth_accepted(client, monkeypatch):
         headers={"Authorization": f"Bearer {SVC_KEY}"},
     )
     assert r.status_code == 200
-    assert track.load_events(client.settings.cv_tailor_links_path)[0]["source"] == "cv_tailor_api"
+    assert _cv_links(client)[0]["source"] == "cv_tailor_api"
 
 
 def test_bearer_token_wrong_key(client, monkeypatch):
@@ -842,9 +864,12 @@ def test_health(client):
     assert body["last_indexed"] == "2026-06-09T00:00:00Z"
 
 
-# --- Phase 6.5 Step 4: dual-write (SQLite + JSONL) -----------------------------
-# The autouse conftest._isolate_db fixture points JR_DB_PATH at a per-test tmp DB,
-# so these read it back via cli.db.get_db() without touching the real corpus DB.
+# --- Phase 6.5 Step 6: SQLite is the sole write destination --------------------
+# The JSONL dual-write was removed; the *.jsonl state files are frozen read-only audit
+# archives — an API write must NOT add a line to them (DoD item 5). `track.load_events`
+# reads the raw JSONL file directly (returns [] for a missing/unwritten file), so it's the
+# probe for "JSONL not written"; `_db_rows` reads the SQLite table (the new source of truth).
+# The per-test DB is the autouse conftest._isolate_db tmp DB (no real corpus touched).
 
 def _db_rows(table: str) -> list[dict]:
     from cli.db import get_db
@@ -855,60 +880,60 @@ def _db_rows(table: str) -> list[dict]:
         conn.close()
 
 
-def test_status_write_goes_to_sqlite_and_jsonl(client, monkeypatch):
+def test_status_write_sqlite_only(client, monkeypatch):
     monkeypatch.setenv("JR_WRITE_KEY", KEY)
     _unlock(client)
     assert client.post("/api/status", json={"job_id": "sha256:j1", "status": "applied", "notes": "sent"}).status_code == 200
-    # JSONL (existing safety net)
-    jsonl = track.load_events(client.settings.log_path)
-    assert jsonl[0]["event"] == "status" and jsonl[0]["value"] == "applied"
-    # SQLite (new)
+    # SQLite (the sole write destination)
     rows = _db_rows("activity_log")
     assert len(rows) == 1
     assert rows[0]["event"] == "status" and rows[0]["value"] == "applied" and rows[0]["notes"] == "sent"
+    # JSONL audit archive NOT written (Step 6)
+    assert track.load_events(client.settings.log_path) == []
 
 
-def test_annotation_write_goes_to_sqlite_and_jsonl(client, monkeypatch):
+def test_annotation_write_sqlite_only(client, monkeypatch):
     monkeypatch.setenv("JR_WRITE_KEY", KEY)
     _unlock(client)
     payload = {"job_id": "sha256:j1", "annotation_type": "domain_incorrect", "field": "domain",
                "observed": ["A"], "expected": ["B"], "reason": "wrong"}
     assert client.post("/api/annotations", json=payload).status_code == 200
-    assert len(track.load_events(client.settings.annotations_path)) == 1
     rows = _db_rows("annotations")
     assert len(rows) == 1
     assert rows[0]["annotation_type"] == "domain_incorrect" and rows[0]["field"] == "domain"
     assert json.loads(rows[0]["observed"]) == ["A"]          # list round-trips via JSON text
     assert rows[0]["scorer_fit_score"] == 7                  # captured server-side
+    # JSONL audit archive NOT written (Step 6)
+    assert track.load_events(client.settings.annotations_path) == []
 
 
-def test_cv_tailor_write_goes_to_sqlite_and_jsonl(client, monkeypatch):
+def test_cv_tailor_write_sqlite_only(client, monkeypatch):
     monkeypatch.setenv("JR_WRITE_KEY", KEY)
     _unlock(client)
     assert client.post("/api/cv-tailor-results", json={
         "job_id": "sha256:j1", "cv_tailor_run_id": "run_dw", "fit_score": 0.8,
         "cv_quality_score": 7.5, "cvcm_enabled": True, "tailoring_mode": "full",
     }).status_code == 200
-    assert track.load_events(client.settings.cv_tailor_links_path)[0]["cv_tailor_run_id"] == "run_dw"
     rows = _db_rows("cv_tailor_links")
     assert len(rows) == 1
     assert rows[0]["cv_tailor_run_id"] == "run_dw" and rows[0]["fit_score"] == 0.8
     assert rows[0]["cvcm_enabled"] == 1                      # bool -> INTEGER
+    # JSONL audit archive NOT written (Step 6)
+    assert track.load_events(client.settings.cv_tailor_links_path) == []
 
 
 def test_annotation_duplicate_uses_sqlite_constraint(client, monkeypatch):
     """The 409 comes from the SQLite UNIQUE index (IntegrityError), not a Python JSONL scan.
     field=None (a rejection_reason) is the case a naive UNIQUE would miss — IFNULL(field,'')
-    handles it. The duplicate must NOT add a second JSONL line either."""
+    handles it. The duplicate adds no second SQLite row, and Step 6 writes no JSONL at all."""
     monkeypatch.setenv("JR_WRITE_KEY", KEY)
     _unlock(client)
     payload = {"job_id": "sha256:j1", "annotation_type": "rejection_reason", "field": None,
                "observed": [], "expected": [], "reason": "too_salesy"}
     assert client.post("/api/annotations", json=payload).status_code == 200
     assert client.post("/api/annotations", json=payload).status_code == 409
-    # exactly one row in BOTH stores (the rejected dup left no orphan line)
-    assert len(_db_rows("annotations")) == 1
-    assert len(track.load_events(client.settings.annotations_path)) == 1
+    assert len(_db_rows("annotations")) == 1                 # exactly one SQLite row
+    assert track.load_events(client.settings.annotations_path) == []  # JSONL archive untouched
 
 
 # --- Phase 6.5 Step 5: API reads come from SQLite ------------------------------
@@ -920,7 +945,7 @@ def test_index_overlay_reads_from_sqlite(client):
     from cli.db import write_activity_event
     write_activity_event({"v": 1, "ts": "2026-06-12T00:00:00Z", "job_id": "sha256:j1",
                           "event": "status", "value": "applied", "notes": ""})
-    assert track.load_events(client.settings.log_path) == []   # JSONL has nothing
+    assert track.load_events(client.settings.log_path) == []   # raw JSONL file has nothing
     rec = client.get("/api/index").json()["records"][0]
     assert rec["application_status"] == "applied"              # …but the overlay shows it
 

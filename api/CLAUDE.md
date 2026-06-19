@@ -1,25 +1,29 @@
 # CLAUDE.md — api/ (Phase 6 interactive backend)
 
-Thin FastAPI layer that mediates browser writes (job_radar_SPEC §10). It is **one more
-write path over the same JSONL the CLI appends to** — never a second source of truth.
+Thin FastAPI layer that mediates browser writes (job_radar_SPEC §10). It writes interactive
+state to **SQLite** (`corpus/job_radar.db`) via `cli.db`, sharing the same event model and
+validators as the CLI — never a second source of truth.
 
-> **Phase 6.5 dual-write (SPEC_DB_MIGRATION, in progress).** Interactive state
-> (`activity_log` / `annotations` / `cv_tailor_links`) is migrating JSONL → SQLite.
-> During the migration window every write endpoint writes BOTH: it appends the JSONL
-> line (unchanged) AND inserts into SQLite via the thin `cli/db.py` helpers
-> (`write_activity_event` / `write_annotation` / `write_cv_tailor_link`). The
-> annotations **409 dedup now comes from the SQLite UNIQUE index** (IntegrityError),
-> not the old load-JSONL-and-scan. `cli.db` is the single home for the JSONL↔SQL row
+> **Phase 6.5 — SQLite is the interactive-state store (SPEC_DB_MIGRATION, ✅ complete).**
+> Interactive state (`activity_log` / `annotations` / `cv_tailor_links`) lives in
+> `corpus/job_radar.db`. As of **Step 6 (2026-06-19)** every write endpoint INSERTs into
+> SQLite **only**, via the thin `cli/db.py` helpers (`write_activity_event` /
+> `write_annotation` / `write_cv_tailor_link`) — the JSONL dual-write was removed after a
+> clean 5-day production soak; the `*.jsonl` state files are frozen read-only audit archives
+> (never deleted). The annotations **409 dedup comes from the SQLite UNIQUE index**
+> (IntegrityError), not a JSONL scan. `cli.db` is the single home for the JSONL↔SQL row
 > mapping; it is the one new import the routers take beyond `cli.track`/`models.record`.
-> Reads still come from JSONL until Step 5. Pipeline artefacts (scored/validated/meta/
-> stats) stay JSONL forever. When you add a new write endpoint, dual-write it.
+> Reads come from SQLite via the auto-detecting loaders. Pipeline artefacts (scored/validated/
+> meta/stats) stay JSONL forever. When you add a new interactive-state write endpoint, INSERT
+> via the `cli.db.write_*` helpers (SQLite only) — do not re-introduce a JSONL append.
 
 ## Hard invariants
 
-- **THIN layer.** Import `cli.track` (`build_event`, `append_event`, `load_events`,
-  `project`, `load_scores`, `transition_warning`, `_clock`, `_default_state`) and
-  `models.record` vocab/validators. **NEVER** call the scorer, labeller, or any pipeline
-  stage. A write = `require_unlocked` → `build_event`/`validate_*` → `append_event` → 200.
+- **THIN layer.** Import `cli.track` (`build_event`, `load_events`, `load_activity_events`,
+  `project`, `load_scores`, `transition_warning`, `_clock`, `_default_state`), the
+  `cli.db.write_*` helpers, and `models.record` vocab/validators. **NEVER** call the scorer,
+  labeller, or any pipeline stage. A write = `require_unlocked` → `build_event`/`validate_*` →
+  `cli.db.write_*` (SQLite INSERT) → 200. (Step 6: JSONL appends removed — SQLite only.)
   **The one exception:** `POST /api/manual-ingest` (`routers/manual_ingest.py`, SPEC §11.1,
   deviation 44) DOES run the live pipeline — single-JD synchronous extract (`pipeline.label.
   extract_one`, Haiku 4.5) → `soft_validate` → `score` → append corpus files → rebuild
@@ -53,12 +57,14 @@ write path over the same JSONL the CLI appends to** — never a second source of
   Copied/adapted from cv-tailor `api/security.py`.
 - **404, not --force.** Unknown `job_id` → 404 on every write (the CLI's `--force` escape
   hatch is intentionally not exposed over HTTP).
-- **Write endpoints** (all gated): `POST /api/status|note|title|outcome` (workflow.py,
-  append to `activity_log.jsonl`) + `POST /api/annotations` (annotations.py →
-  `annotations.jsonl`) + `POST /api/manual-ingest` (manual_ingest.py — the one thick endpoint,
-  writes `*_manual_{ts}.jsonl` + rebuilds the index, deviation 44). `outcome` validates against
-  `OUTCOME`; the UI pairs it with a `/api/status` call to move the workflow lane (the two are
-  orthogonal under model C).
+- **Write endpoints** (all gated): `POST /api/status|note|title|outcome` (workflow.py →
+  SQLite `activity_log`) + `POST /api/annotations` (annotations.py → SQLite `annotations`) +
+  `POST /api/cv-tailor-results` (cv_tailor.py → SQLite `cv_tailor_links`) + `POST
+  /api/manual-ingest` (manual_ingest.py — the one thick endpoint, writes `*_manual_{ts}.jsonl`
+  *pipeline artefacts* + an `activity_log` SQLite note + rebuilds the index, deviation 44).
+  Step 6: interactive-state writes are SQLite-only; the matching `*.jsonl` files are frozen
+  audit archives. `outcome` validates against `OUTCOME`; the UI pairs it with a `/api/status`
+  call to move the workflow lane (the two are orthogonal under model C).
 - **SSE live-update bus (deviation 48).** `GET /api/events` (events.py — **public**,
   `text/event-stream`, no auth) emits an `index_updated` frame after every write so the UI
   re-fetches `/api/index` instead of going stale. The bus is `api/events.py` (in-process set of
