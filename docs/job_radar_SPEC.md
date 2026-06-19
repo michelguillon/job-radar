@@ -2684,7 +2684,7 @@ Phase 1 data proves which metrics are worth tracking.
 `GET /api/index` overlay, like annotations); `POST /api/cv-tailor-results`
 (owner-gated) + `GET /api/jobs/{job_id}` (public, returns `raw_text` for the
 Phase 2 handoff); React detail-panel CV-Tailor section (read-only for all,
-owner add/edit). 468 tests. See CLAUDE.md deviation 41 + LEARNINGS.
+owner add/edit). 527 tests. See CLAUDE.md deviation 41 + LEARNINGS.
 
 **Trigger:** Unblocked now. Build after rejection reasons and yield tracking
 are stable.

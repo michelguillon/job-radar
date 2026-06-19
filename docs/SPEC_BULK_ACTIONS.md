@@ -65,12 +65,15 @@ selected). Exactly the "flag scoring issue" form from the detail panel.
 
 ---
 
-## 3. UX flow
+## 3. UX flow (as built — supersedes original single-action design)
 
 ### Step 1 — Selection
 
-Checkboxes appear on each Browse row when hovering or when any box is
-already ticked. Header row has a "Select all filtered" checkbox.
+Checkboxes render only when `write_configured` is true (no dead
+affordances for public visitors). "Select all filtered" in the header
+selects all roles currently visible after filters — not the full corpus.
+Selection state is local to the session — cleared on page reload or
+filter change.
 
 ```
 ☐  Palantir    Deployment Strategist           strong_fit  10  new
@@ -79,16 +82,10 @@ already ticked. Header row has a "Select all filtered" checkbox.
 ☐  Palantir    Sr Solutions Engineer           strong_fit  10  applied
 ```
 
-"Select all filtered" selects every role currently visible in Browse
-(respects active filters — not every role in the corpus).
-
-Selection state is local to the session — cleared on page reload or
-filter change.
-
 ### Step 2 — Bulk action bar
 
-When ≥1 role is selected, a bulk action bar appears at the bottom of
-the screen (sticky, above the footer):
+When ≥1 role is selected, a sticky bulk action bar appears at the
+bottom of the screen:
 
 ```
 ─── 3 selected ──────────────────────────────────────────────────
@@ -96,99 +93,71 @@ the screen (sticky, above the footer):
                                                             [Deselect all]
 ```
 
-Each button opens an inline form — identical to the single-role detail
-panel forms.
+### Step 3 — Multi-action composer (tabbed)
 
-### Step 3 — Fill in the action
+Each button opens a **tabbed composer** with all four actions as tabs:
+`Override fit / Set status / Flag issue / Add note`.
 
-**Override fit:**
-```
-Override fit label for 3 roles
-Label:  [strong_fit ▾]
-Reason: [                              ]  (optional)
-[Preview →]
-```
+The owner stages any **combination** of the four in one session:
+- A tab is **included** (staged) when its "Apply this change" checkbox
+  is ticked, or when any of its fields is edited
+- `fit` and `status` tabs have no empty state — they're never applied
+  unless explicitly staged
+- A **•** marks a staged tab; **amber •** when required text is still
+  missing
+- One **Preview →** advances to the confirmation screen with all staged
+  actions combined
 
-**Set status:**
 ```
-Set status for 3 roles
-Status: [will_not_apply ▾]
-Rejection reason: [requirement_mismatch ▾]  ← shown when will_not_apply
-[Preview →]
-```
-
-**Flag scoring issue:**
-```
-Flag scoring issue for 3 roles
-Type:     [domain_incorrect ▾]
-Field:    [domain             ]
-Observed: [                   ]
-Expected: [                   ]
-Reason:   [FinTech domain preferred requirement — not a hard blocker but
-           consistent pattern across all Palantir roles]
-[Preview →]
+┌─────────────────────────────────────────────────────────────┐
+│ • Override fit  │ • Set status  │   Flag issue  │  Add note  │
+├─────────────────────────────────────────────────────────────┤
+│ Status: [will_not_apply ▾]                                   │
+│ Rejection reason: [requirement_mismatch ▾]                   │
+├─────────────────────────────────────────────────────────────┤
+│                                              [Preview →]     │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-**Add note:**
-```
-Add note to 3 roles
-Note: [                              ]
-[Preview →]
-```
+Status dropdown posts real enum values (`review`/`shortlisted`/
+`will_not_apply`/`archived`) under friendly labels.
 
 ### Step 4 — Confirmation screen
 
-Before executing, show a confirmation screen listing every selected role
-with what will happen to it:
+Lists every selected role with a **per-action ✓/⚠ chip** for each
+staged action:
 
 ```
-─── Confirm bulk action ──────────────────────────────────────────
+─── Confirm bulk actions ─────────────────────────────────────
 
-Action: Set status → will_not_apply
-Reason: requirement_mismatch
-Note:   —
+Staged: Override fit (good_fit) · Set status (will_not_apply, requirement_mismatch)
 
-3 roles will be updated · 1 will be skipped
+✓ Palantir  Deployment Strategist   fit ✓  status ✓  (new → will_not_apply)
+✓ Palantir  Regional Director EMEA  fit ✓  status ✓  (new → will_not_apply)
+✓ Palantir  Enterprise AE           fit ✓  status ✓  (review → will_not_apply)
+⚠ Palantir  Sr Solutions Engineer   fit ✓  status ⚠  SKIPPED — already applied
 
-✓ Palantir    Deployment Strategist      new → will_not_apply
-✓ Palantir    Regional Director EMEA     new → will_not_apply
-✓ Palantir    Enterprise AE              review → will_not_apply
-⚠ Palantir    Sr Solutions Engineer      SKIPPED — already applied
+3 fully updated · 1 partial (fit only) · 0 failed
 
-[← Back]  [Apply to 3]  [Cancel]
+[← Back]  [Apply]  [Cancel]
 ```
 
-**Skip logic (permissive):**
-- `will_not_apply` / `archive` skipped if current status is `applied`,
-  `interviewing`, or `offer` — don't accidentally discard active
-  applications
-- `review` / `shortlist` skipped if current status is already further
-  advanced
-- Fit override and scoring flags: never skipped — always safe to apply
+**Skip logic — per (role, action), not per role:**
+- Status `will_not_apply` / `archive` skipped if current status is
+  `applied`, `interviewing`, or `offer`
+- Status `review` / `shortlist` skipped if already more advanced
+- Fit override, scoring flag, note: **never skipped**
+- A role can take the fit override while its status change is skipped
 
-"Back" returns to Step 3 with all form values preserved.
-"Cancel" clears selections and dismisses.
-"Apply to N" shows the count of roles actually being updated (not total
-selected).
+"Back" returns to the composer with all staged values preserved.
 
 ### Step 5 — Execution + toast
 
-Execute each action as N individual API calls (same endpoints as the
-detail panel — `POST /api/status`, `POST /api/fit-override`,
-`POST /api/annotations`, `POST /api/note`). Parallel where safe,
-sequential for status+outcome combos.
+`Promise.all()` fans out every staged action across every role. On
+completion, Browse re-fetches, selections clear, toast shows summary:
 
-On completion:
 ```
-✓ 3 roles updated  (1 skipped)
-```
-
-Toast dismisses after 4 seconds. Browse re-fetches index. Selections
-cleared.
-
-On partial failure (some API calls failed):
-```
-⚠ 2 of 3 roles updated — 1 failed
+✓ 3 roles updated  (1 partial — status skipped on 1)
 ```
 
 ---
@@ -255,28 +224,29 @@ No server-side skip logic needed.
 
 ---
 
-## 8. Definition of Done
+## 8. Definition of Done — ✅ met (2026-06-19)
 
-1. Checkboxes on Browse rows, "Select all filtered" in header
-2. Bulk action bar appears when ≥1 role selected
-3. All four actions available: fit override, status, scoring flag, note
-4. Confirmation screen lists every role with outcome (updated / skipped)
-5. "Apply to N" count reflects skips
-6. "Back" preserves form state
-7. Execution fans out individual API calls per role
-8. Toast shows updated / skipped counts
-9. Browse re-fetches after execution
-10. Filter change clears selection with toast
-11. All existing tests pass + new bulk action tests
-12. `tsc -b` clean
+1. ✅ Checkboxes on Browse rows (owner-only — gated on `write_configured`)
+2. ✅ "Select all filtered" in header
+3. ✅ Bulk action bar appears when ≥1 role selected
+4. ✅ Tabbed multi-action composer — all four actions stageable in one session
+5. ✅ Tab staged indicator (• / amber •) when action is included / incomplete
+6. ✅ Confirmation screen with per-action ✓/⚠ chip per role
+7. ✅ Skip logic per (role, action) — status skips only; fit/flag/note never skipped
+8. ✅ "Back" preserves all staged form values
+9. ✅ Execution fans out via `Promise.all()` — one call per (role × action)
+10. ✅ Toast shows updated / partial / skipped / failed counts
+11. ✅ Browse re-fetches after execution; selections cleared
+12. ✅ Filter change clears selection with toast
+13. ✅ `tsc -b` + `vite build` clean
 
 ---
 
 ## 9. Tests
 
-- `test_select_all_filtered_respects_filters` — only visible roles selected
-- `test_skip_logic_applied_role` — applied role skipped for will_not_apply
-- `test_skip_logic_fit_override_never_skipped` — fit override applies to all
-- `test_bulk_status_fans_out_individual_calls` — N roles → N POST /api/status calls
-- `test_confirmation_screen_shows_skips` — skipped roles shown with reason
-- `test_filter_change_clears_selection`
+Per `frontend/CLAUDE.md` no-JS-test-toolchain convention (deviations
+51f/52e), logic cases were not added as JS tests. Instead, skip logic
+and executor were extracted into pure functions in
+`frontend/src/lib/bulk.ts` and verified by `tsc -b` + `vite build` +
+manual browser check. Backend tests unchanged — individual API
+endpoints already covered.
