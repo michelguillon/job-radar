@@ -2796,9 +2796,12 @@ cv-tailor shows a warning and allows retry; Job Radar is not in the critical pat
 
 ---
 
-### Phase 4 — Deep integration — Step 1 ✅ BUILT (2026-06-17)
+### Phase 4 — Deep integration — Step 1 ✅ BUILT + LIVE (2026-06-19)
 
-**Status:** Step 1 (extraction + assessment context on the read endpoint) built.
+**Status:** Step 1 (extraction + assessment context on the read endpoint) built
+(2026-06-17), deployed, and **verified working live end-to-end between both
+deployed apps (2026-06-19)** — cv-tailor fetches `GET /api/jobs/{job_id}` at run
+start and consumes the `extraction` + `assessment` blocks in production.
 The broader Phase 4 redesign remains open — see the integration spec §7. Step 1
 revives a *scoped* slice of the originally-retired "share Job Radar's extraction"
 direction: rather than coupling the two pipelines, it simply exposes Job Radar's

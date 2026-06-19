@@ -2536,5 +2536,23 @@ silent.
 
 ---
 
+## cv-tailor Phase 4 Step 1 — verified live end-to-end in production (2026-06-19)
+
+- **Deployed (API-only) + confirmed working between the two live apps.** The Step 1 change
+  (`extraction` + `assessment` on `GET /api/jobs/{job_id}`) is backend-only, so the prod
+  update was the fast `api`-only path (`docker compose … up -d --build api` — no React
+  bundle recompile, since the frontend was unchanged). cv-tailor, fetching the endpoint at
+  its run start, now receives and consumes both blocks in production. The thin-read-layer
+  design paid off again: no corpus re-seed, no schema/scorer change, and no restart-only
+  shortcut (the code is baked into the image, so `--build` is required, not a bare restart).
+- **"Built" and "live" are distinct doc states worth separating.** The first commit marked
+  Step 1 *built*; only after the prod deploy + cross-app smoke test is it *verified live*.
+  Recording both (with the divergent dates 06-17 / 06-19) keeps the integration spec honest
+  about what's proven in production vs merely merged — and keeps the cv-tailor-side DoD items
+  (2–5) and the coverage-measurement gate (6) clearly flagged as still-open, not implied-done
+  by "it worked."
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*

@@ -1,10 +1,12 @@
 # SPEC_INTEGRATION_PHASE4.md
 ## Job Radar → cv-tailor: Assessment Context Enrichment
 
-**Status:** Specced — not yet built
+**Status:** Step 1 ✅ built + deployed + **verified live end-to-end between
+both apps (2026-06-19)**. Steps 2–3 (cv-tailor prompt wiring) and the §6 coverage
+measurement remain open — see §10.
 **Trigger:** 20+ full-mode cv-tailor runs with linked Job Radar roles
 **Part of:** Job Radar ↔ cv-tailor Integration Spec §7
-**Last updated:** 2026-06-15
+**Last updated:** 2026-06-19
 
 ---
 
@@ -263,10 +265,17 @@ set.
 
 ## 10. Definition of Done
 
-1. `GET /api/jobs/{job_id}` returns `extraction` + `assessment`
-2. cv-tailor stores `job_radar_assessment` in `run_meta.json`
-3. Phase 1 prompt uses assessment context when present
-4. Runs without Job Radar source are unaffected
-5. Langfuse traces include assessment metadata
+1. ✅ `GET /api/jobs/{job_id}` returns `extraction` + `assessment` (Job Radar
+   side — built, deployed, **verified live end-to-end with cv-tailor 2026-06-19**)
+2. cv-tailor stores `job_radar_assessment` in `run_meta.json` *(cv-tailor repo)*
+3. Phase 1 prompt uses assessment context when present *(cv-tailor repo)*
+4. Runs without Job Radar source are unaffected *(cv-tailor repo)*
+5. Langfuse traces include assessment metadata *(cv-tailor repo)*
 6. Measurable improvement in coverage scores on gap-flagged roles
-   vs baseline (from pre-Phase 4 Langfuse traces)
+   vs baseline (from pre-Phase 4 Langfuse traces) — **open**, needs accumulated
+   run data; the measurement gate, not a code task
+
+> **2026-06-19:** Item 1 (the only Job Radar-side deliverable) is live and the
+> data flows correctly between both deployed apps — cv-tailor fetches the endpoint
+> at run start and receives the `extraction` + `assessment` blocks. Items 2–5 are
+> cv-tailor-repo work tracked there; item 6 is the longer coverage-measurement gate.

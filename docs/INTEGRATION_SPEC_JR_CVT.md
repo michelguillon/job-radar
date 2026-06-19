@@ -465,7 +465,9 @@ Radar's critical path and Job Radar is not in cv-tailor's.
 ## 7. Phase 4 — Deep integration (to be redesigned based on data)
 
 **Status:** 🔄 Broader redesign still open. **Step 1 ✅ built (2026-06-17,
-Job Radar side).**
+Job Radar side) + deployed + verified live end-to-end between both apps
+(2026-06-19)** — cv-tailor fetches the endpoint at run start and consumes the
+`extraction` + `assessment` blocks in production.
 
 **Step 1 — extraction + assessment context on the read endpoint (✅ built).**
 `GET /api/jobs/{job_id}` (public, unchanged auth) now returns two nested objects

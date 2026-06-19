@@ -564,6 +564,10 @@ Kept in full: everything below — active operational guards Claude Code must kn
     already 404s unscored roles). `leadership_geography` is returned as the model's `list[str]`
     (the prompt's example showed a scalar — the executable artifact wins). Helpers
     `_extraction_view`/`_assessment_view` are pure + module-level; 527 tests.
+    **Deployed + verified live end-to-end with cv-tailor 2026-06-19** (API-only prod
+    update — backend-only change, no frontend rebuild); cv-tailor consumes both blocks
+    at run start in production. cv-tailor-side wiring (DoD 2–5) + the coverage-measurement
+    gate (DoD 6) remain open — tracked in `docs/SPEC_INTEGRATION_PHASE4.md` §10.
 
 
 ## Schema summary
