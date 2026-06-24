@@ -2682,5 +2682,21 @@ frontend tab. 109 YAML entries migrated 1:1; 551 tests pass; `tsc -b` clean.
 
 ---
 
+## Pipeline view — collapsible stages (frontend-only UX affordance)
+
+- **Per-stage collapse, all collapsed by default, session-only.** The Pipeline view grouped
+  jobs under stage headers but rendered every card at once, making the view long. Added a
+  chevron toggle to each stage header (`PipelineView.tsx`): a `useState<Set<string>>` of
+  expanded statuses (empty = all collapsed), the header is now a full-width `<button>` that
+  toggles its status, and the card list renders only when expanded. Title + count stay visible
+  while collapsed so each stage still reports its size at a glance.
+- **Deliberately not persisted.** Unlike the active-company filter (`localStorage`), collapse
+  state lives only in component state — the owner wanted a clean collapsed slate each visit, so
+  there's nothing to remember. No `lib/jobs.ts` change, no backend/schema/API change; verified
+  by `tsc -b` + `vite build` in a `node:20` container (artifacts cleaned per the recipe above).
+  Minor affordance on an existing view — no deviation number / SPEC section.
+
+---
+
 *[Claude Code: append new entries here as each step and phase completes.
 Do not rewrite existing entries. Use the template above.]*
